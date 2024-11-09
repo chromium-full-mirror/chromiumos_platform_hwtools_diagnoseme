@@ -5,5 +5,3 @@ repairing of HWTools products.
 
 Designed to allow non developers access to the same tools and processes with
 little training.
-
-

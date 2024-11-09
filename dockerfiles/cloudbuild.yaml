@@ -1,0 +1,104 @@
+# Copyright 2024 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+steps:
+
+- name: 'gcr.io/cloud-builders/git'
+  id: 'src-prep'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    set -x
+    rm -rf /workspace
+    mkdir /workspace
+    cd /workspace
+    git clone $_REPO_URL .
+    git fetch $_REPO_URL $COMMIT_SHA
+    git checkout -b buildbranch FETCH_HEAD
+    git branch --set-upstream-to=origin/$BRANCH_NAME buildbranch
+    git config --global user.email "someone@example.com"
+    git rebase
+
+- name: 'gcr.io/kaniko-project/executor:latest'
+  id: 'build'
+  args:
+  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/diagnoseme:$COMMIT_SHA
+  - --cache=true
+  - --cache-ttl=96h
+  - -f=/workspace/dockerfiles/Dockerfile
+  waitFor: ['src-prep']
+
+- name: 'us-docker.pkg.dev/$PROJECT_ID/diagnoseme/diagnoseme:$COMMIT_SHA'
+  id: 'test'
+  entrypoint: pytest
+  args:
+    - -n=auto
+    - --forked
+    - --cov-report=lcov
+    - --cov=/usr/local/lib/python3.11/dist-packages/servo
+    - --cov=/usr/local/lib/python3.11/dist-packages/usbkm232
+    - --cov=/usr/local/lib/python3.11/dist-packages/ec3po
+    - /hdctools/
+  waitFor: ['build']
+
+- name: 'pyfound/black:24.2.0'
+  id: 'test-black-formatting'
+  entrypoint: 'black'
+  args:
+    - --check
+    - --config=/workspace/pyproject.toml
+    - /workspace
+  waitFor: ['src-prep']
+
+- name: 'xcgd/isort'
+  id: 'test-isort-formatting'
+  entrypoint: 'isort'
+  args:
+    - --check
+    - /workspace
+  waitFor: ['src-prep']
+
+- name: 'cytopia/pylint'
+  id: 'test-pylint'
+  entrypoint: 'pylint'
+  args:
+    - --rcfile=/workspace/pylintrc
+    - /workspace
+  waitFor: ['src-prep']
+
+- name: gcr.io/cloud-builders/gcloud
+  entrypoint: bash
+  args:
+    - -c
+    - |
+      set -ex
+
+      cd /workspace
+      gcloud config set project chromeos-hw-tools-dev
+      # Copy to ng3 metrics
+      # The parser is picky, so drop lines that are of no use to it
+      sed -e "/^BRDA:0,/ d" coverage.lcov > coverage.edited.lcov
+      gsutil cp coverage.edited.lcov gs://ng3-metrics/ng3-hw-tools-coverage/absolute/hdctools/$COMMIT_SHA/coverage.out
+      cat > metadata.json << EOF
+      {
+        "host": "chromium",
+        "project": "chromiumos/codesearch",
+        "trace_type": "LCOV",
+        "trim_prefix": "/usr/local/lib/python3.11/dist-packages/",
+        "add_prefix": "src/platform/hwtools/diagnoseme/",
+        "commit_id": "${COMMIT_SHA}",
+        "ref": "refs/heads/main",
+        "source": "zoss-uploader-hw-tools:main",
+        "owner": "1192509288844",
+        "bug_component": "983411"
+      }
+      EOF
+      gsutil cp metadata.json gs://ng3-metrics/ng3-hw-tools-coverage/absolute/hdctools/$COMMIT_SHA/metadata.json
+  waitFor: ['test']
+
+options:
+  machineType: 'N1_HIGHCPU_32'
+
+timeout: 3600s
