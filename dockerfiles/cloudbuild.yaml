@@ -37,10 +37,8 @@ steps:
     - -n=auto
     - --forked
     - --cov-report=lcov
-    - --cov=/usr/local/lib/python3.11/dist-packages/servo
-    - --cov=/usr/local/lib/python3.11/dist-packages/usbkm232
-    - --cov=/usr/local/lib/python3.11/dist-packages/ec3po
-    - /hdctools/
+    - --cov=src/
+    - /diagnoseme/
   waitFor: ['build']
 
 - name: 'pyfound/black:24.2.0'
@@ -60,12 +58,12 @@ steps:
     - /workspace
   waitFor: ['src-prep']
 
-- name: 'cytopia/pylint'
+- name: 'pipelinecomponents/pylint'
   id: 'test-pylint'
   entrypoint: 'pylint'
   args:
     - --rcfile=/workspace/pylintrc
-    - /workspace
+    - /workspace/src
   waitFor: ['src-prep']
 
 - name: gcr.io/cloud-builders/gcloud

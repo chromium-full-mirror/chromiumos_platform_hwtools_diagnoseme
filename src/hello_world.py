@@ -3,5 +3,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-""" Boilerplate code comment."""
-print("Hello, world!")
+""" Foo bar Boilerplate code comment."""
+
+
+def hello_world():
+    """Boilerplate...."""
+    return "Hello World."

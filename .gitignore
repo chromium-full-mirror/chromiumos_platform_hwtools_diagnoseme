@@ -18,6 +18,8 @@ cscope.files
 cscope.in.out
 cscope.out
 cscope.po.out
+.coverage
+coverage.lcov
 
 # Ignore tags for those using TAGS
 TAGS

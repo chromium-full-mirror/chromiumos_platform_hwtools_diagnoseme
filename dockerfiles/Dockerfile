@@ -6,3 +6,16 @@
 ######################################################################
 
 FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y \
+    python3 \
+    python3-pytest \
+    python3-pytest-cov \
+    python3-pytest-forked \
+    python3-pytest-mock \
+    python3-pytest-xdist
+
+WORKDIR /diagnoseme
+
+COPY / /diagnoseme/

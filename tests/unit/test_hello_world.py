@@ -6,8 +6,10 @@
 """Boilerplate comment remove
 """
 
+import hello_world
+
 
 def test_hello_world():
     """Boilerplate comment remove"""
-    test = "Hello World"
-    assert test == "Hello World"
+    result = hello_world.hello_world()
+    assert result == "Hello World."
