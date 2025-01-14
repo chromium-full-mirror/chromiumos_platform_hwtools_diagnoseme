@@ -9,6 +9,7 @@ import re
 import sys
 from urllib import request
 
+
 UNBLOCKED_TERMS_FILE = "unblocked_terms.txt"
 
 
