@@ -62,6 +62,16 @@ ignore-patterns=^\.#
 # and thus existing member attributes cannot be deduced by static analysis). It
 # supports qualified module names, as well as Unix pattern matching.
 ignored-modules=
+   dolos,
+   dolos_pb2,
+   dolos_pb2_grpc,
+   doloscmd,
+   google.cloud,
+   google.protobuf,
+   grpc.aio,
+   grpc_reflection.v1alpha,
+   paramiko,
+   serial,
 
 # Python code to execute, usually for sys.path manipulation such as
 # pygtk.require().
@@ -335,7 +345,8 @@ indent-after-paren=4
 indent-string='    '
 
 # Maximum number of characters on a single line.
-max-line-length=100
+# We use black for formatting so set it to black max line length.
+max-line-length=88
 
 # Maximum number of lines in a module.
 max-module-lines=1000

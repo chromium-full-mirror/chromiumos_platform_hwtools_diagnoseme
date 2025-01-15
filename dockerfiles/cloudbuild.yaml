@@ -24,7 +24,7 @@ steps:
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'envoy'
   args:
-  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/diagnoseme:$COMMIT_SHA
+  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/envoy:$COMMIT_SHA
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/envoy/Dockerfile
@@ -42,12 +42,12 @@ steps:
   waitFor: ['src-prep']
 
 - name: 'gcr.io/kaniko-project/executor:latest'
-  id: 'build'
+  id: 'server'
   args:
-  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/diagnoseme:$COMMIT_SHA
+  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server:$COMMIT_SHA
   - --cache=true
   - --cache-ttl=96h
-  - -f=/workspace/dockerfiles/Dockerfile
+  - -f=/workspace/dockerfiles/rpcserver/Dockerfile
   waitFor: ['src-prep']
 
 - name: 'pyfound/black:24.2.0'
@@ -65,6 +65,14 @@ steps:
   args:
     - --check
     - /workspace
+  waitFor: ['src-prep']
+
+- name: 'pipelinecomponents/pylint'
+  id: 'test-pylint'
+  entrypoint: 'pylint'
+  args:
+    - --rcfile=/workspace/pylintrc
+    - /workspace/src
   waitFor: ['src-prep']
 
 options:
