@@ -1,0 +1,83 @@
+// Copyright 2025 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+syntax = "proto3";
+package diagnoseme;
+import "google/protobuf/empty.proto";
+service DolosRpcService {
+  rpc update_firmware(FirmwareUpdateRequest) returns (FirmwareUpdateResponse) {}
+  rpc check_dolos_from_dut(google.protobuf.Empty) returns (CheckDolosFromDutResponse) {}
+  rpc check_dolos_from_host(google.protobuf.Empty) returns (CheckDolosFromHostResponse) {}
+  rpc program_cable(ProgramCableRequest) returns (ProgramCableResponse) {}
+  rpc get_firmware_versions(google.protobuf.Empty) returns (FirmwareVersionsResponse) {}
+  rpc get_models(google.protobuf.Empty) returns (ModelsResponse) {}
+  rpc program_serial_number(ProgramSerialRequest) returns (ProgramSerialResponse) {}
+}
+// NEXT_TAG = 4
+message CommandExecutionResults {
+  string stderr = 1;
+  string stdout = 2;
+  uint32 exit_code = 3;
+}
+// NEXT_TAG = 2
+message FirmwareUpdateRequest {
+  string firmware_version = 1;
+}
+// NEXT_TAG = 2
+message FirmwareUpdateResponse {
+  repeated CommandExecutionResults result = 1;
+}
+enum TEST_STATUS {
+  PASS = 0;
+  FAIL = 1;
+  INFRA_ERROR = 2;
+}
+enum DOLOS_STATUS {
+    DOLOS_UNKNOWN = 0;
+    DOLOS_NO_POWER_SUPPLIED = 1;
+    DOLOS_OUTPUT_POWER_FAILED = 2;
+    DOLOS_BMS_STATE_INVALID = 3;
+    DOLOS_SMBUS_COMM_NOT_DETECTED = 4;
+    DOLOS_EEPROM_FAILURE = 5;
+    DOLOS_OK = 6;
+    DOLOS_NO_COMMUNICATION = 7;
+    DOLOS_NOT_PRESENT = 8;
+}
+// NEXT_TAG = 3
+message CheckDolosFromDutResponse {
+  TEST_STATUS status = 1;
+  string error = 2;
+}
+// NEXT_TAG = 5
+message CheckDolosFromHostResponse {
+  TEST_STATUS status = 1;
+  string error = 2;
+  string dolos_serial_number = 3;
+  DOLOS_STATUS dolos_status = 4;
+}
+// NEXT_TAG = 2
+message ProgramCableRequest {
+  string model = 1;
+}
+// NEXT_TAG = 2
+message ProgramCableResponse {
+   CommandExecutionResults result = 1;
+}
+// NEXT_TAG = 3
+message FirmwareVersionsResponse {
+  repeated string firmware_version = 1;
+  string default_firmware_version = 2;
+}
+// NEXT_TAG = 1
+message ModelsResponse {
+  repeated string models = 1;
+}
+//
+message ProgramSerialRequest {
+  string new_serial_number = 1;
+  string model = 2;
+}
+//
+message ProgramSerialResponse {
+  CommandExecutionResults result = 1;
+}

@@ -30,6 +30,17 @@ steps:
   - -f=/workspace/dockerfiles/envoy/Dockerfile
   waitFor: ['src-prep']
 
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'proto-gen'
+  args:
+    - buildx
+    - build
+    - --output=./generated
+    - --target=copytohost
+    - -f=dockerfiles/utilities/Dockerfile.protoc
+    - /workspace
+  waitFor: ['src-prep']
+
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'build'
   args:
