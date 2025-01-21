@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 default_install_hook_types: [pre-commit, commit-msg]
-default_stages: [commit]
+default_stages: [pre-commit]
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -16,17 +16,17 @@ repos:
     -   id: check-merge-conflict
 
   - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
+    rev: 6.0.1
     hooks:
       - id: isort
         name: isort (python)
         types: [python]
 
   - repo: https://github.com/psf/black
-    rev: 24.10.0
+    rev: 25.1.0
     hooks:
       - id: black
-        language_version: python3.11
+        language_version: python3.12
         types: [python]
 
   - repo: local
@@ -46,7 +46,7 @@ repos:
   - repo: local
     hooks:
     - id: banned-words
-      stages: [commit, commit-msg]
+      stages: [pre-commit, commit-msg]
       name: banned-words
       entry: hooks/banned-words.py
       language: python
@@ -68,4 +68,5 @@ repos:
                 LICENSE|
                 DIR_METADATA|
                 PRESUBMIT.cfg|
+                .*\.json
             )$

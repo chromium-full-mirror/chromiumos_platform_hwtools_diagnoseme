@@ -1,0 +1,17 @@
+/* Copyright 2025 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+*/
+<mat-toolbar color="primary">
+  <button [matMenuTriggerFor]="menu" mat-icon-button class="example-icon" aria-label="Example icon-button with menu icon">
+    <mat-icon>menu</mat-icon>
+  </button>
+  <mat-menu #menu="matMenu">
+    <button mat-menu-item>Dolos Rework</button>
+  </mat-menu>
+  <span>HW Tools Diagnose Me</span>
+</mat-toolbar>
+
+<div class=top-level>
+<app-dolos-provision></app-dolos-provision>
+</div>

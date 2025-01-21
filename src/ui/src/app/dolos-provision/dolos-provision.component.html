@@ -1,0 +1,395 @@
+/* Copyright 2025 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+*/
+<mat-toolbar color="primary">
+  <span>Dolos Rework</span>
+</mat-toolbar>
+
+<div class="reworkcard">
+  <mat-card>
+    <mat-card-content>
+      <h2>1. Dolos Firmware Update</h2>
+      <div class="f-container">
+        <div class="f-row">
+          <div class="f-item1">
+            Connect the Dolos Host connecter to the "DiagnoseMe" box with cable
+            <b class="bold">USB A.</b>
+          </div>
+          <div class="f-item2"></div>
+        </div>
+        <div class="f-row">
+          <div class="f-item1">Select firmware version:</div>
+          <div class="f-item2">
+            <mat-form-field class="form">
+              <mat-select [(value)]="selectedFirmwareVersion">
+                @for (version of firmwareVersions; track version) {
+                <mat-option [value]="version">{{
+                  version
+                }}</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+          </div>
+        </div>
+        <div class="f-row">
+          <div class="f-item1">Update firmware by pressing:</div>
+          <div class="f-item2">
+            <button
+              (click)="onFirmwareUpdate()"
+              [disabled]="firmwareProgress"
+              mat-raised-button
+              color="primary"
+            >
+              Firmware Update
+            </button>
+          </div>
+        </div>
+      </div>
+    </mat-card-content>
+    <mat-card-footer>
+      <div *ngIf="firmwareProgress">
+        <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+      </div>
+    </mat-card-footer>
+  </mat-card>
+</div>
+
+<div class="reworkcard">
+  <mat-card>
+    <mat-card-content>
+      <h2>2. Battery Cable Selection:</h2>
+      <div class="f-container">
+        <div class="f-row">
+          <div class="f-item1">
+            Select the Chromebook model you are reworking:
+          </div>
+          <div class="f-item2">
+            <mat-form-field class="form">
+              <mat-select (selectionChange)="onChangeModel($event.value)">
+                @for (model of models; track model) {
+                <mat-option [value]="model">{{
+                  model.name | titlecase
+                }}</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+          </div>
+        </div>
+        <div class="f-row f-column" *ngIf="selectedModel">
+          <div class="f-item1">
+            Use battery cable with GPN
+            <b class="bold">{{ selectedModel.config.gpn }}</b>
+          </div>
+          <div class="f-item2">
+            <button (click)="openCablePics()" mat-mini-fab color="primary">
+              <mat-icon class="icon-display">open_in_new</mat-icon>
+            </button>
+          </div>
+        </div>
+        <div class="f-row" *ngIf="selectedModel">
+          <div class="f-item1">
+            Scan the barcode on box the cable was selected from:
+          </div>
+          <div class="f-item2">
+            <mat-form-field class="form">
+              <input
+                #gpn
+                [(ngModel)]="gpnScan"
+                (input)="gpnChange($event)"
+                matInput
+                placeholder="GPN"
+              />
+            </mat-form-field>
+            <button
+              *ngIf="gpnPass == TestResultEnum.Pass"
+              class="test-pass-button"
+              mat-mini-fab
+              color="primary"
+            >
+              <mat-icon class="icon-display">check</mat-icon>
+            </button>
+            <button
+              *ngIf="gpnPass == TestResultEnum.Fail"
+              class="test-fail-button"
+              mat-mini-fab
+              color="primary"
+            >
+              <mat-icon class="icon-display">close</mat-icon>
+            </button>
+          </div>
+        </div>
+      </div>
+    </mat-card-content>
+  </mat-card>
+</div>
+
+<div class="reworkcard">
+  <mat-card>
+    <mat-card-content>
+      <h2>3. Chromebook Rework</h2>
+      <div class="f-container">
+        <div class="f-row">
+          <div class="f-item1">
+            Remove the screws on the base of the Chromebook and expose
+            motherboard.
+          </div>
+          <div class="f-item2">
+            <button (click)="openScrewsPics()" mat-mini-fab color="primary">
+              <mat-icon class="icon-display">open_in_new</mat-icon>
+            </button>
+          </div>
+        </div>
+        <div class="f-row">
+          <div class="f-item1">Remove the battery from the Chromebook.</div>
+          <div class="f-item2">
+            <button
+              *ngIf="false"
+              (click)="openBatteryPics()"
+              mat-mini-fab
+              color="primary"
+            >
+              <mat-icon class="icon-display">open_in_new</mat-icon>
+            </button>
+          </div>
+        </div>
+        <div class="f-row">
+          <div class="f-item1">
+            Connect the selected battery cable to the motherboard.
+          </div>
+          <div class="f-item2">
+            <button (click)="openConnectPics()" mat-mini-fab color="primary">
+              <mat-icon class="icon-display">open_in_new</mat-icon>
+            </button>
+          </div>
+        </div>
+        <div class="f-row">
+          <div class="f-item1">
+            Route the cable outside of the case and attach the base with screws.
+          </div>
+          <div class="f-item2">
+            <button
+              *ngIf="false"
+              (click)="openRoutePics()"
+              mat-mini-fab
+              color="primary"
+            >
+              <mat-icon class="icon-display">open_in_new</mat-icon>
+            </button>
+          </div>
+        </div>
+      </div>
+    </mat-card-content>
+  </mat-card>
+</div>
+<div class="reworkcard">
+  <mat-card>
+    <mat-card-content>
+      <h2>4. Cable Programming:</h2>
+      <div class="f-container">
+        <div class="f-row">
+          <div class="f-item1">Connect the battery cable to Dolos output.</div>
+          <div class="f-item2">
+            <button mat-mini-fab color="primary" (click)="openConnectDolosPics()">
+              <mat-icon class="icon-display">open_in_new</mat-icon>
+            </button>
+          </div>
+        </div>
+
+        <div class="f-row">
+          <div class="f-item1">Connect the AC adapter to the Dolos.</div>
+          <div class="f-item2">
+            <button *ngIf="false" mat-mini-fab color="primary">
+              <mat-icon class="icon-display">open_in_new</mat-icon>
+            </button>
+          </div>
+        </div>
+        <div class="f-row" *ngIf="selectedModel">
+          <div class="f-item1" *ngIf="selectedModel != null" >
+            Program the cable for model {{ selectedModel.name }}:
+          </div>
+          <div class="f-item2">
+            <button
+              (click)="onCableProgram()"
+              [disabled]="firmwareProgress"
+              mat-raised-button
+              color="primary"
+            >
+              Program Cable
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </mat-card-content>
+    <mat-card-footer>
+      <div *ngIf="cableProgramProgress">
+        <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+      </div>
+    </mat-card-footer>
+  </mat-card>
+</div>
+<div class="reworkcard">
+  <mat-card>
+    <mat-card-content>
+      <h2>5. Testing</h2>
+      <div class="f-container">
+
+        <div class="f-row">
+          <div class="f-item1">Connect the Ethernet dongle to the Chromebook.</div>
+          <div class="f-item2">
+            <button *ngIf="false" mat-mini-fab color="primary">
+              <mat-icon class="icon-display">open_in_new</mat-icon>
+            </button>
+          </div>
+        </div>
+
+        <div class="f-row">
+          <div class="f-item1">Power On the Chromebook.</div>
+          <div class="f-item2"></div>
+        </div>
+
+        <div class="f-row">
+          <div class="f-item1">Did the Chromebook power on ?</div>
+          <div class="f-item2">
+            <button (click)="onBootup()" mat-raised-button color="primary">
+              Yes</button
+            ><button mat-raised-button color="warn">No</button>
+          </div>
+        </div>
+
+        <div
+          class="f-row"
+          *ngIf="
+            this.hostTestPass != TestResultEnum.NoResult ||
+            this.hostTestProgress
+          "
+        >
+          <div class="f-item1">Testing Dolos from Chromebook:</div>
+          <div class="f-item2">
+            <button
+              *ngIf="dutTestPass == TestResultEnum.Pass"
+              class="test-pass-button"
+              (click)="openRoutePics()"
+              mat-mini-fab
+              color="primary"
+            >
+              <mat-icon class="icon-display">check</mat-icon>
+            </button>
+            <div *ngIf="dutTestPass == TestResultEnum.Fail">
+              <button
+                class="test-fail-button"
+                (click)="openRoutePics()"
+                mat-mini-fab
+                color="primary"
+              >
+                <mat-icon class="icon-display">close</mat-icon>
+              </button>
+              {{ dutErrorMsg }}
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="f-row"
+          *ngIf="
+            this.hostTestPass != TestResultEnum.NoResult ||
+            this.hostTestProgress
+          "
+        >
+          <div class="f-item1">Testing Dolos from host:</div>
+          <div class="f-item2">
+            <button
+              *ngIf="hostTestPass == TestResultEnum.Pass"
+              class="test-pass-button"
+              (click)="openRoutePics()"
+              mat-mini-fab
+              color="primary"
+            >
+              <mat-icon class="icon-display">check</mat-icon>
+            </button>
+            <div *ngIf="hostTestPass == TestResultEnum.Fail">
+              <button
+                class="test-fail-button"
+                (click)="openRoutePics()"
+                mat-mini-fab
+                color="primary"
+              >
+                <mat-icon class="icon-display">close</mat-icon>
+              </button>
+              {{ hostErrorMsg }}
+            </div>
+          </div>
+        </div>
+
+        <div class="f-row" *ngIf="this.hostTestPass == TestResultEnum.Pass">
+          <div class="f-item1">
+            Scan the Dolos serial number barcode on the battery cable:
+          </div>
+          <div class="f-item2">
+            <mat-form-field class="form">
+              <input
+                #dolosserial
+                [(ngModel)]="dolosSerialScan"
+                (input)="dolosSerialChange($event)"
+                matInput
+              />
+            </mat-form-field>
+            <button
+              *ngIf="dolosSerialPass == TestResultEnum.Pass"
+              class="test-pass-button"
+              mat-mini-fab
+              color="primary"
+            >
+              <mat-icon class="icon-display">check</mat-icon>
+            </button>
+            <div *ngIf="dolosSerialPass == TestResultEnum.Fail">
+              <button
+                class="test-fail-button"
+                mat-mini-fab
+                color="primary"
+              >
+                <mat-icon class="icon-display">close</mat-icon>
+              </button>
+              [{{ internalDolosSerialNumber }}]
+              <button
+              (click)="onUpdateSerialNumber()"
+              [disabled]="firmwareProgress"
+              mat-raised-button
+              color="primary"
+              *ngIf="selectedModel != null"
+            >
+              Flash Serial Number
+            </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </mat-card-content>
+
+    <mat-card-footer>
+      <div *ngIf="hostTestProgress || dutTestProgress || flashSerialProgress">
+        <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+      </div>
+    </mat-card-footer>
+  </mat-card>
+
+  <div class="reworkcard"></div>
+  <mat-card>
+    <mat-card-content>
+      <h2>6. Start Next Device</h2>
+      <div class="f-container">
+        <div class="f-row"></div>
+          <div class="f-item1">
+            <button
+            (click)="onReload()"
+              mat-raised-button
+              color="primary"
+            >
+              Reset Page
+            </button>
+      </div>
+      </div>
+    </mat-card-content>
+  </mat-card>
+</div>
