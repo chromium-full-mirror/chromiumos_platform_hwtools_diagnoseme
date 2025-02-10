@@ -1,4 +1,4 @@
-# Copyright 2025 The Chromium OS Authors
+# Copyright 2025 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 ####################################################################
@@ -18,7 +18,9 @@ RUN apt-get update --no-install-recommends \
     git \
     python3-pip
 
-RUN pip3 install protobuf==4.21.12 grpcio-tools==1.51.1 grpcio-reflection==1.51.1 grpcio==1.51.1 --break-system-packages
+WORKDIR /workspace
+COPY dockerfiles/rpcserver/requirements.txt .
+RUN pip3 install -r requirements.txt --break-system-packages
 
 WORKDIR /
 RUN git clone https://chromium.googlesource.com/chromiumos/platform/dolos
@@ -54,7 +56,9 @@ RUN apt-get update && apt-get install -yq \
     git \
     vim
 
-RUN pip3 install protobuf==4.21.12 grpcio-tools==1.51.1 grpcio-reflection==1.51.1 grpcio==1.51.1 google-cloud-storage --break-system-packages
+WORKDIR /workspace
+COPY dockerfiles/rpcserver/requirements.txt .
+RUN pip3 install -r requirements.txt --break-system-packages
 
 RUN mkdir /var/log/rpcserver
 RUN chown diagnoseme /var/log/rpcserver
