@@ -9,15 +9,15 @@ FROM node:22 as protogen_node
 RUN apt-get update && apt-get install --no-install-recommends -yq \
     npm
 
-RUN npm i -g -S @ngx-grpc/common @ngx-grpc/core @ngx-grpc/grpc-web-client @ngx-grpc/well-known-types google-protobuf grpc-web
-RUN npm i -g -D @ngx-grpc/protoc-gen-ng @types/google-protobuf
-
 WORKDIR /workspace
 
-COPY src/common/protos/*.proto .
-COPY src/common/protos/*.proto .
+COPY dockerfiles/utilities/package*.json .
+RUN npm install
+
+ENV PATH="$PATH:/workspace/node_modules/.bin"
 
 RUN mkdir -p generated
+COPY src/common/protos/*.proto .
 RUN npx protoc --plugin=protoc-gen-ng=$(which protoc-gen-ng) --ng_out=./generated dolos.proto
 
 ##############################################################################
@@ -27,12 +27,12 @@ FROM python:3.11-slim-bookworm as protogen_python
 RUN apt-get update && apt-get install --no-install-recommends -yq \
     python3-pip
 
-RUN pip3 install protobuf==4.21.12 grpcio-tools==1.51.1 grpcio-reflection==1.51.1 grpcio==1.51.1 --break-system-packages
-
 WORKDIR /workspace
+COPY dockerfiles/utilities/requirements.txt .
+RUN pip3 install -r requirements.txt --break-system-packages
+
 RUN mkdir -p generated
 COPY src/common/protos/*.proto .
-
 RUN python3 -m grpc_tools.protoc -I. -I=$(python3 -c 'import site; print(site.getsitepackages()[0])')/grpc_tools/_proto/ --python_out=./generated --pyi_out=./generated --grpc_python_out=. *.proto
 
 
