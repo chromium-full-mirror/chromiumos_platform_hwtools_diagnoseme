@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install --no-install-recommends -yq \
 
 WORKDIR /workspace
 COPY dockerfiles/utilities/requirements.txt .
-RUN pip3 install -r requirements.txt --break-system-packages
+RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
 
 RUN mkdir -p generated
 COPY src/common/protos/*.proto .

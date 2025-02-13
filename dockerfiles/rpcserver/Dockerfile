@@ -20,7 +20,7 @@ RUN apt-get update --no-install-recommends \
 
 WORKDIR /workspace
 COPY dockerfiles/rpcserver/requirements.txt .
-RUN pip3 install -r requirements.txt --break-system-packages
+RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
 
 WORKDIR /
 RUN git clone https://chromium.googlesource.com/chromiumos/platform/dolos
@@ -58,7 +58,7 @@ RUN apt-get update && apt-get install -yq \
 
 WORKDIR /workspace
 COPY dockerfiles/rpcserver/requirements.txt .
-RUN pip3 install -r requirements.txt --break-system-packages
+RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
 
 RUN mkdir /var/log/rpcserver
 RUN chown diagnoseme /var/log/rpcserver
