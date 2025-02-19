@@ -79,7 +79,7 @@ RUN chmod -R 600 /home/diagnoseme/.ssh/*
 
 COPY --from=dolostools /dolos/tools/doloscmd/dist .
 COPY --from=dolostools /dolos/tools/dolosbattery/dist .
-RUN pip3 install *.whl --break-system-packages
+RUN pip3 install *.whl --no-deps --no-index --break-system-packages
 
 WORKDIR /builder/hdctools
 
