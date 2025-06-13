@@ -8,8 +8,10 @@ ARG UID=246
 
 RUN addgroup --gid $UID diagnoseme && adduser --ingroup diagnoseme --uid $UID --disabled-password --gecos "" diagnoseme
 
-RUN cp workspace/dockerfiles/envoy/envoy.yaml /etc/envoy/envoy.yaml
+COPY dockerfiles/envoy/envoy.yaml /etc/envoy/envoy.yaml
 
 USER diagnoseme
+
+WORKDIR /var/log/envoy
 
 CMD /usr/local/bin/envoy -c /etc/envoy/envoy.yaml

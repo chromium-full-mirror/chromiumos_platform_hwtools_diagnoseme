@@ -14,11 +14,16 @@ from concurrent import futures
 import logging
 import sys
 
-import dolos
-import dolos_pb2
-from dolos_pb2_grpc import add_DolosRpcServiceServicer_to_server
 import grpc.aio
 from grpc_reflection.v1alpha import reflection
+
+# pylint: disable=no-name-in-module
+# pylint: disable=import-error
+from server import diagnoseme_dolos_pb2
+from server import dolos
+from server.diagnoseme_dolos_pb2_grpc import (
+    add_DolosRpcServiceServicer_to_server,
+)
 
 
 BACKEND_GRPC_SERVICE_PORT = 6002
@@ -64,7 +69,9 @@ async def serve():
     try:
         add_DolosRpcServiceServicer_to_server(dolos.DolosRpcService(), server)
         service_name = (
-            dolos_pb2.DESCRIPTOR.services_by_name["DolosRpcService"].full_name,
+            diagnoseme_dolos_pb2.DESCRIPTOR.services_by_name[
+                "DolosRpcService"
+            ].full_name,
             reflection.SERVICE_NAME,
         )
         reflection.enable_server_reflection(service_name, server)
@@ -83,6 +90,11 @@ async def serve():
 
     finally:
         await server.stop(0)
+
+
+def run_service():
+    """Alternative main used by pyproject.toml for packaging."""
+    asyncio.run(serve())
 
 
 if __name__ == "__main__":

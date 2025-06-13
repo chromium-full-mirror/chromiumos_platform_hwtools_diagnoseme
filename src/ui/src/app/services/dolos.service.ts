@@ -3,11 +3,11 @@
 // found in the LICENSE file.
 
 import { Injectable, isDevMode } from '@angular/core';
-import { CommandExecutionResults, TestStatus } from 'src/protos/dolos.pb';
-import { DolosRpcServiceClient } from 'src/protos/dolos.pbsc';
+import { CommandExecutionResults, TestStatus } from 'src/protos/diagnoseme-dolos.pb';
+import { DolosRpcServiceClient } from 'src/protos/diagnoseme-dolos.pbsc';
 
 import { Empty } from '@ngx-grpc/well-known-types';
-import { FirmwareUpdateRequest, ProgramCableRequest, ProgramSerialRequest } from 'src/protos/dolos.pb';
+import { FirmwareUpdateRequest, ProgramCableRequest, ProgramSerialRequest } from 'src/protos/diagnoseme-dolos.pb';
 
 @Injectable({
   providedIn: 'root'

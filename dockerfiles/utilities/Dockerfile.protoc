@@ -4,7 +4,7 @@
 # found in the LICENSE file.
 
 ##############################################################################
-FROM node:22 as protogen_node
+FROM node:24 as protogen_node
 
 RUN apt-get update && apt-get install --no-install-recommends -yq \
     npm
@@ -17,8 +17,9 @@ RUN npm install
 ENV PATH="$PATH:/workspace/node_modules/.bin"
 
 RUN mkdir -p generated
-COPY src/common/protos/*.proto .
-RUN npx protoc --plugin=protoc-gen-ng=$(which protoc-gen-ng) --ng_out=./generated dolos.proto
+RUN mkdir -p server
+COPY src/common/protos/*.proto server/
+RUN npx protoc --plugin=protoc-gen-ng=$(which protoc-gen-ng) --ng_out=./generated server/diagnoseme-dolos.proto
 
 ##############################################################################
 
@@ -32,12 +33,13 @@ COPY dockerfiles/utilities/requirements.txt .
 RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
 
 RUN mkdir -p generated
-COPY src/common/protos/*.proto .
-RUN python3 -m grpc_tools.protoc -I. -I=$(python3 -c 'import site; print(site.getsitepackages()[0])')/grpc_tools/_proto/ --python_out=./generated --pyi_out=./generated --grpc_python_out=. *.proto
+RUN mkdir -p server
+COPY src/common/protos/*.proto server/
+RUN python3 -m grpc_tools.protoc -I. -I=$(python3 -c 'import site; print(site.getsitepackages()[0])')/grpc_tools/_proto/ --python_out=./generated --pyi_out=./generated --grpc_python_out=./generated server/*.proto
 
 
 #######################################################################
 FROM scratch as copytohost
 
-COPY --link --from=protogen_node /workspace/generated /
-COPY --link --from=protogen_python /workspace/generated /
+COPY --link --from=protogen_node /workspace/generated/server /
+COPY --link --from=protogen_python /workspace/generated/server /

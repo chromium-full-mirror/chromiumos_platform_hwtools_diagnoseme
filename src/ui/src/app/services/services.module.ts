@@ -8,7 +8,7 @@ import { NgModule } from '@angular/core';
 import { ModuleWithProviders } from '@angular/core';
 import { GRPC_CLIENT_FACTORY, GrpcCoreModule } from '@ngx-grpc/core';
 import { GrpcWebClientFactory, GrpcWebClientSettings } from '@ngx-grpc/grpc-web-client';
-import { GRPC_DOLOS_RPC_SERVICE_CLIENT_SETTINGS } from 'src/protos/dolos.pbconf';
+import { GRPC_DOLOS_RPC_SERVICE_CLIENT_SETTINGS } from 'src/protos/diagnoseme-dolos.pbconf';
 
 
 @NgModule({

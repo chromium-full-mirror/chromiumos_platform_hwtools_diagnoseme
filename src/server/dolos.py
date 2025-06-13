@@ -11,8 +11,6 @@ import subprocess
 import tempfile
 import time
 
-import dolos_pb2
-import dolos_pb2_grpc
 from doloscmd import console_lib
 from google.cloud import storage
 from paramiko import AuthenticationException
@@ -20,6 +18,10 @@ from paramiko import AutoAddPolicy
 from paramiko import BadHostKeyException
 from paramiko import SSHClient
 from paramiko import SSHException
+
+# pylint: disable=no-name-in-module
+from server import diagnoseme_dolos_pb2
+from server import diagnoseme_dolos_pb2_grpc
 
 
 logging.getLogger("paramiko").setLevel(logging.WARNING)
@@ -44,7 +46,7 @@ BOX_FIRMWARE_SUBDIR = "box_firmware/"
 EEPROM_FIRMWARE_SUBDIR = "cable_eeprom/"
 
 
-class DolosRpcService(dolos_pb2_grpc.DolosRpcServiceServicer):
+class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
     """Provides RPC methods for interacting with Dolos devices.
 
     This service implements the functions necessary to provision and test the Dolos
@@ -68,7 +70,7 @@ class DolosRpcService(dolos_pb2_grpc.DolosRpcServiceServicer):
             A FirmwareVersionsResponse containing the available firmware versions
             and the default version.
         """
-        response = dolos_pb2.FirmwareVersionsResponse()
+        response = diagnoseme_dolos_pb2.FirmwareVersionsResponse()
         storage_client = storage.Client.create_anonymous_client()
         for blob in storage_client.list_blobs(
             FIRMWARE_CLOUD_BUCKET, prefix=BOX_FIRMWARE_SUBDIR
@@ -95,7 +97,7 @@ class DolosRpcService(dolos_pb2_grpc.DolosRpcServiceServicer):
         Returns:
             A ModelsResponse containing the supported Dolos models.
         """
-        response = dolos_pb2.ModelsResponse()
+        response = diagnoseme_dolos_pb2.ModelsResponse()
         storage_client = storage.Client.create_anonymous_client()
         for blob in storage_client.list_blobs(
             FIRMWARE_CLOUD_BUCKET, prefix=EEPROM_FIRMWARE_SUBDIR
@@ -122,10 +124,10 @@ class DolosRpcService(dolos_pb2_grpc.DolosRpcServiceServicer):
             A FirmwareUpdateResponse containing the results of the update operation
             for each Dolos device.
         """
-        response = dolos_pb2.FirmwareUpdateResponse()
+        response = diagnoseme_dolos_pb2.FirmwareUpdateResponse()
         doloses = console_lib.DolosConsole.get_all_dolos_consoles()
         for dolos in doloses:
-            result = dolos_pb2.CommandExecutionResults()
+            result = diagnoseme_dolos_pb2.CommandExecutionResults()
             try:
                 dolos.update_firmware(request.firmware_version)
                 dolos.repair()
@@ -174,14 +176,14 @@ class DolosRpcService(dolos_pb2_grpc.DolosRpcServiceServicer):
             A CheckDolosFromDutResponse indicating the test status (PASS/FAIL)
             and any associated error messages.
         """
-        response = dolos_pb2.CheckDolosFromDutResponse()
-        response.status = dolos_pb2.TEST_STATUS.FAIL
+        response = diagnoseme_dolos_pb2.CheckDolosFromDutResponse()
+        response.status = diagnoseme_dolos_pb2.TEST_STATUS.FAIL
 
         devices = self._get_active_network_devices()
         # None is an error as is more than one.
         if len(devices) != 1:
             logging.debug("Wrong number of DUT's detected: %s", devices)
-            response.status = dolos_pb2.TEST_STATUS.INFRA_ERROR
+            response.status = diagnoseme_dolos_pb2.TEST_STATUS.INFRA_ERROR
             response.error = (
                 f"Expected 1 chromebook connected found {len(devices)} chromebooks."
             )
@@ -229,7 +231,7 @@ class DolosRpcService(dolos_pb2_grpc.DolosRpcServiceServicer):
         logging.info("Battery flag is present %s", battery_present)
 
         if battery_present:
-            response.status = dolos_pb2.TEST_STATUS.PASS
+            response.status = diagnoseme_dolos_pb2.TEST_STATUS.PASS
         response.error = f"Battery flag is present {battery_present}"
 
         return response
@@ -248,8 +250,8 @@ class DolosRpcService(dolos_pb2_grpc.DolosRpcServiceServicer):
             A CheckDolosFromHostResponse containing the Dolos serial number,
             status, and the overall test status.
         """
-        response = dolos_pb2.CheckDolosFromHostResponse()
-        response.status = dolos_pb2.TEST_STATUS.PASS
+        response = diagnoseme_dolos_pb2.CheckDolosFromHostResponse()
+        response.status = diagnoseme_dolos_pb2.TEST_STATUS.PASS
 
         doloses = console_lib.DolosConsole.get_all_dolos_consoles()
         dolos = doloses[0]
@@ -258,8 +260,8 @@ class DolosRpcService(dolos_pb2_grpc.DolosRpcServiceServicer):
 
         response.dolos_serial_number = dolos.serial
         response.dolos_status = dolos.determine_status(dolos_status_map)
-        if response.dolos_status != dolos_pb2.DOLOS_STATUS.DOLOS_OK:
-            response.status = dolos_pb2.TEST_STATUS.FAIL
+        if response.dolos_status != diagnoseme_dolos_pb2.DOLOS_STATUS.DOLOS_OK:
+            response.status = diagnoseme_dolos_pb2.TEST_STATUS.FAIL
 
         return response
 
@@ -278,7 +280,7 @@ class DolosRpcService(dolos_pb2_grpc.DolosRpcServiceServicer):
         Returns:
             A ProgramCableResponse containing the results of the programming operation.
         """
-        response = dolos_pb2.ProgramCableResponse()
+        response = diagnoseme_dolos_pb2.ProgramCableResponse()
         storage_client = storage.Client.create_anonymous_client()
         blobs = list(
             storage_client.list_blobs(
@@ -336,7 +338,7 @@ class DolosRpcService(dolos_pb2_grpc.DolosRpcServiceServicer):
         Returns:
             A ProgramSerialResponse containing the results of the programming operation.
         """
-        response = dolos_pb2.ProgramSerialResponse()
+        response = diagnoseme_dolos_pb2.ProgramSerialResponse()
         storage_client = storage.Client.create_anonymous_client()
         blobs = list(
             storage_client.list_blobs(

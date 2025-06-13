@@ -3,18 +3,18 @@
 # found in the LICENSE file.
 
 ######################################################################
-FROM node:22 as build
+FROM node:24 AS build
 
 WORKDIR /app
 
 # add `/app/node_modules/.bin` to $PATH
-ENV PATH /app/node_modules/.bin:$PATH
+ENV PATH=/app/node_modules/.bin:$PATH
 
 
 # install and cache app dependencies
 # add app
-COPY ./diagnoseme/package.json /app
-COPY ./diagnoseme/package-lock.json /app
+COPY src/ui/package.json /app
+#COPY src/ui/package-lock.json /app
 
 RUN npm install -g npm@latest
 RUN npm install --ignore-scripts
@@ -22,9 +22,9 @@ RUN npm install --ignore-scripts
 # install and cache app dependencies
 # add app
 
-COPY ./diagnoseme /app
+COPY src/ui /app/
 WORKDIR /app/src/protos/
-COPY --chown=diagnoseme generated/*.ts /app/src/protos/
+COPY --chown=diagnoseme src/generated/*.ts /app/src/protos/
 
 RUN ng build --output-path=dist --output-hashing=all --configuration=production
 
@@ -45,7 +45,7 @@ RUN chmod -R uog+rw /var/run
 # copy artifact build from the 'build environment'
 COPY --chown=diagnoseme --from=build /app/dist/browser /etc/nginx/html/
 
-COPY --chown=diagnoseme diagnoseme/nginx.conf /etc/nginx
+COPY --chown=diagnoseme src/ui/nginx.conf /etc/nginx
 RUN rm -f /etc/nginx/conf.d/*
 RUN rm -f /docker-entrypoint.d/*
 RUN rm -f /var/log/nginx/*

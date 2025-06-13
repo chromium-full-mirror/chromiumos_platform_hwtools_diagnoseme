@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 ####################################################################
-FROM alpine/git as test_keys
+FROM alpine/git AS test_keys
 WORKDIR /
 RUN git clone --filter=blob:none --no-checkout --depth 1 --sparse https://chromium.googlesource.com/chromiumos/chromite
 WORKDIR /chromite
@@ -11,19 +11,16 @@ RUN git sparse-checkout add ssh_keys/testing_rsa
 RUN git checkout
 
 #####################################################################
-FROM python:3.11-bookworm as dolostools
+FROM python:3.11-bookworm AS dolostools
 
 RUN apt-get update --no-install-recommends \
     && apt-get install -y --no-install-recommends \
     git \
-    python3-pip
-
-WORKDIR /workspace
-COPY dockerfiles/rpcserver/requirements.txt .
-RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
+    apt-transport-https
 
 WORKDIR /
 RUN git clone https://chromium.googlesource.com/chromiumos/platform/dolos
+RUN pip3 install -r /dolos/tools/requirements.txt --require-hashes --break-system-packages
 
 WORKDIR /dolos/tools/doloscmd
 RUN python3 setup.py bdist_wheel
@@ -31,8 +28,26 @@ RUN python3 setup.py bdist_wheel
 WORKDIR /dolos/tools/dolosbattery
 RUN python3 setup.py bdist_wheel
 
-# #####################################################################
-FROM us-docker.pkg.dev/chromeos-hw-tools/servod/servod:release
+######################################################################
+FROM python:3.11-bookworm AS serverbuild
+
+RUN apt-get update --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
+    python3-build
+
+WORKDIR /build/server
+
+COPY src/server/*.py .
+COPY src/generated/*.py .
+COPY src/generated/*.pyi .
+
+WORKDIR /build
+COPY src/server/pyproject.toml .
+ENV PYTHONPATH=/usr/lib/python3/dist-packages
+RUN python3 -m build
+
+#####################################################################
+FROM python:3.11-bookworm
 
 ARG UID=246
 ARG GID=412
@@ -67,21 +82,23 @@ RUN chown diagnoseme /usr/local/tmp
 
 WORKDIR /usr/local/server
 
-COPY --chown=diagnoseme src/server/* .
-COPY --chown=diagnoseme src/generated/*.py .
-COPY --chown=diagnoseme src/generated/*.pyi .
-
 RUN mkdir -p /home/diagnoseme/.ssh
 RUN chown diagnoseme /home/diagnoseme/.ssh
 COPY --chown=diagnoseme  dockerfiles/rpcserver/ssh_config /home/diagnoseme/.ssh/config
 COPY --chown=diagnoseme --from=test_keys /chromite/ssh_keys/testing_rsa /home/diagnoseme/.ssh/
 RUN chmod -R 600 /home/diagnoseme/.ssh/*
 
+WORKDIR /install_tmp
 COPY --from=dolostools /dolos/tools/doloscmd/dist .
 COPY --from=dolostools /dolos/tools/dolosbattery/dist .
+COPY --from=dolostools /dolos/tools/requirements.txt .
+RUN pip3 install *.whl --no-deps --no-index --break-system-packages
+RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
+
+COPY --from=serverbuild /build/dist .
 RUN pip3 install *.whl --no-deps --no-index --break-system-packages
 
-WORKDIR /builder/hdctools
+RUN rm -rf /install_tmp
 
 RUN chmod og+w /var/log
 
@@ -91,9 +108,4 @@ USER diagnoseme
 
 EXPOSE 6002
 
-ENV PYTHONPATH=/usr/local/server:/usr/lib/python3/dist-packages/
-
-RUN find . -print
-RUN chmod u+x /usr/local/server/rpcserver.py
-
-CMD ["/usr/local/server/rpcserver.py", "-v"]
+CMD ["rpcserver", "-v"]

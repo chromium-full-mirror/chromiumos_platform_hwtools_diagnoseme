@@ -3,10 +3,19 @@
 // found in the LICENSE file.
 
 import { Component, ElementRef, HostListener, Inject, QueryList, ViewChildren } from '@angular/core';
-import { TestStatus } from 'src/protos/dolos.pb';
+import { TestStatus } from 'src/protos/diagnoseme-dolos.pb';
 import { DolosService } from '../services/dolos.service';
+import {NgIf, TitleCasePipe} from '@angular/common'
+import {FormsModule} from '@angular/forms'
 
+import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
+import { MatCardModule } from '@angular/material/card';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatSelectModule } from '@angular/material/select';
+import { MatToolbarModule } from '@angular/material/toolbar';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
+
 import {
   MAT_DIALOG_DATA,
   MatDialog,
@@ -17,7 +26,7 @@ import {
   MatDialogTitle
 } from '@angular/material/dialog';
 
-import { CommandExecutionResults } from 'src/protos/dolos.pb';
+import { CommandExecutionResults } from 'src/protos/diagnoseme-dolos.pb';
 
 
 interface Model {
@@ -39,7 +48,18 @@ export enum TestResult {
 @Component({
   selector: 'app-dolos-provision',
   templateUrl: './dolos-provision.component.html',
-  styleUrl: './dolos-provision.component.scss'
+  styleUrl: './dolos-provision.component.scss',
+  imports: [
+      NgIf,
+      TitleCasePipe,
+      MatIconModule,
+      MatCardModule,
+      MatFormFieldModule,
+      MatSelectModule,
+      MatToolbarModule,
+      MatProgressBarModule,
+      FormsModule,
+  ]
 })
 
 export class DolosProvisionComponent {

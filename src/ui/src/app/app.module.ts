@@ -36,14 +36,12 @@ import {MatAutocompleteModule} from '@angular/material/autocomplete';
 
 
 @NgModule({
-  declarations: [
-    AppComponent,
-    DolosProvisionComponent
-  ],
   imports: [
     BrowserModule,
+    AppComponent,
     AppRoutingModule,
     MatSlideToggleModule,
+    DolosProvisionComponent,
     MatToolbarModule,
     MatIconModule,
     MatMenuModule,
