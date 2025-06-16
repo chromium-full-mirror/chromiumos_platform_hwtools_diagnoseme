@@ -1,0 +1,50 @@
+# Copyright 2025 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+services:
+  ##############################################################################
+  ui:
+    container_name: ui
+    image: ui
+    pull_policy: never
+    hostname: ui
+    restart: unless-stopped
+
+    volumes:
+      - logs:/var/log/nginx
+
+  ##############################################################################
+  server:
+    container_name: server
+    image: server
+    pull_policy: never
+    user: diagnoseme
+    hostname: server
+    restart: unless-stopped
+    privileged: true
+
+    volumes:
+      - logs:/var/log/doloslab
+      - /dev:/dev
+
+  #############################################################################
+  envoy:
+      container_name: envoy
+      image: envoy
+      pull_policy: never
+      user: diagnoseme
+      restart: unless-stopped
+      environment:
+        ENVOY_UID: 0
+
+      hostname: envoy-proxy
+      volumes:
+        - logs:/var/log/envoy
+
+      ports:
+       - 80:6001
+  #############################################################################
+
+volumes:
+  logs: {}

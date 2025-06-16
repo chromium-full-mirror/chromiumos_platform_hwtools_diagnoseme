@@ -1,0 +1,52 @@
+# Copyright 2025 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+services:
+  ##############################################################################
+  ui:
+    container_name: ui
+    image: ${REGISTRY_URI:-us-docker.pkg.dev/chromeos-hw-tools/diagnoseme}/ui:${UI:-testing}
+    hostname: ui
+    restart: unless-stopped
+
+    volumes:
+      - logs:/var/log/nginx
+
+  ##############################################################################
+  server:
+    container_name: server
+    image: ${REGISTRY_URI:-us-docker.pkg.dev/chromeos-hw-tools/diagnoseme}/server:${SERVER:-testing}
+    user: diagnoseme
+    hostname: server
+    restart: unless-stopped
+    privileged: true
+
+    volumes:
+      - logs:/var/log/doloslab
+      - /dev:/dev
+
+  #############################################################################
+  envoy-proxy:
+      container_name: envoy-proxy
+      image: ${REGISTRY_URI:-us-docker.pkg.dev/chromeos-hw-tools/diagnoseme}/envoy-proxy:${ENVOYPROXY:-testing}
+      user: diagnoseme
+      restart: unless-stopped
+      environment:
+        ENVOY_UID: 0
+
+      hostname: envoy-proxy
+      volumes:
+        - logs:/var/log/envoy
+
+      ports:
+       - 80:6001
+  #############################################################################
+  watchtower:
+    image: containrrr/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+  #############################################################################
+
+volumes:
+  logs: {}
