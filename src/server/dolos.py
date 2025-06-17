@@ -131,7 +131,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             try:
                 dolos.update_firmware(request.firmware_version)
                 dolos.repair()
-            except console_lib.DolosConsoleException as e:
+            except console_lib.DolosConsoleError as e:
                 result.exit_code = 1
                 result.stderr = str(e)
 

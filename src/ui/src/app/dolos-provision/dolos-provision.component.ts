@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 import { Component, ElementRef, HostListener, Inject, QueryList, ViewChildren } from '@angular/core';
-import { TestStatus } from 'src/protos/diagnoseme-dolos.pb';
+import { TestStatus } from '../../proto/diagnoseme-dolos.pb';
 import { DolosService } from '../services/dolos.service';
-import {NgIf, TitleCasePipe} from '@angular/common'
+import { TitleCasePipe } from '@angular/common'
 import {FormsModule} from '@angular/forms'
 
 import { MatIconModule } from '@angular/material/icon';
@@ -15,19 +15,17 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSelectModule } from '@angular/material/select';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatProgressBarModule } from '@angular/material/progress-bar';
-
+import { CommonModule } from '@angular/common';
 import {
   MAT_DIALOG_DATA,
   MatDialog,
   MatDialogActions,
-  MatDialogClose,
   MatDialogContent,
   MatDialogRef,
-  MatDialogTitle
+  MatDialogTitle,
 } from '@angular/material/dialog';
 
-import { CommandExecutionResults } from 'src/protos/diagnoseme-dolos.pb';
-
+import { CommandExecutionResults } from '../../proto/diagnoseme-dolos.pb';
 
 interface Model {
   name: string;
@@ -50,7 +48,6 @@ export enum TestResult {
   templateUrl: './dolos-provision.component.html',
   styleUrl: './dolos-provision.component.scss',
   imports: [
-      NgIf,
       TitleCasePipe,
       MatIconModule,
       MatCardModule,
@@ -59,6 +56,8 @@ export enum TestResult {
       MatToolbarModule,
       MatProgressBarModule,
       FormsModule,
+      MatButtonModule,
+      CommonModule,
   ]
 })
 
@@ -379,7 +378,7 @@ export class DolosProvisionComponent {
   templateUrl: './dialog-help-picture.html',
   styleUrl: './dolos-provision.component.scss',
   standalone: true,
-  imports: [MatDialogContent, MatDialogActions, MatDialogClose, MatButtonModule]
+  imports: [MatDialogContent, MatDialogActions, MatButtonModule]
 })
 export class DialogOverviewExampleDialog {
   constructor(
@@ -403,8 +402,7 @@ export class DialogOverviewExampleDialog {
     MatButtonModule,
     MatDialogTitle,
     MatDialogContent,
-    MatDialogActions,
-    MatDialogClose
+    MatDialogActions
   ]
 })
 export class DialogFirmwareComplete {

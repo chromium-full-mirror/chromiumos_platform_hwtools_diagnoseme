@@ -1,7 +1,7 @@
-/* Copyright 2025 The ChromiumOS Authors
+<!-- Copyright 2025 The ChromiumOS Authors
      Use of this source code is governed by a BSD-style license that can be
      found in the LICENSE file.
-*/
+-->
 <mat-toolbar color="primary">
   <span>Dolos Rework</span>
 </mat-toolbar>
@@ -36,9 +36,9 @@
           <div class="f-item1">Update firmware by pressing:</div>
           <div class="f-item2">
             <button
+              mat-raised-button
               (click)="onFirmwareUpdate()"
               [disabled]="firmwareProgress"
-              mat-raised-button
               color="primary"
             >
               Firmware Update
