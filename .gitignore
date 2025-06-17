@@ -23,3 +23,8 @@ coverage.lcov
 
 # Ignore tags for those using TAGS
 TAGS
+
+src/generated/**
+src/ui/node_modules/**
+src/ui/package-lock.json
+src/ui/src/proto/**
