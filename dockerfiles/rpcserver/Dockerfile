@@ -69,6 +69,7 @@ RUN apt-get update && apt-get install -yq \
     python3-cffi \
     python3-bcrypt \
     git \
+    sudo \
     vim
 
 WORKDIR /workspace

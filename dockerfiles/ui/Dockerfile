@@ -14,7 +14,6 @@ ENV PATH=/app/node_modules/.bin:$PATH
 # install and cache app dependencies
 # add app
 COPY src/ui/package.json /app
-#COPY src/ui/package-lock.json /app
 
 RUN npm install -g npm@latest
 RUN npm install --ignore-scripts
@@ -22,13 +21,15 @@ RUN npm install --ignore-scripts
 # install and cache app dependencies
 # add app
 
-COPY src/ui /app/
-WORKDIR /app/src/protos/
+COPY src/ui/ /app/
+RUN rm -rf /app/src/protos
+WORKDIR /app/src/protos
 COPY --chown=diagnoseme src/generated/*.ts /app/src/protos/
 
+WORKDIR /app
 RUN ng build --output-path=dist --output-hashing=all --configuration=production
 
-######################################################################
+#####################################################################
 
 FROM nginx:alpine
 

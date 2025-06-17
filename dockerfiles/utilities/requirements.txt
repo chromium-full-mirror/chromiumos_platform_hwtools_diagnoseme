@@ -1,3 +1,4 @@
+
 # Copyright 2025 The Chromium OS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -127,8 +128,8 @@ protobuf==4.21.12 \
     #   -r requirements.in
     #   grpcio-reflection
     #   grpcio-tools
-
 # WARNING: The following packages were not pinned, but pip requires them to be
 # pinned when the requirements file includes hashes and the requirement is not
 # satisfied by a package already installed. Consider using the --allow-unsafe flag.
 # setuptools
+
