@@ -6,7 +6,7 @@ import { Component, ElementRef, HostListener, Inject, QueryList, ViewChildren } 
 import { TestStatus } from '../../proto/diagnoseme-dolos.pb';
 import { DolosService } from '../services/dolos.service';
 import { TitleCasePipe } from '@angular/common'
-import {FormsModule} from '@angular/forms'
+import { FormsModule } from '@angular/forms'
 
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
@@ -24,6 +24,7 @@ import {
   MatDialogRef,
   MatDialogTitle,
 } from '@angular/material/dialog';
+import { MatInputModule } from '@angular/material/input';
 
 import { CommandExecutionResults } from '../../proto/diagnoseme-dolos.pb';
 
@@ -58,6 +59,7 @@ export enum TestResult {
       FormsModule,
       MatButtonModule,
       CommonModule,
+      MatInputModule,
   ]
 })
 
