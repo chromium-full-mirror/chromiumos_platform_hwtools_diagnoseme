@@ -132,6 +132,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
                 dolos.update_firmware(request.firmware_version)
                 dolos.repair()
             except console_lib.DolosConsoleError as e:
+                logging.exception("Failed to update firmware.")
                 result.exit_code = 1
                 result.stderr = str(e)
 
