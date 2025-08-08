@@ -4,9 +4,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """The RPC server that encapsulates a set of services that diagnoseme front
-   end can use.
-   Current hosted services:
-       dolos
+end can use.
+Current hosted services:
+    dolos
 """
 import argparse
 import asyncio
@@ -20,9 +20,14 @@ from grpc_reflection.v1alpha import reflection
 # pylint: disable=no-name-in-module
 # pylint: disable=import-error
 from server import diagnoseme_dolos_pb2
+from server import diagnoseme_servod_pb2
 from server import dolos
+from server import servod
 from server.diagnoseme_dolos_pb2_grpc import (
     add_DolosRpcServiceServicer_to_server,
+)
+from server.diagnoseme_servod_pb2_grpc import (
+    add_ServodRpcServiceServicer_to_server,
 )
 
 
@@ -71,6 +76,15 @@ async def serve():
         service_name = (
             diagnoseme_dolos_pb2.DESCRIPTOR.services_by_name[
                 "DolosRpcService"
+            ].full_name,
+            reflection.SERVICE_NAME,
+        )
+        reflection.enable_server_reflection(service_name, server)
+
+        add_ServodRpcServiceServicer_to_server(servod.ServodRpcService(), server)
+        service_name = (
+            diagnoseme_servod_pb2.DESCRIPTOR.services_by_name[
+                "ServodRpcService"
             ].full_name,
             reflection.SERVICE_NAME,
         )

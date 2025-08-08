@@ -9,6 +9,7 @@ import { ModuleWithProviders } from '@angular/core';
 import { GRPC_CLIENT_FACTORY, GrpcCoreModule } from '@ngx-grpc/core';
 import { GrpcWebClientFactory, GrpcWebClientSettings } from '@ngx-grpc/grpc-web-client';
 import { GRPC_DOLOS_RPC_SERVICE_CLIENT_SETTINGS } from '../../proto/diagnoseme-dolos.pbconf';
+import { GRPC_SERVOD_RPC_SERVICE_CLIENT_SETTINGS } from '../../proto/diagnoseme-servod.pbconf';
 
 
 @NgModule({
@@ -35,6 +36,7 @@ export class ServicesModule {
       ngModule: ServicesModule,
       providers: [
         { provide: GRPC_DOLOS_RPC_SERVICE_CLIENT_SETTINGS, useValue: { host: this.getServiceURL() } as GrpcWebClientSettings },
+        { provide: GRPC_SERVOD_RPC_SERVICE_CLIENT_SETTINGS, useValue: { host: this.getServiceURL() } as GrpcWebClientSettings },
         { provide: GRPC_CLIENT_FACTORY, useClass: GrpcWebClientFactory}
       ],
     };

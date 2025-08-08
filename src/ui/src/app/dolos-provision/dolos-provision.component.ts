@@ -27,6 +27,7 @@ import {
 import { MatInputModule } from '@angular/material/input';
 
 import { CommandExecutionResults } from '../../proto/diagnoseme-dolos.pb';
+import { ServodService } from '../services/servod-service';
 
 interface Model {
   name: string;
@@ -135,13 +136,19 @@ export class DolosProvisionComponent {
 
   internalDolosSerialNumber: string = '';
   gpnPass: TestResult = TestResult.NoResult;
+  hwid: string = '';
 
-  constructor(public dialog: MatDialog, private dolosService: DolosService) {
+  constructor(public dialog: MatDialog, private dolosService: DolosService, private servodService: ServodService) {
     this.dolosService.getModels(this.updateModels)
+    this.servodService.getHWID(this.updateHWID)
     this.models.sort((a, b) =>
       a.name > b.name ? 1 : b.name > a.name ? -1 : 0
     );
     this.dolosService.getFirmwareVersions(this.updateFirmwareVersions)
+  }
+
+  updateHWID = (hwid: string) => {
+    this.hwid = hwid
   }
 
   updateModels = (models: string[]) => {

@@ -1,8 +1,7 @@
 # Copyright 2025 The Chromium OS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-"""RPC service providing functionality to provision and test Dolos devices.
-"""
+"""RPC service providing functionality to provision and test Dolos devices."""
 import logging
 import pathlib
 import re

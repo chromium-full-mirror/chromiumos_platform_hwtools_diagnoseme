@@ -1,0 +1,28 @@
+// Copyright 2025 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+syntax = "proto3";
+package diagnoseme;
+import "google/protobuf/empty.proto";
+service ServodRpcService {
+  rpc start_servod(StartServodRequest) returns (StartServodResponse) {}
+  rpc get_dut_hardware_id(GetHardwareIDRequest) returns (GetHardwareIDResponse) {}
+}
+
+message StartServodRequest {
+  string board = 1;
+  optional string model = 2;
+  optional string serial = 3;
+}
+
+message StartServodResponse {
+  string error = 1;
+}
+
+message GetHardwareIDRequest {
+  string board = 1;
+}
+
+message GetHardwareIDResponse {
+  string hwid = 1;
+}
