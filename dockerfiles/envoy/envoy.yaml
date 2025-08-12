@@ -42,6 +42,13 @@ static_resources:
                   prefix: "/"
                 route:
                   cluster: backend_ui_service
+              cors:
+                allow_origin_string_match:
+                    - prefix: "*"
+                allow_methods: GET, PUT, DELETE, POST, OPTIONS
+                allow_headers: keep-alive,user-agent,cache-control,content-type,content-transfer-encoding,custom-header-1,x-accept-content-transfer-encoding,x-accept-response-streaming,x-user-agent,x-grpc-web,grpc-timeout
+                max_age: "1728000"
+                expose_headers: custom-header-1,grpc-status,grpc-message
           http_filters:
             - name: envoy.filters.http.grpc_web
               typed_config:
@@ -54,33 +61,33 @@ static_resources:
                 "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   clusters:
   - name: backend_grpc_service
-    connect_timeout: 0.25s
+    connect_timeout: 1s
     type: LOGICAL_DNS
+    lb_policy: ROUND_ROBIN
     typed_extension_protocol_options:
       envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
         "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
         explicit_http_config:
           http2_protocol_options: {}
-    lb_policy: ROUND_ROBIN
     load_assignment:
-      cluster_name: backend_grpc_service
+      cluster_name: cluster_0
       endpoints:
       - lb_endpoints:
         - endpoint:
             address:
               socket_address:
-                address: server
+                address: 192.168.100.11
                 port_value: 6002
   - name: backend_ui_service
     connect_timeout: 1s
     type: STRICT_DNS
     lb_policy: ROUND_ROBIN
     load_assignment:
-      cluster_name: backend_ui_service
+      cluster_name: cluster_1
       endpoints:
       - lb_endpoints:
         - endpoint:
             address:
               socket_address:
-                address: ui
+                address: 192.168.100.10
                 port_value: 6010

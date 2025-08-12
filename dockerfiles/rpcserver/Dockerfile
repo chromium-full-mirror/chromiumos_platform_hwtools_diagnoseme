@@ -49,16 +49,6 @@ RUN python3 -m build
 #####################################################################
 FROM python:3.11-bookworm
 
-ARG UID=246
-ARG GID=412
-
-RUN addgroup --gid $UID diagnoseme && adduser --ingroup diagnoseme --uid $UID \
-    --disabled-password --gecos "" diagnoseme
-
-RUN addgroup --gid 402 serial
-RUN adduser diagnoseme serial
-RUN adduser diagnoseme dialout
-
 RUN apt-get update && apt-get install -yq \
     fping \
     python3-paramiko \
@@ -68,26 +58,23 @@ RUN apt-get update && apt-get install -yq \
     python3-ftdi \
     python3-cffi \
     python3-bcrypt \
+    python3-docker \
     git \
     sudo \
     vim
 
-WORKDIR /workspace
 COPY dockerfiles/rpcserver/requirements.txt .
 RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
 
 RUN mkdir /var/log/rpcserver
-RUN chown diagnoseme /var/log/rpcserver
 RUN mkdir /usr/local/tmp
-RUN chown diagnoseme /usr/local/tmp
 
 WORKDIR /usr/local/server
 
-RUN mkdir -p /home/diagnoseme/.ssh
-RUN chown diagnoseme /home/diagnoseme/.ssh
-COPY --chown=diagnoseme  dockerfiles/rpcserver/ssh_config /home/diagnoseme/.ssh/config
-COPY --chown=diagnoseme --from=test_keys /chromite/ssh_keys/testing_rsa /home/diagnoseme/.ssh/
-RUN chmod -R 600 /home/diagnoseme/.ssh/*
+RUN mkdir -p .ssh
+COPY dockerfiles/rpcserver/ssh_config .ssh/config
+COPY --from=test_keys /chromite/ssh_keys/testing_rsa .ssh/
+RUN chmod -R 600 .ssh/*
 
 WORKDIR /install_tmp
 COPY --from=dolostools /dolos/tools/doloscmd/dist .
@@ -103,9 +90,7 @@ RUN rm -rf /install_tmp
 
 RUN chmod og+w /var/log
 
-RUN echo "diagnoseme  ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
-USER diagnoseme
+ENV PYTHONPATH=/usr/lib/python3/dist-packages/
 
 EXPOSE 6002
 

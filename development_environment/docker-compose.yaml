@@ -11,6 +11,10 @@ services:
     hostname: ui
     restart: unless-stopped
 
+    networks:
+      diagnoseme:
+        ipv4_address: 192.168.100.10
+
     volumes:
       - logs:/var/log/nginx
 
@@ -19,32 +23,47 @@ services:
     container_name: server
     image: server
     pull_policy: never
-    user: diagnoseme
     hostname: server
     restart: unless-stopped
     privileged: true
 
+    networks:
+      diagnoseme:
+        ipv4_address: 192.168.100.11
+
     volumes:
-      - logs:/var/log/doloslab
+      - logs:/var/log/rpcserver
       - /dev:/dev
+      - /var/run/docker.sock:/var/run/docker.sock
 
   #############################################################################
   envoy:
-      container_name: envoy
-      image: envoy
-      pull_policy: never
-      user: diagnoseme
-      restart: unless-stopped
-      environment:
-        ENVOY_UID: 0
+    container_name: envoy
+    image: envoy
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      ENVOY_UID: 0
 
-      hostname: envoy-proxy
-      volumes:
-        - logs:/var/log/envoy
+    networks:
+      diagnoseme:
+        ipv4_address: 192.168.100.12
 
-      ports:
-       - 80:6001
+    hostname: envoy-proxy
+    volumes:
+      - logs:/var/log/envoy
+
+    ports:
+      - 8888:6001
   #############################################################################
 
 volumes:
   logs: {}
+
+networks:
+  diagnoseme:
+    enable_ipv6: false
+    ipam:
+      driver: default
+      config:
+        - subnet: "192.168.100.0/24"
