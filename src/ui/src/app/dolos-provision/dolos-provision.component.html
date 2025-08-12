@@ -13,9 +13,16 @@
       <div class="f-container">
         <div class="f-row">
           <div class="f-item1">
-            Connect the Dolos Host connecter to the "DiagnoseMe" box with cable
-            <b class="bold">USB A.</b>
+            Connect your servo to your host box ( USB cable from this machine to host port in servo )
           </div>
+          <div class="f-item2"></div>
+        </div>
+        <div class="f-row">
+          <div class="f-item1">Connect the Dolos "Host" Port to the lower USB port on the servo.</div>
+          <div class="f-item2"></div>
+        </div>
+        <div class="f-row">
+          <div class="f-item1">If you are repairing a broken Dolos check this box for BSL mode.</div>
           <div class="f-item2"></div>
         </div>
         <div class="f-row">
@@ -119,63 +126,20 @@
             </button>
           </div>
         </div>
-      </div>
-    </mat-card-content>
-  </mat-card>
-</div>
-
-<div class="reworkcard">
-  <mat-card>
-    <mat-card-content>
-      <h2>3. Chromebook Rework</h2>
-      <div class="f-container">
-        <div class="f-row">
+        <div class="f-row" *ngIf="selectedModel">
           <div class="f-item1">
-            Remove the screws on the base of the Chromebook and expose
-            motherboard.
+            Probed HWID Value:
           </div>
           <div class="f-item2">
-            <button (click)="openScrewsPics()" mat-mini-fab color="primary">
-              <mat-icon class="icon-display">open_in_new</mat-icon>
-            </button>
-          </div>
-        </div>
-        <div class="f-row">
-          <div class="f-item1">Remove the battery from the Chromebook.</div>
-          <div class="f-item2">
-            <button
-              *ngIf="false"
-              (click)="openBatteryPics()"
-              mat-mini-fab
-              color="primary"
-            >
-              <mat-icon class="icon-display">open_in_new</mat-icon>
-            </button>
-          </div>
-        </div>
-        <div class="f-row">
-          <div class="f-item1">
-            Connect the selected battery cable to the motherboard.
-          </div>
-          <div class="f-item2">
-            <button (click)="openConnectPics()" mat-mini-fab color="primary">
-              <mat-icon class="icon-display">open_in_new</mat-icon>
-            </button>
-          </div>
-        </div>
-        <div class="f-row">
-          <div class="f-item1">
-            Route the cable outside of the case and attach the base with screws.
-          </div>
-          <div class="f-item2">
-            <button
-              *ngIf="false"
-              (click)="openRoutePics()"
-              mat-mini-fab
-              color="primary"
-            >
-              <mat-icon class="icon-display">open_in_new</mat-icon>
-            </button>
+            <mat-form-field class="form">
+              <input
+                #hwidDisplay
+                [(ngModel)]="hwid"
+                matInput
+                placeholder="HWID being probed...."
+                readonly
+              />
+            </mat-form-field>
           </div>
         </div>
       </div>
@@ -185,7 +149,7 @@
 <div class="reworkcard">
   <mat-card>
     <mat-card-content>
-      <h2>4. Cable Programming:</h2>
+      <h2>3. Cable Programming:</h2>
       <div class="f-container">
         <div class="f-row">
           <div class="f-item1">Connect the battery cable to Dolos output.</div>
@@ -236,19 +200,13 @@
       <div class="f-container">
 
         <div class="f-row">
-          <div class="f-item1">Connect the Ethernet dongle to the Chromebook.</div>
+          <div class="f-item1"></div>
           <div class="f-item2">
             <button *ngIf="false" mat-mini-fab color="primary">
               <mat-icon class="icon-display">open_in_new</mat-icon>
             </button>
           </div>
         </div>
-
-        <div class="f-row">
-          <div class="f-item1">Power On the Chromebook.</div>
-          <div class="f-item2"></div>
-        </div>
-
         <div class="f-row">
           <div class="f-item1">Did the Chromebook power on ?</div>
           <div class="f-item2">

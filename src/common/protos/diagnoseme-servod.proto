@@ -16,7 +16,8 @@ message StartServodRequest {
 }
 
 message StartServodResponse {
-  string error = 1;
+  string console_output = 1;
+  bool started = 2;
 }
 
 message GetHardwareIDRequest {
@@ -25,4 +26,5 @@ message GetHardwareIDRequest {
 
 message GetHardwareIDResponse {
   string hwid = 1;
+  string console_output = 2;
 }

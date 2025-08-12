@@ -23,6 +23,7 @@ message CommandExecutionResults {
 // NEXT_TAG = 2
 message FirmwareUpdateRequest {
   string firmware_version = 1;
+  bool bsl_mode = 2;
 }
 // NEXT_TAG = 2
 message FirmwareUpdateResponse {

@@ -50,7 +50,6 @@ export enum TestResult {
   templateUrl: './dolos-provision.component.html',
   styleUrl: './dolos-provision.component.scss',
   imports: [
-      TitleCasePipe,
       MatIconModule,
       MatCardModule,
       MatFormFieldModule,
@@ -104,17 +103,16 @@ export class DolosProvisionComponent {
 
   models: Model[] = [];
   boardModels: Map<string, string> = new Map();
+  hwid: string = '';
 
   firmwareVersions: string[] = [];
   selectedFirmwareVersion: string = "";
 
   internalDolosSerialNumber: string = '';
   gpnPass: TestResult = TestResult.NoResult;
-  hwid: string = '';
 
   constructor(public dialog: MatDialog, private dolosService: DolosService, private servodService: ServodService) {
     this.dolosService.getModels(this.updateModels)
-    this.servodService.getHWID(this.updateHWID)
     this.models.sort((a, b) =>
       a.name > b.name ? 1 : b.name > a.name ? -1 : 0
     );
@@ -127,10 +125,6 @@ export class DolosProvisionComponent {
     mapping.forEach((boardModel: BoardModel) => {
         this.boardModels.set(boardModel.model, boardModel.board);
     })
-  }
-
-  updateHWID = (hwid: string) => {
-    this.hwid = hwid
   }
 
   updateModels = (models: string[]) => {
@@ -147,19 +141,34 @@ export class DolosProvisionComponent {
 
 
   onChangeModel(newValue: Model) {
-    console.log(newValue);
     this.selectedModel = newValue;
     this.gpnPass = TestResult.NoResult;
     this.gpnScan = '';
-    console.log(this.gpnScanInput?.get(0))
     setTimeout(() => {
        this.gpnScanInput?.get(0)?.nativeElement.focus()
     }, 10);
+    let board:string | undefined = this.boardModels.get(this.selectedModel.name);
+    if (board == undefined) {
+      board = "unknown";
+    }
+    this.servodService.startServod(board, this.selectedModel.name, this.servodStarted)
   }
 
-  servodStarted = (stderr: string) => {
-    this.servodService.getHWID(this.updateHWID)
-    console.log(this.boardModels.get(newValue.name))
+  servodStarted = (started:boolean, console_output: string) => {
+    console.log(started);
+    if (started == true) {
+        this.servodService.getHWID(this.updateHWID);
+    } else {
+      console.log(console_output)
+    }
+  }
+
+  updateHWID = (hwid: string, output: string) => {
+    if (hwid != "") {
+        this.hwid = hwid
+    } else {
+        console.log(output)
+    }
   }
 
   afterFirmwareUpdate = (results?: CommandExecutionResults[]) => {

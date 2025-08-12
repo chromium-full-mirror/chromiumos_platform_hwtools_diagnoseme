@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright 2025 The Chromium OS Authors
+# Copyright 2025 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """The RPC server that encapsulates a set of services that diagnoseme front
@@ -81,14 +81,15 @@ async def serve():
         )
         reflection.enable_server_reflection(service_name, server)
 
-        add_ServodRpcServiceServicer_to_server(servod.ServodRpcService(), server)
-        service_name = (
-            diagnoseme_servod_pb2.DESCRIPTOR.services_by_name[
-                "ServodRpcService"
-            ].full_name,
-            reflection.SERVICE_NAME,
-        )
-        reflection.enable_server_reflection(service_name, server)
+        with servod.ServodRpcService() as servod_service:
+            add_ServodRpcServiceServicer_to_server(servod_service, server)
+            service_name = (
+                diagnoseme_servod_pb2.DESCRIPTOR.services_by_name[
+                    "ServodRpcService"
+                ].full_name,
+                reflection.SERVICE_NAME,
+            )
+            reflection.enable_server_reflection(service_name, server)
 
         serving_port = BACKEND_GRPC_SERVICE_PORT
         server.add_insecure_port(f"[::]:{serving_port}")
