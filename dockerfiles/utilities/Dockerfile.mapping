@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1.4
+# Copyright 2025 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+##############################################################################
+FROM python:3.11-bookworm as map
+
+RUN git clone --filter=blob:none --no-checkout --depth 1 --sparse https://chromium.googlesource.com/chromiumos/chromite
+WORKDIR chromite/
+RUN git sparse-checkout init --cone
+RUN git sparse-checkout add  config/ge_build_config.json
+RUN git checkout
+COPY mapping.py .
+RUN python3 mapping.py
+
+#######################################################################
+FROM scratch as copytohost
+
+COPY --link --from=map /chromite/mapping.csv /

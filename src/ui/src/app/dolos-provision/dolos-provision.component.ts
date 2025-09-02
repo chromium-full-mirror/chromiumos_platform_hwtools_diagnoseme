@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 import { Component, ElementRef, HostListener, Inject, QueryList, ViewChildren } from '@angular/core';
-import { TestStatus } from '../../proto/diagnoseme-dolos.pb';
+import { TestStatus, BoardModel } from '../../proto/diagnoseme-dolos.pb';
 import { DolosService } from '../services/dolos.service';
 import { TitleCasePipe } from '@angular/common'
 import { FormsModule } from '@angular/forms'
@@ -102,37 +102,11 @@ export class DolosProvisionComponent {
     { name: 'config7', gpn: '600-02522-00' }
   ];
 
-  models: Model[] = [
-    { name: 'careena', config: this.configs[2] },
-    { name: 'vayne', config: this.configs[2] },
-    { name: 'blooglet', config: this.configs[2] },
-    { name: 'bloog', config: this.configs[2] },
-    { name: 'vortininja', config: this.configs[2] },
-    { name: 'blooguard', config: this.configs[2] },
-    { name: 'meep', config: this.configs[2] },
-    { name: 'vorticon', config: this.configs[2] },
-    { name: 'taniks', config: this.configs[3] },
-    { name: 'whitetip', config: this.configs[3] },
-    { name: 'akemi', config: this.configs[3] },
-    { name: 'lick', config: this.configs[3] },
-    { name: 'laser14', config: this.configs[3] },
-    { name: 'foob', config: this.configs[3] },
-    { name: 'lillipup', config: this.configs[3] },
-    { name: 'cret', config: this.configs[7] },
-    { name: 'aleena', config: this.configs[7] },
-    { name: 'kindred', config: this.configs[7] },
-    { name: 'akali', config: this.configs[7] },
-    { name: 'sparky', config: this.configs[7] },
-    { name: 'garg', config: this.configs[7] },
-    { name: 'bobba360', config: this.configs[7] },
-    { name: 'electro', config: this.configs[7] },
-    { name: 'limozeen', config: this.configs[7] },
-    { name: 'delbin', config: this.configs[7] }
-  ];
+  models: Model[] = [];
+  boardModels: Map<string, string> = new Map();
 
   firmwareVersions: string[] = [];
   selectedFirmwareVersion: string = "";
-
 
   internalDolosSerialNumber: string = '';
   gpnPass: TestResult = TestResult.NoResult;
@@ -145,6 +119,14 @@ export class DolosProvisionComponent {
       a.name > b.name ? 1 : b.name > a.name ? -1 : 0
     );
     this.dolosService.getFirmwareVersions(this.updateFirmwareVersions)
+    this.dolosService.getBoardModelMapping(this.updateBoardModelMapping)
+  }
+
+  updateBoardModelMapping = (mapping: BoardModel[]) => {
+    this.boardModels.clear()
+    mapping.forEach((boardModel: BoardModel) => {
+        this.boardModels.set(boardModel.model, boardModel.board);
+    })
   }
 
   updateHWID = (hwid: string) => {
@@ -173,6 +155,11 @@ export class DolosProvisionComponent {
     setTimeout(() => {
        this.gpnScanInput?.get(0)?.nativeElement.focus()
     }, 10);
+  }
+
+  servodStarted = (stderr: string) => {
+    this.servodService.getHWID(this.updateHWID)
+    console.log(this.boardModels.get(newValue.name))
   }
 
   afterFirmwareUpdate = (results?: CommandExecutionResults[]) => {

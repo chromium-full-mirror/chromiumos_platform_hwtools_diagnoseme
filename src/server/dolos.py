@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """RPC service providing functionality to provision and test Dolos devices."""
+import csv
+from io import StringIO
 import logging
 import pathlib
 import re
@@ -26,6 +28,12 @@ from server import diagnoseme_dolos_pb2_grpc
 logging.getLogger("paramiko").setLevel(logging.WARNING)
 logging.getLogger().setLevel(logging.DEBUG)
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+file_handler = logging.FileHandler(f"/var/log/{__name__}.log")
+logger.addHandler(file_handler)
+
+
 # Location where dhcp leases are stored.
 _DHCPD_LEASES = "/leases/dnsmasq.leases"
 
@@ -43,6 +51,7 @@ SUBNET_DUT_SEARCH_RE = r"(?P<ip>192\.168\.231\.[0-9][0-9]*[0-9]*).*"
 FIRMWARE_CLOUD_BUCKET = "dolos-firmware"
 BOX_FIRMWARE_SUBDIR = "box_firmware/"
 EEPROM_FIRMWARE_SUBDIR = "cable_eeprom/"
+BOARD_MODEL_MAPPING_FILE = "cable_eeprom/mapping.csv"
 
 
 class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
@@ -69,6 +78,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             A FirmwareVersionsResponse containing the available firmware versions
             and the default version.
         """
+        logger.info("Getting firmware versions")
         response = diagnoseme_dolos_pb2.FirmwareVersionsResponse()
         storage_client = storage.Client.create_anonymous_client()
         for blob in storage_client.list_blobs(
@@ -108,6 +118,31 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             response.models.append(model)
         return response
 
+    def get_board_model_mapping(self, unused_request, unused_context):
+        """Reads public csv file with board model mapping.
+
+        Args:
+            unused_request: An unused request object.
+            unused_context: An unused context object.
+
+        Returns:
+            BoardModelMappingResponse which has the mapping.
+
+        """
+        logger.debug("Generating board model mapping.")
+        response = diagnoseme_dolos_pb2.BoardModelMappingResponse()
+        storage_client = storage.Client.create_anonymous_client()
+        bucket = storage_client.bucket(FIRMWARE_CLOUD_BUCKET)
+        blob = storage.Blob(bucket=bucket, name=BOARD_MODEL_MAPPING_FILE)
+        csv_data = StringIO(blob.download_as_string(storage_client).decode("utf-8"))
+        reader = csv.reader(csv_data)
+        for row in reader:
+            board_model_mapping = diagnoseme_dolos_pb2.BoardModel()
+            board_model_mapping.model = row[0]
+            board_model_mapping.board = row[1]
+            response.board_model_mappings.append(board_model_mapping)
+        return response
+
     def update_firmware(self, request, unused_context):
         """Updates the firmware on connected Dolos devices.
 
@@ -131,7 +166,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
                 dolos.update_firmware(request.firmware_version)
                 dolos.repair()
             except console_lib.DolosConsoleError as e:
-                logging.exception("Failed to update firmware.")
+                logger.exception("Failed to update firmware.")
                 result.exit_code = 1
                 result.stderr = str(e)
 
@@ -159,7 +194,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             if match:
                 connected_ip_addresses.append(match.group("ip"))
             else:
-                logging.info("Ignoring %s no match", line)
+                logger.info("Ignoring %s no match", line)
         return list(set(connected_ip_addresses))
 
     def check_dolos_from_dut(self, unused_request, unused_context):
@@ -182,7 +217,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
         devices = self._get_active_network_devices()
         # None is an error as is more than one.
         if len(devices) != 1:
-            logging.debug("Wrong number of DUT's detected: %s", devices)
+            logger.debug("Wrong number of DUT's detected: %s", devices)
             response.status = diagnoseme_dolos_pb2.TEST_STATUS.INFRA_ERROR
             response.error = (
                 f"Expected 1 chromebook connected found {len(devices)} chromebooks."
@@ -205,14 +240,14 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             SSHException,
             socket.error,
         ) as e:
-            logging.exception(e)
+            logger.exception(e)
             response.error = "Failed to ssh into DUT - have you installed test image ?"
             return response
 
         unused_stdin, stdout, unused_stderr = client.exec_command("ectool battery")
         cmd_result = " ".join(stdout).replace("\n", " ")
 
-        logging.info("Check from dut %s", cmd_result)
+        logger.info("Check from dut %s", cmd_result)
 
         battery_voltage_search = re.search(r"Present voltage\s*(\d+) mV", cmd_result)
 
@@ -221,14 +256,14 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             if battery_voltage_search and int(battery_voltage_search.group(1)) >= 3:
                 battery_present = True
         except ValueError:
-            logging.info(
+            logger.info(
                 "Voltage is not a valid int (%s)", battery_voltage_search.group(1)
             )
 
         client.close()
 
-        logging.info("Battery match %s", battery_voltage_search)
-        logging.info("Battery flag is present %s", battery_present)
+        logger.info("Battery match %s", battery_voltage_search)
+        logger.info("Battery flag is present %s", battery_present)
 
         if battery_present:
             response.status = diagnoseme_dolos_pb2.TEST_STATUS.PASS
@@ -299,7 +334,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             ]
             try:
                 proc = subprocess.run(cmd, capture_output=True, check=True)
-                logging.debug(
+                logger.debug(
                     "Cable update %r, stdout: %r ,stderr: %r",
                     " ".join(cmd),
                     proc.stdout,
@@ -309,10 +344,10 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
                 response.result.stdout = proc.stdout
                 response.result.exit_code = proc.returncode
             except subprocess.CalledProcessError as err:
-                logging.debug("Command: %s", err.cmd)
-                logging.debug("stderr: %s", err.stderr)
-                logging.debug("stdout: %s", err.stdout)
-                logging.debug(str(err))
+                logger.debug("Command: %s", err.cmd)
+                logger.debug("stderr: %s", err.stderr)
+                logger.debug("stdout: %s", err.stdout)
+                logger.debug(str(err))
             finally:
                 time.sleep(5)
                 doloses = console_lib.DolosConsole.get_all_dolos_consoles()
@@ -359,7 +394,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             ]
             try:
                 proc = subprocess.run(cmd, capture_output=True, check=True)
-                logging.debug(
+                logger.debug(
                     "Serial update %r, stdout: %r ,stderr: %r",
                     " ".join(cmd),
                     proc.stdout,
@@ -369,10 +404,10 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
                 response.result.stdout = proc.stdout
                 response.result.exit_code = proc.returncode
             except subprocess.CalledProcessError as err:
-                logging.debug("Command: %s", err.cmd)
-                logging.debug("stderr: %s", err.stderr)
-                logging.debug("stdout: %s", err.stdout)
-                logging.debug(str(err))
+                logger.debug("Command: %s", err.cmd)
+                logger.debug("stderr: %s", err.stderr)
+                logger.debug("stdout: %s", err.stdout)
+                logger.debug(str(err))
             finally:
                 time.sleep(5)
                 doloses = console_lib.DolosConsole.get_all_dolos_consoles()
