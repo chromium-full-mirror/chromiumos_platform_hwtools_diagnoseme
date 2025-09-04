@@ -9,6 +9,7 @@ services:
     image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/ui:release
     hostname: ui
     restart: unless-stopped
+    pull_policy: always
 
     networks:
       diagnoseme:
@@ -24,6 +25,7 @@ services:
     hostname: server
     restart: unless-stopped
     privileged: true
+    pull_policy: always
 
     networks:
       diagnoseme:
@@ -39,6 +41,7 @@ services:
     container_name: envoy
     image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/envoy:release
     restart: unless-stopped
+    pull_policy: always
     environment:
       ENVOY_UID: 0
 
