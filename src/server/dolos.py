@@ -162,17 +162,18 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             status, and the overall test status.
         """
         response = diagnoseme_dolos_pb2.CheckDolosFromHostResponse()
-        response.status = diagnoseme_dolos_pb2.TEST_STATUS.PASS
+        response.status = diagnoseme_dolos_pb2.TEST_STATUS.FAIL
 
         doloses = console_lib.DolosConsole.get_all_dolos_consoles()
-        dolos = doloses[0]
-        dolos.open()
-        dolos_status_map = dolos.get_status()
+        if len(doloses) > 0:
+            dolos = doloses[0]
+            dolos.open()
+            dolos_status_map = dolos.get_status()
 
-        response.dolos_serial_number = dolos.serial
-        response.dolos_status = dolos.determine_status(dolos_status_map)
-        if response.dolos_status != diagnoseme_dolos_pb2.DOLOS_STATUS.DOLOS_OK:
-            response.status = diagnoseme_dolos_pb2.TEST_STATUS.FAIL
+            response.dolos_serial_number = dolos.serial
+            response.dolos_status = dolos.determine_status(dolos_status_map)
+            if response.dolos_status == diagnoseme_dolos_pb2.DOLOS_STATUS.DOLOS_OK:
+                response.status = diagnoseme_dolos_pb2.TEST_STATUS.PASS
 
         return response
 
@@ -193,21 +194,24 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
         response.success = False
 
         doloses = console_lib.DolosConsole.get_all_dolos_consoles()
-        dolos = doloses[0]
-        dolos.open()
-        try:
-            dolos.program_cable(request.hwid)
-        except DolosConsoleError as e:
-            response.error_message = str(e)
-            logging.exception("Failed to program cable.")
+        if len(doloses) > 0:
+            dolos = doloses[0]
+            dolos.open()
+            try:
+                dolos.program_cable(request.hwid)
+            except DolosConsoleError as e:
+                response.error_message = str(e)
+                logging.exception("Failed to program cable.")
 
-        time.sleep(5)
-        try:
-            dolos.repair()
-            response.success = True
+            time.sleep(5)
+            try:
+                dolos.repair()
+                response.success = True
 
-        except DolosConsoleError as e:
-            response.error_message = str(e)
-            logging.exception("Failed to reset the device.")
+            except DolosConsoleError as e:
+                response.error_message = str(e)
+                logging.exception("Failed to reset the device.")
+        else:
+            response.error_message = "No Dolos console found"
 
         return response
