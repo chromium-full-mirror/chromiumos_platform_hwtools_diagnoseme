@@ -5,7 +5,7 @@
 
 export DOCKER_BUILDKIT=1
 IMAGE="servod:dev"
-set -x
+set -ex
 
 SOURCE="${BASH_SOURCE[0]}"
 while [ -L "${SOURCE}" ]; do # resolve $SOURCE until the file is no longer a symlink

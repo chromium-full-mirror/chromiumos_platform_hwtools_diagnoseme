@@ -46,6 +46,8 @@ RUN rm -f /docker-entrypoint.d/*
 RUN rm -f /var/log/nginx/*
 RUN chmod uog+rw /var/log/nginx
 
+COPY src/ui/src/assets/* /etc/nginx/html/assets/img/
+
 
 EXPOSE 6010
 

@@ -50,18 +50,7 @@ RUN python3 -m build
 FROM python:3.11-bookworm
 
 RUN apt-get update && apt-get install -yq \
-    fping \
-    python3-paramiko \
-    python3-serial \
-    python3-requests \
-    ssh \
-    python3-ftdi \
-    python3-cffi \
-    python3-bcrypt \
-    python3-docker \
-    git \
-    sudo \
-    vim
+    python3-docker
 
 COPY dockerfiles/rpcserver/requirements.txt .
 RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
