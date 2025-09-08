@@ -33,7 +33,8 @@ import {MatCheckboxModule} from '@angular/material/checkbox';
 import { FormsModule } from '@angular/forms';
 
 import {MatAutocompleteModule} from '@angular/material/autocomplete';
-
+import { MatIconRegistry } from '@angular/material/icon';
+import { DomSanitizer } from '@angular/platform-browser'; // Required for security
 
 @NgModule({
   imports: [
@@ -61,6 +62,16 @@ import {MatAutocompleteModule} from '@angular/material/autocomplete';
   providers: [
     provideAnimationsAsync()
   ],
-  bootstrap: [AppComponent]
+  bootstrap: [AppComponent],
+  declarations: [
+    ]
 })
-export class AppModule { }
+
+
+
+export class AppModule {
+  constructor(iconRegistry: MatIconRegistry, sanitizer: DomSanitizer) {
+    iconRegistry.setDefaultFontSetClass('material-symbols-outlined');
+    // Or for other styles: 'material-symbols-rounded', 'material-symbols-sharp'
+  }
+}
