@@ -1,0 +1,20 @@
+<!-- Copyright 2025 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<div class="reworkcard">
+  <mat-card>
+    <mat-card-content>
+      <h2>{{title}}</h2>
+      <div class="f-container">
+        <ng-content></ng-content>
+      </div>
+    </mat-card-content>
+    <mat-card-footer>
+      <div *ngIf="progress">
+        <mat-progress-bar mode="indeterminate"></mat-progress-bar>
+      </div>
+    </mat-card-footer>
+  </mat-card>
+</div>
