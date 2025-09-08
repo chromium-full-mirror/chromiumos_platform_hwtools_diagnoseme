@@ -1,4 +1,4 @@
-# Copyright 2025 The Chromium OS Authors
+# Copyright 2025 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """RPC service providing functionality to provision and test Dolos devices."""
@@ -6,47 +6,21 @@ import csv
 from io import StringIO
 import logging
 import pathlib
-import re
-import socket
-import subprocess
-import tempfile
 import time
 
 from doloscmd import console_lib
+from doloscmd.error import DolosConsoleError
 from google.cloud import storage
-from paramiko import AuthenticationException
-from paramiko import AutoAddPolicy
-from paramiko import BadHostKeyException
-from paramiko import SSHClient
-from paramiko import SSHException
 
 # pylint: disable=no-name-in-module
 from server import diagnoseme_dolos_pb2
 from server import diagnoseme_dolos_pb2_grpc
 
 
-logging.getLogger("paramiko").setLevel(logging.WARNING)
-logging.getLogger().setLevel(logging.DEBUG)
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 file_handler = logging.FileHandler(f"/var/log/{__name__}.log")
 logger.addHandler(file_handler)
-
-
-# Location where dhcp leases are stored.
-_DHCPD_LEASES = "/leases/dnsmasq.leases"
-
-# fping, ping a range of IP addresses in parallel.
-# -c is the number of packets to send.
-# -p is the interval between ping packets to a single target.
-# -i is the interval between sending ping packets.
-FIND_DUT_CMD = [
-    "cat %s | awk -F ' ' '{print $3}' | /usr/bin/fping -a -t200 -B1.0 -r2"
-    % _DHCPD_LEASES
-]
-
-SUBNET_DUT_SEARCH_RE = r"(?P<ip>192\.168\.231\.[0-9][0-9]*[0-9]*).*"
 
 FIRMWARE_CLOUD_BUCKET = "dolos-firmware"
 BOX_FIRMWARE_SUBDIR = "box_firmware/"
@@ -163,7 +137,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
         for dolos in doloses:
             result = diagnoseme_dolos_pb2.CommandExecutionResults()
             try:
-                dolos.update_firmware(request.firmware_version)
+                dolos.update_firmware(request.firmware_version, request.bsl_mode)
                 dolos.repair()
             except console_lib.DolosConsoleError as e:
                 logger.exception("Failed to update firmware.")
@@ -171,104 +145,6 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
                 result.stderr = str(e)
 
             response.result.append(result)
-        return response
-
-    def _get_active_network_devices(self):
-        """Find the active DUT's with IP's issues by the DiagnoseMe box.
-
-        DiagnoseMe has a private network (on the second NIC) for the DUT
-        DHCP is running on that network.   Find a list of assigned IP
-        addresses and remove any IP's that do not respond to ping.
-
-        Returns:
-            list of strings: The IP addresses of devices connected to the
-            DiagnoseMe test network.
-        """
-        connected_ip_addresses = []
-        process = subprocess.run(
-            FIND_DUT_CMD, capture_output=True, shell=True, check=True
-        )
-        fping_result = process.stdout
-        for line in fping_result.decode("utf-8").splitlines():
-            match = re.match(SUBNET_DUT_SEARCH_RE, line)
-            if match:
-                connected_ip_addresses.append(match.group("ip"))
-            else:
-                logger.info("Ignoring %s no match", line)
-        return list(set(connected_ip_addresses))
-
-    def check_dolos_from_dut(self, unused_request, unused_context):
-        """Checks Dolos status from the DUT perspective.
-
-        Establishes an SSH connection to a connected DUT and executes a command
-        to check the Dolos status, typically related to battery presence.
-
-        Args:
-            unused_request: An unused request object.
-            unused_context: An unused context object.
-
-        Returns:
-            A CheckDolosFromDutResponse indicating the test status (PASS/FAIL)
-            and any associated error messages.
-        """
-        response = diagnoseme_dolos_pb2.CheckDolosFromDutResponse()
-        response.status = diagnoseme_dolos_pb2.TEST_STATUS.FAIL
-
-        devices = self._get_active_network_devices()
-        # None is an error as is more than one.
-        if len(devices) != 1:
-            logger.debug("Wrong number of DUT's detected: %s", devices)
-            response.status = diagnoseme_dolos_pb2.TEST_STATUS.INFRA_ERROR
-            response.error = (
-                f"Expected 1 chromebook connected found {len(devices)} chromebooks."
-            )
-            return response
-
-        client = SSHClient()
-        client.set_missing_host_key_policy(AutoAddPolicy())
-
-        try:
-            client.connect(
-                username="root",
-                hostname=devices[0],
-                key_filename="/home/diagnoseme/.ssh/testing_rsa",
-                timeout=10,
-            )
-        except (
-            BadHostKeyException,
-            AuthenticationException,
-            SSHException,
-            socket.error,
-        ) as e:
-            logger.exception(e)
-            response.error = "Failed to ssh into DUT - have you installed test image ?"
-            return response
-
-        unused_stdin, stdout, unused_stderr = client.exec_command("ectool battery")
-        cmd_result = " ".join(stdout).replace("\n", " ")
-
-        logger.info("Check from dut %s", cmd_result)
-
-        battery_voltage_search = re.search(r"Present voltage\s*(\d+) mV", cmd_result)
-
-        battery_present = False
-        try:
-            if battery_voltage_search and int(battery_voltage_search.group(1)) >= 3:
-                battery_present = True
-        except ValueError:
-            logger.info(
-                "Voltage is not a valid int (%s)", battery_voltage_search.group(1)
-            )
-
-        client.close()
-
-        logger.info("Battery match %s", battery_voltage_search)
-        logger.info("Battery flag is present %s", battery_present)
-
-        if battery_present:
-            response.status = diagnoseme_dolos_pb2.TEST_STATUS.PASS
-        response.error = f"Battery flag is present {battery_present}"
-
         return response
 
     def check_dolos_from_host(self, unused_request, unused_context):
@@ -303,116 +179,35 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
     def program_cable(self, request, unused_context):
         """Programs a Dolos cable.
 
-        Downloads the appropriate firmware from Google Cloud Storage based on
-        the provided model and uses the `dolos_program_cable` tool to program the
-        cable.
         Performs a dolos repair ( resets the device ) after the update.
 
         Args:
-            request: A ProgramCableRequest specifying the Dolos model.
+            request: A ProgramCableRequest specifying the Dolos hwid and
+                     optional serial.
             unused_context: An unused context object.
 
         Returns:
             A ProgramCableResponse containing the results of the programming operation.
         """
         response = diagnoseme_dolos_pb2.ProgramCableResponse()
-        storage_client = storage.Client.create_anonymous_client()
-        blobs = list(
-            storage_client.list_blobs(
-                FIRMWARE_CLOUD_BUCKET, prefix=EEPROM_FIRMWARE_SUBDIR + request.model
-            )
-        )
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            blobs[0].download_to_filename(tmp.name)
-            cmd = [
-                "/usr/local/bin/dolos_program_cable",
-                "-y",
-                tmp.name,
-                "-v",
-                "-d",
-                "any",
-            ]
-            try:
-                proc = subprocess.run(cmd, capture_output=True, check=True)
-                logger.debug(
-                    "Cable update %r, stdout: %r ,stderr: %r",
-                    " ".join(cmd),
-                    proc.stdout,
-                    proc.stderr,
-                )
-                response.result.stderr = proc.stderr
-                response.result.stdout = proc.stdout
-                response.result.exit_code = proc.returncode
-            except subprocess.CalledProcessError as err:
-                logger.debug("Command: %s", err.cmd)
-                logger.debug("stderr: %s", err.stderr)
-                logger.debug("stdout: %s", err.stdout)
-                logger.debug(str(err))
-            finally:
-                time.sleep(5)
-                doloses = console_lib.DolosConsole.get_all_dolos_consoles()
-                if doloses:
-                    dolos = doloses[0]
-                    dolos.open()
-                    dolos.repair()
-        return response
+        response.success = False
 
-    def program_serial_number(self, request, unused_context):
-        """Programs the serial number of a Dolos cable.
+        doloses = console_lib.DolosConsole.get_all_dolos_consoles()
+        dolos = doloses[0]
+        dolos.open()
+        try:
+            dolos.program_cable(request.hwid)
+        except DolosConsoleError as e:
+            response.error_message = str(e)
+            logging.exception("Failed to program cable.")
 
-        Downloads the appropriate firmware from Google Cloud Storage based on the
-        provided model and uses the `dolos_program_cable` tool to program the cable
-        with the specified serial number.
-        Performs a dolos repair ( resets the device ) after the update.
+        time.sleep(5)
+        try:
+            dolos.repair()
+            response.success = True
 
-        Args:
-            request: A ProgramSerialRequest specifying the Dolos model and new
-                     serial number.
-            unused_context: An unused context object.
+        except DolosConsoleError as e:
+            response.error_message = str(e)
+            logging.exception("Failed to reset the device.")
 
-        Returns:
-            A ProgramSerialResponse containing the results of the programming operation.
-        """
-        response = diagnoseme_dolos_pb2.ProgramSerialResponse()
-        storage_client = storage.Client.create_anonymous_client()
-        blobs = list(
-            storage_client.list_blobs(
-                FIRMWARE_CLOUD_BUCKET, prefix=EEPROM_FIRMWARE_SUBDIR + request.model
-            )
-        )
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            blobs[0].download_to_filename(tmp.name)
-            cmd = [
-                "/usr/local/bin/dolos_program_cable",
-                "-y",
-                tmp.name,
-                "-v",
-                "-d",
-                "any",
-                "-ns",
-                request.new_serial_number,
-            ]
-            try:
-                proc = subprocess.run(cmd, capture_output=True, check=True)
-                logger.debug(
-                    "Serial update %r, stdout: %r ,stderr: %r",
-                    " ".join(cmd),
-                    proc.stdout,
-                    proc.stderr,
-                )
-                response.result.stderr = proc.stderr
-                response.result.stdout = proc.stdout
-                response.result.exit_code = proc.returncode
-            except subprocess.CalledProcessError as err:
-                logger.debug("Command: %s", err.cmd)
-                logger.debug("stderr: %s", err.stderr)
-                logger.debug("stdout: %s", err.stdout)
-                logger.debug(str(err))
-            finally:
-                time.sleep(5)
-                doloses = console_lib.DolosConsole.get_all_dolos_consoles()
-                if doloses:
-                    dolos = doloses[0]
-                    dolos.open()
-                    dolos.repair()
         return response

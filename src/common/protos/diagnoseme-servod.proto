@@ -7,6 +7,7 @@ import "google/protobuf/empty.proto";
 service ServodRpcService {
   rpc start_servod(StartServodRequest) returns (StartServodResponse) {}
   rpc get_dut_hardware_id(GetHardwareIDRequest) returns (GetHardwareIDResponse) {}
+  rpc run_dut_control(RunDutControlRequest) returns (RunDutControlResponse) {}
 }
 
 message StartServodRequest {
@@ -27,4 +28,12 @@ message GetHardwareIDRequest {
 message GetHardwareIDResponse {
   string hwid = 1;
   string console_output = 2;
+}
+
+message RunDutControlRequest {
+  string command = 1;
+}
+
+message RunDutControlResponse {
+  string result = 1;
 }

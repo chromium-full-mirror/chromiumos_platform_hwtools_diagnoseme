@@ -59,11 +59,12 @@ message CheckDolosFromHostResponse {
 }
 // NEXT_TAG = 2
 message ProgramCableRequest {
-  string model = 1;
+  string hwid = 1;
 }
 // NEXT_TAG = 2
 message ProgramCableResponse {
-   CommandExecutionResults result = 1;
+   string error_message = 1;
+   bool success = 2;
 }
 // NEXT_TAG = 3
 message FirmwareVersionsResponse {
