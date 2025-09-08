@@ -1,0 +1,33 @@
+// Copyright 2025 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+.f-item {
+    display:flex;
+    align-items: center;
+    justify-content: left;
+}
+
+.f-item1 {
+    @extend .f-item;
+    min-width: 800px;
+    max-width: 800px;
+    font-size: 18px;
+}
+.f-item2 {
+    @extend .f-item;
+    min-width: 100px;
+    padding-left: 3px;
+}
+
+.f-item3 {
+    @extend .f-item;
+    min-width: 100px;
+    padding-left: 3px;
+}
+
+.f-item2and3 {
+    @extend .f-item;
+    min-width: 400px;
+    padding-left: 3px;
+}
