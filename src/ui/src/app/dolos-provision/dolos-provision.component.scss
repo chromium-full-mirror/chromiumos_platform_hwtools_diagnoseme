@@ -1,9 +1,6 @@
 // Copyright 2025 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-.reworkcard {
-    padding-bottom: 8px;
-}
 
 .icon-display {
     transform: scale(.8);
@@ -11,7 +8,8 @@
 
 
 .image-dialog-content {
-    margin: 10px; padding: 0;
+    margin: 10px;
+    padding: 0;
     display: flex;
     align-self: center;
     justify-content: center;
@@ -19,11 +17,11 @@
 }
 
 .card-image {
-    display: flex;
+    /*display: flex;
     align-items: center;
     width: 80%;
     height: 80%;
-    object-fit: fill;
+    object-fit: fill;*/
 }
 
 
@@ -35,41 +33,22 @@
     background-color: #f44336;
 }
 
-.f-container {
-    display: flex;
-    flex-direction: column;
-    row-gap: 1px;
 
-}
-
-.f-row {
-    display: flex;
-    column-gap: 10px;
-}
-
-.f-item1 {
-    display: flex;
-    justify-content: left;
-    align-items: center;
-    font-size: larger;
-    min-width: 40%;
-    height: 50px;
-    // border: solid black 1px;
-}
-.f-item2 {
-    display: flex;
-    justify-content: left;
-    align-items: center;
-    height: 50px;
-    font-size: larger;
-    // border: solid black 1px;
-}
 .bold {
     padding-left: 3px;
 }
 
-.form {
-    padding-top: 24px;
-    width: 280px;
-    height: 70px;
+.hwid-probe-form {
+    width: 200px;
+}
+
+.dolos-mat-form {
+    display: flex;
+    align-self: left;
+    justify-content: left;
+    padding: 0px;
+}
+
+mat-form-field {
+    width: 100%;
 }

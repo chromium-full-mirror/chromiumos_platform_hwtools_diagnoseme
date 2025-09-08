@@ -1,0 +1,13 @@
+<!-- Copyright 2025 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<h2 mat-dialog-title>Oops something went wrong.</h2>
+<mat-dialog-content class=oops-dialog-content>
+<pre>{{data}}</pre>
+</mat-dialog-content>
+<mat-dialog-actions class=oops-dialog-content>
+  <button               mat-raised-button
+  color="primary" (click)="onClose()">Close</button>
+</mat-dialog-actions>

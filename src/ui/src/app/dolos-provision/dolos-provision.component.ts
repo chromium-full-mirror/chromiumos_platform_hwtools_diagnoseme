@@ -2,10 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import { Component, ElementRef, HostListener, Inject, QueryList, ViewChildren } from '@angular/core';
+import { Component, ElementRef, Inject, QueryList, ViewChildren } from '@angular/core';
 import { TestStatus, BoardModel } from '../../proto/diagnoseme-dolos.pb';
 import { DolosService } from '../services/dolos.service';
-import { TitleCasePipe } from '@angular/common'
 import { FormsModule } from '@angular/forms'
 
 import { MatIconModule } from '@angular/material/icon';
@@ -14,7 +13,6 @@ import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatSelectModule } from '@angular/material/select';
 import { MatToolbarModule } from '@angular/material/toolbar';
-import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { CommonModule } from '@angular/common';
 import {
   MAT_DIALOG_DATA,
@@ -28,6 +26,12 @@ import { MatInputModule } from '@angular/material/input';
 
 import { CommandExecutionResults } from '../../proto/diagnoseme-dolos.pb';
 import { ServodService } from '../services/servod-service';
+import { MatCheckboxModule } from '@angular/material/checkbox';
+import { DolosReworkCard } from '../dolos-rework-card/dolos-rework-card';
+import { DolosReworkCardRow } from '../dolos-rework-card-row/dolos-rework-card-row';
+import { DolosReworkCardColumn } from '../dolos-rework-card-column/dolos-rework-card-column';
+import { HelpDialogButton } from '../help-dialog-button/help-dialog-button';
+
 
 interface Model {
   name: string;
@@ -50,16 +54,20 @@ export enum TestResult {
   templateUrl: './dolos-provision.component.html',
   styleUrl: './dolos-provision.component.scss',
   imports: [
-      MatIconModule,
-      MatCardModule,
-      MatFormFieldModule,
-      MatSelectModule,
-      MatToolbarModule,
-      MatProgressBarModule,
-      FormsModule,
-      MatButtonModule,
-      CommonModule,
-      MatInputModule,
+    MatIconModule,
+    MatCardModule,
+    MatFormFieldModule,
+    MatSelectModule,
+    MatToolbarModule,
+    FormsModule,
+    MatButtonModule,
+    CommonModule,
+    MatInputModule,
+    MatCheckboxModule,
+    DolosReworkCard,
+    DolosReworkCardRow,
+    DolosReworkCardColumn,
+    HelpDialogButton,
   ]
 })
 
@@ -72,17 +80,22 @@ export class DolosProvisionComponent {
 
   selectedModel: Model | null = null;
 
-  dutTestProgress: boolean = false;
   hostTestProgress: boolean = false;
   firmwareProgress: boolean = false;
   cableProgramProgress: boolean = false;
   flashSerialProgress: boolean = false;
   disableAll: boolean = false;
+  hwidProgress: boolean = false;
+  bslMode: boolean = false;
 
+  model: string = "";
+  board: string = "";
 
-  dutTestPass: TestResult = TestResult.NoResult;
   hostTestPass: TestResult = TestResult.NoResult;
   dolosSerialPass: TestResult = TestResult.NoResult;
+
+  testVoltage: string = "";
+  testPowerstate: string = "";
 
   dolosSerialScan: string = '';
   gpnScan: string = '';
@@ -123,20 +136,25 @@ export class DolosProvisionComponent {
   updateBoardModelMapping = (mapping: BoardModel[]) => {
     this.boardModels.clear()
     mapping.forEach((boardModel: BoardModel) => {
-        this.boardModels.set(boardModel.model, boardModel.board);
+      this.boardModels.set(boardModel.model, boardModel.board);
     })
   }
 
   updateModels = (models: string[]) => {
     this.models = []
     models.forEach((model: string) => {
-      this.models.push({name: model, config: this.configs[2]})
+      this.models.push({ name: model, config: this.configs[2] })
     })
   }
 
-  updateFirmwareVersions = (firmwareVersions: string[], defaultFirmwareVersion:string) => {
+  updateFirmwareVersions = (firmwareVersions: string[], defaultFirmwareVersion: string) => {
     this.firmwareVersions = firmwareVersions;
     this.selectedFirmwareVersion = defaultFirmwareVersion;
+  }
+
+  onProbeHardware() {
+    this.hwidProgress = true;
+    this.servodService.startServod(this.board, this.model, this.servodStarted);
   }
 
 
@@ -145,30 +163,45 @@ export class DolosProvisionComponent {
     this.gpnPass = TestResult.NoResult;
     this.gpnScan = '';
     setTimeout(() => {
-       this.gpnScanInput?.get(0)?.nativeElement.focus()
+      this.gpnScanInput?.get(0)?.nativeElement.focus()
     }, 10);
-    let board:string | undefined = this.boardModels.get(this.selectedModel.name);
-    if (board == undefined) {
-      board = "unknown";
+    this.model = this.selectedModel?.name;
+    if (this.model == undefined) {
+      this.model = "unknown";
     }
-    this.servodService.startServod(board, this.selectedModel.name, this.servodStarted)
+    let board = this.boardModels.get(this.model);
+    if (board == undefined) {
+      this.board = "unknown";
+    } else {
+      this.board = board;
+    }
+
   }
 
-  servodStarted = (started:boolean, console_output: string) => {
+  servodStarted = (started: boolean, console_output: string) => {
     console.log(started);
     if (started == true) {
-        this.servodService.getHWID(this.updateHWID);
+      this.servodService.getHWID(this.updateHWID);
     } else {
+      this.hwidProgress = false
       console.log(console_output)
+      const dialogRef = this.dialog.open(DialogOops, {
+        data: console_output
+      });
     }
   }
 
   updateHWID = (hwid: string, output: string) => {
+    console.log(output)
     if (hwid != "") {
-        this.hwid = hwid
+      this.hwid = hwid
     } else {
-        console.log(output)
+      const dialogRef = this.dialog.open(DialogOops, {
+        data: output
+      });
+      this.hwid = this.model;
     }
+    this.hwidProgress = false;
   }
 
   afterFirmwareUpdate = (results?: CommandExecutionResults[]) => {
@@ -193,51 +226,47 @@ export class DolosProvisionComponent {
   };
 
   onFirmwareUpdate() {
-    console.log('Firmware Update');
     this.firmwareProgress = true;
-    this.dolosService.updateFirmware(this.selectedFirmwareVersion, this.afterFirmwareUpdate);
+    this.dolosService.updateFirmware(this.selectedFirmwareVersion, this.bslMode, this.afterFirmwareUpdate);
   }
 
-  onBootup() {
-    this.dutTestPass = TestResult.NoResult;
+  onStartTests() {
+    console.log("OnstartTests");
     this.hostTestPass = TestResult.NoResult;
     this.internalDolosSerialNumber = '';
     this.dolosSerialScan = '';
     this.dolosSerialPass = TestResult.NoResult;
     this.hostTestProgress = true;
-    this.dutTestProgress = true;
-    this.dolosService.checkDolosFromHost(this.afterHostCheck);
-    this.dolosService.checkDolosFromDut(this.afterDutCheck);
+    this.dolosService.checkDolosFromHost(this.afterDolosCheck);
+    this.servodService.runDutControl('servo_uart_cmd:"cc off"', this.afterCCOff);
   }
 
-  afterHostCheck = (result: TestStatus, dolosSerialNumber: string, error: string) => {
+  afterCCOff = async (result: string) => {
+    await sleep(2000);  // 2 second wait for cc off to take effect
+    this.servodService.runDutControl('ppvar_vbat_mv', this.afterVoltage);
+    this.servodService.runDutControl('ec_system_powerstate', this.afterPowerstate);
+    this.servodService.runDutControl('servo_uart_cmd:"cc on"', this.afterCCOn);
+  }
+
+  afterVoltage = (result: string) => { this.testVoltage = result }
+  afterPowerstate = (result: string) => { this.testPowerstate = result }
+  afterCCOn = (result: string) => { }
+
+  afterDolosCheck = (result: TestStatus, dolosSerialNumber: string, error: string) => {
     this.hostTestProgress = false;
 
     if (result == TestStatus.PASS) {
       this.hostTestPass = TestResult.Pass
       setTimeout(() => {
         this.dolosSerialInput?.get(0)?.nativeElement.focus()
-     }, 200);
+      }, 200);
     } else {
       this.hostTestPass = TestResult.Fail
     }
     this.internalDolosSerialNumber = dolosSerialNumber;
 
     console.log("host" + this.hostTestPass);
-
-
     this.hostErrorMsg = error;
-
-  };
-
-  afterDutCheck = (result: TestStatus, error: string) => {
-    this.dutTestProgress = false;
-    if (result == TestStatus.PASS) {
-      this.dutTestPass = TestResult.Pass
-    } else {
-      this.dutTestPass = TestResult.Fail
-    }
-    this.dutErrorMsg = error;
   };
 
   isTestPass(result: TestResult) {
@@ -248,36 +277,6 @@ export class DolosProvisionComponent {
   showTestResult(result: TestResult, inProgress: boolean) {
     return !inProgress && result != TestResult.NoResult;
     console.log("Show result: " + inProgress + " " + result)
-  }
-
-  openCablePics() {
-    const dialogRef = this.dialog.open(DialogOverviewExampleDialog, {
-      data: this.selectedModel?.config.gpn + ".jpg"
-    });
-  }
-
-  openRoutePics() {
-  }
-
-  openConnectPics() {
-    const dialogRef = this.dialog.open(DialogOverviewExampleDialog, {
-      data: "connect_motherboard.jpg"
-    });
-  }
-
-  openBatteryPics() {
-  }
-
-  openScrewsPics() {
-    const dialogRef = this.dialog.open(DialogOverviewExampleDialog, {
-      data: "remove_screws.jpg"
-    });
-  }
-
-  openConnectDolosPics() {
-    const dialogRef = this.dialog.open(DialogOverviewExampleDialog, {
-      data: "dolos.png"
-    });
   }
 
   dolosSerialChange(event: any) {
@@ -296,50 +295,30 @@ export class DolosProvisionComponent {
     }
   }
 
-  @HostListener('window:keydown.control.r', ['$event'])
-  runTests(event: KeyboardEvent) {
-    event.preventDefault();
-    this.onBootup();
-  }
-
-  @HostListener('window:keydown.control.f', ['$event'])
-  updateFirmware(event: KeyboardEvent) {
-    event.preventDefault();
-    this.onFirmwareUpdate();
-  }
-
   onCableProgram() {
     console.log('Cable Program');
     this.cableProgramProgress = true;
-    var model = String(this.selectedModel?.name)
-    this.dolosService.programCable(model.toString(), this.afterProgramCable);
+    this.dolosService.programCable(this.hwid, this.afterProgramCable);
   }
 
-  afterProgramCable = (result?: CommandExecutionResults) => {
+  afterProgramCable = (success: boolean, errorMessage: string) => {
     this.cableProgramProgress = false;
-    let success = 0;
-    let failed = 0;
 
-    if (result && result.exitCode == 0) {
-      success += 1;
-    } else {
-      failed += 1;
-    }
-    if (result) {
-      console.log(result.stderr);
-      console.log(result.stdout);
+    if (success == false) {
+      console.log("Program Failed")
+      console.log(errorMessage);
     }
 
     const dialogRef = this.dialog.open(DialogFirmwareComplete, {
       data: {
         title: 'Cable Program',
-        success: success,
-        failed: failed
+        success: success ? 1 : 0,
+        failed: success ? 0 : 1,
       }
     });
   };
 
-    afterSerialNumberUpdate = (result?: CommandExecutionResults) => {
+  afterSerialNumberUpdate = (result?: CommandExecutionResults) => {
     this.flashSerialProgress = false;
     let success = 0;
     let failed = 0;
@@ -376,26 +355,10 @@ export class DolosProvisionComponent {
     location.reload();
   }
 
-}
-
-@Component({
-  selector: 'dialog-help-picture',
-  templateUrl: './dialog-help-picture.html',
-  styleUrl: './dolos-provision.component.scss',
-  standalone: true,
-  imports: [MatDialogContent, MatDialogActions, MatButtonModule]
-})
-export class DialogOverviewExampleDialog {
-  constructor(
-    public dialogRef: MatDialogRef<DialogOverviewExampleDialog>,
-    @Inject(MAT_DIALOG_DATA) public data: any
-  ) {
-    console.log(data);
+  isTestVoltageANumber() {
+    return !isNaN(Number(this.testVoltage));
   }
 
-  onClose(): void {
-    this.dialogRef.close();
-  }
 }
 
 @Component({
@@ -410,13 +373,43 @@ export class DialogOverviewExampleDialog {
     MatDialogActions
   ]
 })
+
 export class DialogFirmwareComplete {
   constructor(
     public dialogRef: MatDialogRef<DialogFirmwareComplete>,
     @Inject(MAT_DIALOG_DATA) public data: any
-  ) {}
+  ) { }
 
   onClose(): void {
     this.dialogRef.close();
   }
+}
+
+@Component({
+  selector: 'dialog-oops',
+  templateUrl: 'dialog-oops.html',
+  styleUrl: './dolos-provision.component.scss',
+  standalone: true,
+  imports: [
+    MatButtonModule,
+    MatDialogTitle,
+    MatDialogContent,
+    MatDialogActions
+  ]
+})
+
+export class DialogOops {
+  constructor(
+    public dialogRef: MatDialogRef<DialogOops>,
+    @Inject(MAT_DIALOG_DATA) public data: any
+  ) { }
+
+  onClose(): void {
+    this.dialogRef.close();
+  }
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise(
+    (resolve) => setTimeout(resolve, ms));
 }
