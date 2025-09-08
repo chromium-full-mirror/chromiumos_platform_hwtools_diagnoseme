@@ -17,6 +17,7 @@ export class DolosService {
 
   async updateFirmware(
     firmwareVersion: string,
+    bslMode: boolean,
     callbackfn: (results: CommandExecutionResults[] | undefined) => void
   ) {
     if (isDevMode()) {
@@ -29,6 +30,7 @@ export class DolosService {
     } else {
       let request: FirmwareUpdateRequest = new FirmwareUpdateRequest();
       request.firmwareVersion = firmwareVersion;
+      request.bslMode = bslMode;
 
       this.client.updateFirmware(request).subscribe(res => {
         let results: CommandExecutionResults[] | undefined = res.result;
@@ -52,6 +54,9 @@ export class DolosService {
       );
     } else {
       this.client.checkDolosFromHost(new Empty()).subscribe(res => {
+        console.log(res.status);
+        console.log(res.dolosSerialNumber);
+        console.log(res.error);
         callbackfn(res.status, res.dolosSerialNumber, res.error);
       });
     }
@@ -67,18 +72,17 @@ export class DolosService {
     }
   }
 
-  async programCable(model: string,
-    callbackfn: (results: CommandExecutionResults | undefined) => void) {
+  async programCable(hwid: string,
+    callbackfn: (success: boolean, error_message: string) => void) {
     if (isDevMode()) {
-      let result: CommandExecutionResults = new CommandExecutionResults();
-      result.exitCode = 0;
       await this.sleep(10000);
-      callbackfn(result);
+      callbackfn(true, "");
     } else {
       var request = new ProgramCableRequest()
-      request.model = model;
+      request.hwid = hwid;
       this.client.programCable(request).subscribe(res => {
-        callbackfn(res.result);
+        console.log(res);
+        callbackfn(res.success, res.errorMessage);
       });
     }
   }
