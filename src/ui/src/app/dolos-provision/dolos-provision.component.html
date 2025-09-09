@@ -165,7 +165,7 @@
   <app-dolos-rework-card-row>
     <app-dolos-rework-card-column column="1">Detect hardware:</app-dolos-rework-card-column>
     <app-dolos-rework-card-column column="2">
-      <button (click)="onProbeHardware()" [disabled]="hwidProgress" mat-raised-button color="primary">
+      <button (click)="onProbeHardware()" [disabled]="hwidProgress || selectedModel == null" mat-raised-button color="primary">
         Start Identification
       </button>
     </app-dolos-rework-card-column>
@@ -189,7 +189,7 @@
       }}:
     </app-dolos-rework-card-column>
     <app-dolos-rework-card-column column="2">
-      <button (click)="onCableProgram()" [disabled]="hwidProgress" mat-raised-button color="primary">
+      <button (click)="onCableProgram()" [disabled]="hwidProgress || hwid == ''" mat-raised-button color="primary">
         Program Cable
       </button>
     </app-dolos-rework-card-column>
@@ -204,7 +204,7 @@
       To verify that everything worked as expected:
     </app-dolos-rework-card-column>
     <app-dolos-rework-card-column column="2">
-      <button (click)="onStartTests()" [disabled]="hwidProgress" mat-raised-button color="primary">
+      <button (click)="onStartTests()" [disabled]="hwidProgress || hwid == ''" mat-raised-button color="primary">
         Start Tests
       </button>
     </app-dolos-rework-card-column>

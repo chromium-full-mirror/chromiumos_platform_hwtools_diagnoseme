@@ -157,7 +157,6 @@ export class DolosProvisionComponent {
     this.servodService.startServod(this.board, this.model, this.servodStarted);
   }
 
-
   onChangeModel(newValue: Model) {
     this.selectedModel = newValue;
     this.gpnPass = TestResult.NoResult;
