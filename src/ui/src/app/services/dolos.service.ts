@@ -7,7 +7,7 @@ import { CommandExecutionResults, TestStatus, BoardModel } from '../../proto/dia
 import { DolosRpcServiceClient } from '../../proto/diagnoseme-dolos.pbsc';
 
 import { Empty } from '@ngx-grpc/well-known-types';
-import { FirmwareUpdateRequest, ProgramCableRequest, ProgramSerialRequest } from '../../proto/diagnoseme-dolos.pb';
+import { FirmwareUpdateRequest, ProgramCableRequest } from '../../proto/diagnoseme-dolos.pb';
 
 @Injectable({
   providedIn: 'root'
@@ -113,18 +113,18 @@ export class DolosService {
     }
   }
 
-  async updateSerialNumber(model: string, serialNumber: string, callbackfn: (results: CommandExecutionResults | undefined) => void) {
+  async updateSerialNumber(hwid: string, serialNumber: string, callbackfn: (success: boolean, error_message: string) => void) {
     if (isDevMode()) {
       let result: CommandExecutionResults = new CommandExecutionResults();
       result.exitCode = 0;
       await this.sleep(10000);
-      callbackfn(result);
+      callbackfn(true, "");
     } else {
-      var request = new ProgramSerialRequest()
-      request.model = model;
+      var request = new ProgramCableRequest()
+      request.hwid = hwid;
       request.newSerialNumber = serialNumber;
-      this.client.programSerialNumber(request).subscribe(res => {
-        callbackfn(res.result);
+      this.client.programCable(request).subscribe(res => {
+        callbackfn(res.success, res.errorMessage);
       });
     }
   }

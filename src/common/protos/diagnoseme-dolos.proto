@@ -11,7 +11,6 @@ service DolosRpcService {
   rpc program_cable(ProgramCableRequest) returns (ProgramCableResponse) {}
   rpc get_firmware_versions(google.protobuf.Empty) returns (FirmwareVersionsResponse) {}
   rpc get_models(google.protobuf.Empty) returns (ModelsResponse) {}
-  rpc program_serial_number(ProgramSerialRequest) returns (ProgramSerialResponse) {}
   rpc get_board_model_mapping(google.protobuf.Empty) returns (BoardModelMappingResponse) {}
 }
 // NEXT_TAG = 4
@@ -60,6 +59,7 @@ message CheckDolosFromHostResponse {
 // NEXT_TAG = 2
 message ProgramCableRequest {
   string hwid = 1;
+  string new_serial_number = 2;
 }
 // NEXT_TAG = 2
 message ProgramCableResponse {
@@ -74,15 +74,6 @@ message FirmwareVersionsResponse {
 // NEXT_TAG = 1
 message ModelsResponse {
   repeated string models = 1;
-}
-// NEXT_TAG = 3
-message ProgramSerialRequest {
-  string new_serial_number = 1;
-  string model = 2;
-}
-// NEXT_TAG = 2
-message ProgramSerialResponse {
-  CommandExecutionResults result = 1;
 }
 // NEXT_TAG = 3
 message BoardModel {

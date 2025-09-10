@@ -317,26 +317,19 @@ export class DolosProvisionComponent {
     });
   };
 
-  afterSerialNumberUpdate = (result?: CommandExecutionResults) => {
-    this.flashSerialProgress = false;
-    let success = 0;
-    let failed = 0;
+  afterSerialNumberUpdate = (success: boolean, errorMessage: string) => {
+    this.cableProgramProgress = false;
 
-    if (result && result.exitCode == 0) {
-      success += 1;
-    } else {
-      failed += 1;
-    }
-    if (result) {
-      console.log(result.stderr);
-      console.log(result.stdout);
+    if (success == false) {
+      console.log("Program Failed")
+      console.log(errorMessage);
     }
 
     const dialogRef = this.dialog.open(DialogFirmwareComplete, {
       data: {
         title: 'Serial Update',
-        success: success,
-        failed: failed
+        success: success ? 1 : 0,
+        failed: success ? 0 : 1,
       }
     });
   };
@@ -344,7 +337,7 @@ export class DolosProvisionComponent {
 
   onUpdateSerialNumber() {
     console.log('Serial Number Program');
-    this.flashSerialProgress = true;
+    this.cableProgramProgress = true;
     var model = String(this.selectedModel?.name)
     var serialNumber = String(this.dolosSerialInput?.get(0)?.nativeElement.value)
     this.dolosService.updateSerialNumber(model.toString(), serialNumber, this.afterSerialNumberUpdate);
