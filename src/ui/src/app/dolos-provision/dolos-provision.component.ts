@@ -123,6 +123,7 @@ export class DolosProvisionComponent {
 
   firmwareVersions: string[] = [];
   selectedFirmwareVersion: string = "";
+  defaultFirmwareVersion: string = "";
 
   internalDolosSerialNumber: string = '';
   gpnPass: TestResult = TestResult.NoResult;
@@ -157,6 +158,7 @@ export class DolosProvisionComponent {
 
   updateFirmwareVersions = (firmwareVersions: string[], defaultFirmwareVersion: string) => {
     this.firmwareVersions = firmwareVersions;
+    this.defaultFirmwareVersion = defaultFirmwareVersion;
     this.selectedFirmwareVersion = defaultFirmwareVersion;
   }
 
