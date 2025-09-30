@@ -6,6 +6,7 @@
   <span>Dolos Rework</span>
 </mat-toolbar>
 
+<!--  ************* CARD 1  *************** -->
 <app-dolos-rework-card [progress]="firmwareProgress" title="1. Dolos Firmware Update">
 
   <app-dolos-rework-card-row>
@@ -60,6 +61,7 @@
   </app-dolos-rework-card-row>
 </app-dolos-rework-card>
 
+<!--  ************* CARD 2  *************** -->
 
 <app-dolos-rework-card title="2. Battery Cable Selection:">
   <app-dolos-rework-card-row>
@@ -109,18 +111,11 @@
     </app-dolos-rework-card-column>
   </app-dolos-rework-card-row>
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      Open the DUT, remove the battery if installed, install the battery cable to the DUT.
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <app-help-dialog-button image="dolos-battery-rework.jpg"></app-help-dialog-button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
 </app-dolos-rework-card>
 
+<!--  ************* CARD 3  *************** -->
 
-<app-dolos-rework-card [progress]="hwidProgress" title="3. DUT Hardware Identifcation:">
+<app-dolos-rework-card [progress]="hwidProgress" title="3. DUT Hardware Identification:">
   <app-dolos-rework-card-row>
     <app-dolos-rework-card-column column="1">
       Connect your servo white USB cable to the DUT CCD port.
@@ -170,6 +165,8 @@
 
 </app-dolos-rework-card>
 
+<!--  ************* CARD 4  *************** -->
+
 <app-dolos-rework-card [progress]="cableProgramProgress" title="4. Cable Programming:">
 
   <app-dolos-rework-card-row>
@@ -185,7 +182,18 @@
 
 </app-dolos-rework-card>
 
+<!--  ************* CARD 5  *************** -->
+
 <app-dolos-rework-card [progress]="hostTestProgress" title="5. Testing:">
+
+  <app-dolos-rework-card-row>
+    <app-dolos-rework-card-column column="1">
+      Open the DUT, remove the battery if installed, install the battery cable to the DUT.
+    </app-dolos-rework-card-column>
+    <app-dolos-rework-card-column column="2">
+      <app-help-dialog-button image="dolos-battery-rework.jpg"></app-help-dialog-button>
+    </app-dolos-rework-card-column>
+  </app-dolos-rework-card-row>
 
   <app-dolos-rework-card-row>
     <app-dolos-rework-card-column column="1">Connect the Dolos pink box power port to a 65W or better power adapter.
@@ -281,6 +289,8 @@
   </app-dolos-rework-card-row>
 
 </app-dolos-rework-card>
+
+<!--  ************* CARD 6  *************** -->
 
 <app-dolos-rework-card title="6. Start Next Device">
   <app-dolos-rework-card-row>
