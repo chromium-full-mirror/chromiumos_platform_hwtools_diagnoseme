@@ -32,6 +32,7 @@ import { DolosReworkCardRow } from '../dolos-rework-card-row/dolos-rework-card-r
 import { DolosReworkCardColumn } from '../dolos-rework-card-column/dolos-rework-card-column';
 import { HelpDialogButton } from '../help-dialog-button/help-dialog-button';
 
+ import { NgxMatSelectSearchModule } from 'ngx-mat-select-search';
 
 interface Model {
   name: string;
@@ -68,6 +69,7 @@ export enum TestResult {
     DolosReworkCardRow,
     DolosReworkCardColumn,
     HelpDialogButton,
+    NgxMatSelectSearchModule,
   ]
 })
 
@@ -115,6 +117,7 @@ export class DolosProvisionComponent {
   ];
 
   models: Model[] = [];
+  filteredModels: Model[] = [];
   boardModels: Map<string, string> = new Map();
   hwid: string = '';
 
@@ -127,6 +130,9 @@ export class DolosProvisionComponent {
   constructor(public dialog: MatDialog, private dolosService: DolosService, private servodService: ServodService) {
     this.dolosService.getModels(this.updateModels)
     this.models.sort((a, b) =>
+      a.name > b.name ? 1 : b.name > a.name ? -1 : 0
+    );
+    this.filteredModels.sort((a, b) =>
       a.name > b.name ? 1 : b.name > a.name ? -1 : 0
     );
     this.dolosService.getFirmwareVersions(this.updateFirmwareVersions)
@@ -142,9 +148,11 @@ export class DolosProvisionComponent {
 
   updateModels = (models: string[]) => {
     this.models = []
+    this.filteredModels = []
     models.forEach((model: string) => {
       this.models.push({ name: model, config: this.configs[2] })
-    })
+      this.filteredModels.push({ name: model, config: this.configs[2] })
+    });
   }
 
   updateFirmwareVersions = (firmwareVersions: string[], defaultFirmwareVersion: string) => {
@@ -349,6 +357,13 @@ export class DolosProvisionComponent {
 
   isTestVoltageANumber() {
     return !isNaN(Number(this.testVoltage));
+  }
+
+  filterModels(filterValue: string) {
+    filterValue = filterValue.trim().toLowerCase();
+    this.filteredModels = this.models.filter(model =>
+      model.name.toLowerCase().startsWith(filterValue)
+    );
   }
 
 }

@@ -78,7 +78,11 @@
     <app-dolos-rework-card-column column="2">
       <mat-form-field subscriptSizing="dynamic">
         <mat-select (selectionChange)="onChangeModel($event.value)">
-          @for (model of models; track model) {
+          <mat-option>
+          <ngx-mat-select-search ngModel (ngModelChange)="filterModels($event)" placeholderLabel="Search:"
+            noEntriesFoundLabel="No matching model found."></ngx-mat-select-search>
+          </mat-option>
+          @for (model of filteredModels; track model) {
           <mat-option [value]="model">{{
             model.name | titlecase
             }}</mat-option>
@@ -157,7 +161,8 @@
   <app-dolos-rework-card-row>
     <app-dolos-rework-card-column column="1">Detect hardware:</app-dolos-rework-card-column>
     <app-dolos-rework-card-column column="2">
-      <button (click)="onProbeHardware()" [disabled]="hwidProgress || selectedModel == null" mat-raised-button color="primary">
+      <button (click)="onProbeHardware()" [disabled]="hwidProgress || selectedModel == null" mat-raised-button
+        color="primary">
         Start Identification
       </button>
     </app-dolos-rework-card-column>
