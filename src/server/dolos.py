@@ -82,6 +82,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
         """
         response = diagnoseme_dolos_pb2.ModelsResponse()
         storage_client = storage.Client.create_anonymous_client()
+        models = []
         for blob in storage_client.list_blobs(
             FIRMWARE_CLOUD_BUCKET, prefix=EEPROM_FIRMWARE_SUBDIR
         ):
@@ -89,7 +90,8 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             if len(path.parts) != 3:
                 continue
             model = path.parts[1]
-            response.models.append(model)
+            models.append(model)
+        response.models.extend(list(set(models)))
         return response
 
     def get_board_model_mapping(self, unused_request, unused_context):
