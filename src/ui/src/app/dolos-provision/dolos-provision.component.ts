@@ -240,7 +240,8 @@ export class DolosProvisionComponent {
   }
 
   onStartTests() {
-    console.log("OnstartTests");
+    this.servodService.startServod(this.board, this.model, this.servodStarted);
+
     this.hostTestPass = TestResult.NoResult;
     this.internalDolosSerialNumber = '';
     this.dolosSerialScan = '';
