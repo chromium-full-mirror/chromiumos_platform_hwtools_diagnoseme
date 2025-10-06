@@ -5,7 +5,7 @@
 import { Component, Input } from '@angular/core';
 
 @Component({
-  selector: 'app-dolos-rework-card-column',
+  selector: 'dolos-rework-card-column',
   standalone: true,
   templateUrl: './dolos-rework-card-column.html',
   styleUrl: './dolos-rework-card-column.scss'

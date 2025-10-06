@@ -7,7 +7,9 @@
 }
 
 .f-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 800px 270px 50px;
+  grid-auto-rows: minmax(60px, auto);
+  grid-gap: 3px;
 }

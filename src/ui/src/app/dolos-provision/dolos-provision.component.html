@@ -7,297 +7,255 @@
 </mat-toolbar>
 
 <!--  ************* CARD 1  *************** -->
-<app-dolos-rework-card [progress]="firmwareProgress" title="1. Dolos Firmware Update">
+<dolos-rework-card [progress]="firmwareProgress" title="1. Dolos Firmware Update">
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      Connect the Dolos pink box host port to the host machine (the machine running this web
-      app).
-    </app-dolos-rework-card-column>
+  <dolos-rework-card-column column="1">
+    Connect the Dolos pink box host port to the host machine (the machine running this web
+    app).
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2"></dolos-rework-card-column>
+  <dolos-rework-card-column column="3">
+    <help-dialog-button image="dolos-host-connect.jpg"></help-dialog-button>
+  </dolos-rework-card-column>
 
-    <app-dolos-rework-card-column column="2">
-      <app-help-dialog-button image="dolos-host-connect.jpg"></app-help-dialog-button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      Select firmware version [recommended version - {{defaultFirmwareVersion}}] :
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <mat-form-field subscriptSizing="dynamic">
-        <mat-select [(value)]="selectedFirmwareVersion">
-          @for (version of firmwareVersions; track version) {
-          <mat-option [value]="version">{{version}}
-          </mat-option>
-          }
-        </mat-select>
-      </mat-form-field>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+  <dolos-rework-card-column column="1">
+    Select firmware version [recommended version - {{defaultFirmwareVersion}}] :
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2">
+    <mat-form-field subscriptSizing="dynamic">
+      <mat-select [(value)]="selectedFirmwareVersion">
+        @for (version of firmwareVersions; track version) {
+        <mat-option [value]="version">{{version}}
+        </mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="3"></dolos-rework-card-column>
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      If you are repairing a broken Dolos check this box for BSL mode.
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <mat-checkbox [(ngModel)]="bslMode">
-      </mat-checkbox>
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="3">
-      <app-help-dialog-button image="dolos-bsl-mode.jpg"></app-help-dialog-button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+  <dolos-rework-card-column column="1">
+    If you are repairing a broken Dolos check this box for BSL mode.
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2">
+    <mat-checkbox [(ngModel)]="bslMode">
+    </mat-checkbox>
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="3">
+    <help-dialog-button image="dolos-bsl-mode.jpg"></help-dialog-button>
+  </dolos-rework-card-column>
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      Update firmware by pressing:
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <button mat-raised-button (click)="onFirmwareUpdate()" [disabled]="firmwareProgress" color="primary">
-        Firmware Update
-      </button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
-</app-dolos-rework-card>
+  <dolos-rework-card-column column="1">
+    Update firmware by pressing:
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2">
+    <button mat-raised-button (click)="onFirmwareUpdate()" [disabled]="firmwareProgress" color="primary">
+      Firmware Update
+    </button>
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="3"></dolos-rework-card-column>
+
+</dolos-rework-card>
+
 
 <!--  ************* CARD 2  *************** -->
 
-<app-dolos-rework-card title="2. Battery Cable Selection:">
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      Select the Chromebook model you are reworking:
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <mat-form-field subscriptSizing="dynamic">
-        <mat-select (selectionChange)="onChangeModel($event.value)">
-          <mat-option>
+<dolos-rework-card title="2. Battery Cable Selection:">
+  <dolos-rework-card-column column="1">
+    Select the Chromebook model you are reworking:
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2">
+    <mat-form-field subscriptSizing="dynamic">
+      <mat-select (selectionChange)="onChangeModel($event.value)">
+        <mat-option>
           <ngx-mat-select-search ngModel (ngModelChange)="filterModels($event)" placeholderLabel="Search:"
             noEntriesFoundLabel="No matching model found."></ngx-mat-select-search>
-          </mat-option>
-          @for (model of filteredModels; track model) {
-          <mat-option [value]="model">{{
-            model.name | titlecase
-            }}</mat-option>
-          }
-        </mat-select>
-      </mat-form-field>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+        </mat-option>
+        @for (model of filteredModels; track model) {
+        <mat-option [value]="model">{{
+          model.name | titlecase
+          }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="3"></dolos-rework-card-column>
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      Use battery cable with GPN
-      <b class="bold">{{ selectedModel?.config?.gpn }}</b>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+  <!-- <dolos-rework-card-column column="1">
+    Use battery cable with GPN
+    <b class="bold">{{ selectedModel?.config?.gpn }}</b>
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2"></dolos-rework-card-column>
+  <dolos-rework-card-column column="3"></dolos-rework-card-column>
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      Scan the barcode on box the cable was selected from:
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <mat-form-field subscriptSizing="dynamic">
-        <input #gpn [(ngModel)]="gpnScan" (input)="gpnChange($event)" matInput placeholder="GPN" />
-      </mat-form-field>
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="3">
-      <button *ngIf="gpnPass == TestResultEnum.Pass" class="test-pass-button" mat-mini-fab color="primary">
-        <mat-icon class="icon-display">check</mat-icon>
-      </button>
-      <button *ngIf="gpnPass == TestResultEnum.Fail" class="test-fail-button" mat-mini-fab color="primary">
-        <mat-icon class="icon-display">close</mat-icon>
-      </button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
-
-</app-dolos-rework-card>
+  <dolos-rework-card-column column="1">
+    Scan the barcode on box the cable was selected from:
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2">
+    <mat-form-field subscriptSizing="dynamic">
+      <input #gpn [(ngModel)]="gpnScan" (input)="gpnChange($event)" matInput placeholder="GPN" />
+    </mat-form-field>
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="3">
+    <button *ngIf="gpnPass == TestResultEnum.Pass" class="test-pass-button" mat-mini-fab color="primary">
+      <mat-icon class="icon-display">check</mat-icon>
+    </button>
+    <button *ngIf="gpnPass == TestResultEnum.Fail" class="test-fail-button" mat-mini-fab color="primary">
+      <mat-icon class="icon-display">close</mat-icon>
+    </button>
+  </dolos-rework-card-column> -->
+</dolos-rework-card>
 
 <!--  ************* CARD 3  *************** -->
 
-<app-dolos-rework-card [progress]="hwidProgress" title="3. DUT Hardware Identification:">
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      Connect your servo white USB cable to the DUT CCD port.
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <app-help-dialog-button image="servo-ccd-connect.jpg"></app-help-dialog-button>
-    </app-dolos-rework-card-column>
+<dolos-rework-card [progress]="hwidProgress" title="3. DUT Hardware Identification:">
 
-  </app-dolos-rework-card-row>
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      Connect at least a 65W charger to the servo DUT Power port.
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <app-help-dialog-button image="servo-dut-power-connect.jpg"></app-help-dialog-button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+  <dolos-rework-card-column column="1">
+    Connect your servo white USB cable to the DUT CCD port.
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2"></dolos-rework-card-column>
+  <dolos-rework-card-column column="3">
+    <help-dialog-button image="servo-ccd-connect.jpg"></help-dialog-button>
+  </dolos-rework-card-column>
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      Connect the servo host port to the host machine (the machine running this web
-      app).
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <app-help-dialog-button image="servo-host-connect.jpg"></app-help-dialog-button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">Detect hardware:</app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <button (click)="onProbeHardware()" [disabled]="hwidProgress || selectedModel == null" mat-raised-button
-        color="primary">
-        Start Identification
-      </button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+  <dolos-rework-card-column column="1">
+    Connect at least a 65W charger to the servo DUT Power port.
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2"></dolos-rework-card-column>
+  <dolos-rework-card-column column="3">
+    <help-dialog-button image="servo-dut-power-connect.jpg"></help-dialog-button>
+  </dolos-rework-card-column>
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">Probed HWID Value:</app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2and3">
-      <mat-form-field subscriptSizing="dynamic">
-        <input #hwidDisplay [(ngModel)]="hwid" matInput placeholder="HWID being probed...." readonly />
-      </mat-form-field>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+  <dolos-rework-card-column column="1">
+    Connect the servo host port to the host machine (the machine running this web
+    app).
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2"></dolos-rework-card-column>
+  <dolos-rework-card-column column="3">
+    <help-dialog-button image="servo-host-connect.jpg"></help-dialog-button>
+  </dolos-rework-card-column>
 
-</app-dolos-rework-card>
+  <dolos-rework-card-column column="1">Detect hardware:</dolos-rework-card-column>
+  <dolos-rework-card-column column="2">
+    <button (click)="onProbeHardware()" [disabled]="hwidProgress || selectedModel == null" mat-raised-button
+      color="primary">
+      Start Identification
+    </button>
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="3"></dolos-rework-card-column>
+
+  <dolos-rework-card-column column="1">Probed HWID Value:</dolos-rework-card-column>
+  <dolos-rework-card-column column="2and3">
+    <mat-form-field subscriptSizing="dynamic">
+      <input #hwidDisplay [(ngModel)]="hwid" matInput placeholder="HWID being probed...." readonly />
+    </mat-form-field>
+  </dolos-rework-card-column>
+
+</dolos-rework-card>
 
 <!--  ************* CARD 4  *************** -->
 
-<app-dolos-rework-card [progress]="cableProgramProgress" title="4. Cable Programming:">
+<dolos-rework-card [progress]="cableProgramProgress" title="4. Cable Programming:">
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">Program the cable for model {{ selectedModel?.name
-      }}:
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <button (click)="onCableProgram()" [disabled]="hwidProgress || hwid == ''" mat-raised-button color="primary">
-        Program Cable
-      </button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+  <dolos-rework-card-column column="1">Program the cable for model {{ selectedModel?.name
+    }}:
+  </dolos-rework-card-column>
 
-</app-dolos-rework-card>
+  <dolos-rework-card-column column="2">
+    <button (click)="onCableProgram()" [disabled]="hwidProgress || hwid == ''" mat-raised-button color="primary">
+      Program Cable
+    </button>
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="3"></dolos-rework-card-column>
+
+</dolos-rework-card>
 
 <!--  ************* CARD 5  *************** -->
 
-<app-dolos-rework-card [progress]="hostTestProgress" title="5. Testing:">
+<dolos-rework-card [progress]="hostTestProgress" title="5. Testing:">
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      Open the DUT, remove the battery if installed, install the battery cable to the DUT.
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <app-help-dialog-button image="dolos-battery-rework.jpg"></app-help-dialog-button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+  <dolos-rework-card-column column="1">
+    Open the DUT, remove the battery if installed, install the battery cable to the DUT.
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="3"></dolos-rework-card-column>
+  <dolos-rework-card-column column="3">
+    <help-dialog-button image="dolos-battery-rework.jpg"></help-dialog-button>
+  </dolos-rework-card-column>
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">Connect the Dolos pink box power port to a 65W or better power adapter.
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <app-help-dialog-button image="dolos-power-connect.jpg"></app-help-dialog-button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+  <dolos-rework-card-column column="1">Connect the Dolos pink box power port to a 65W or better power adapter.
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2"></dolos-rework-card-column>
+  <dolos-rework-card-column column="3">
+    <help-dialog-button image="dolos-power-connect.jpg"></help-dialog-button>
+  </dolos-rework-card-column>
 
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      To verify that everything worked as expected:
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <button (click)="onStartTests()" [disabled]="hwidProgress || hwid == ''" mat-raised-button color="primary">
-        Start Tests
-      </button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
-  <app-dolos-rework-card-row *ngIf="
-            this.hostTestPass != TestResultEnum.NoResult ||
-            this.hostTestProgress
-          ">
-    <app-dolos-rework-card-column column="1">
-      Dolos status reports OK:
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <button *ngIf="hostTestPass == TestResultEnum.Pass" class="test-pass-button" mat-mini-fab color="primary">
-        <mat-icon class="icon-display">check</mat-icon>
-      </button>
-      <div *ngIf="hostTestPass == TestResultEnum.Fail">
-        <button class="test-fail-button" mat-mini-fab color="primary">
-          <mat-icon class="icon-display">close</mat-icon>
-        </button>
-        {{ hostErrorMsg }}
-      </div>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+  <dolos-rework-card-column column="1">
+    To verify that everything worked as expected:
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2">
+    <button (click)="onStartTests()" [disabled]="hwidProgress || hwid == ''" mat-raised-button color="primary">
+      Start Tests
+    </button>
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="3"></dolos-rework-card-column>
 
-  <app-dolos-rework-card-row *ngIf="testVoltage != ''">
-    <app-dolos-rework-card-column column="1">EC Battery Voltage:</app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">{{ testVoltage }}</app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="3">
-      <button *ngIf="isTestVoltageANumber" class="test-pass-button" mat-mini-fab color="primary">
-        <mat-icon class="icon-display">check</mat-icon>
-      </button>
-      <div *ngIf="!isTestVoltageANumber">
-        <button class="test-fail-button" mat-mini-fab color="primary">
-          <mat-icon class="icon-display">close</mat-icon>
-        </button>
-      </div>
+  <dolos-rework-card-column column="1">
+    Dolos status reports:
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2">
+      {{ hostErrorMsg }}
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="3"><test-pass-fail-button #dolospassfail></test-pass-fail-button>
+  </dolos-rework-card-column>
 
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+  <dolos-rework-card-column column="1">EC Battery Voltage:</dolos-rework-card-column>
+  <dolos-rework-card-column *ngIf="testVoltageTestRun" column="2">{{ testVoltage }}</dolos-rework-card-column>
+  <dolos-rework-card-column *ngIf="!testVoltageTestRun" column="2"></dolos-rework-card-column>
+  <dolos-rework-card-column column="3"><test-pass-fail-button #ecpassfail></test-pass-fail-button>
+  </dolos-rework-card-column>
 
-  <app-dolos-rework-card-row *ngIf="testPowerstate != ''">
-    <app-dolos-rework-card-column column="1">AP Power State:</app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">{{ testPowerstate }}</app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+  <dolos-rework-card-column column="1">AP Power State:</dolos-rework-card-column>
+  <dolos-rework-card-column column="2">{{ testPowerstate }}</dolos-rework-card-column>
+  <dolos-rework-card-column column="3">
+    <test-pass-fail-button #appassfail></test-pass-fail-button>
+  </dolos-rework-card-column>
 
-  <app-dolos-rework-card-row *ngIf="internalDolosSerialNumber!=''">
-    <app-dolos-rework-card-column column="1">
-      Scan the Dolos serial number barcode on the battery cable:
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2an3">
-      <mat-form-field subscriptSizing="dynamic">
-        <input #dolosserial [(ngModel)]="dolosSerialScan" (input)="dolosSerialChange($event)" matInput />
-      </mat-form-field>
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="3">
-      <button *ngIf="dolosSerialPass == TestResultEnum.Pass" class="test-pass-button" mat-mini-fab color="primary">
-        <mat-icon class="icon-display">check</mat-icon>
-      </button>
-      <div *ngIf="dolosSerialPass == TestResultEnum.Fail">
-        <button class="test-fail-button" mat-mini-fab color="primary">
-          <mat-icon class="icon-display">close</mat-icon>
-        </button>
-      </div>
+  <dolos-rework-card-column column="1">
+    Scan the Dolos serial number barcode on the battery cable:
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2">
+    <mat-form-field subscriptSizing="dynamic">
+      <input #dolosserial [(ngModel)]="dolosSerialScan" (input)="dolosSerialChange($event)" matInput />
+    </mat-form-field>
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="3">
+    <test-pass-fail-button #serialpassfail></test-pass-fail-button>
+  </dolos-rework-card-column>
 
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
 
-  <app-dolos-rework-card-row *ngIf="dolosSerialPass == TestResultEnum.Fail">
-    <app-dolos-rework-card-column column="1">
-      The label does not match the internal number [{{ internalDolosSerialNumber }}] update cable ?
-    </app-dolos-rework-card-column>
-    <app-dolos-rework-card-column column="2">
-      <button (click)="onUpdateSerialNumber()" [disabled]="firmwareProgress" mat-raised-button color="primary"
-        *ngIf="selectedModel != null">
-        Flash Serial Number
-      </button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
+  <dolos-rework-card-column column="1" *ngIf="showCableReflash">
+    The label does not match the internal number [{{ internalDolosSerialNumber }}] update cable ?
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="2" *ngIf="showCableReflash">
+    <button (click)="onUpdateSerialNumber()" [disabled]="firmwareProgress" mat-raised-button color="primary"
+      *ngIf="selectedModel != null">
+      Flash Serial Number
+    </button>
+  </dolos-rework-card-column>
+   <dolos-rework-card-column column="3"> </dolos-rework-card-column>
 
-</app-dolos-rework-card>
+
+</dolos-rework-card>
 
 <!--  ************* CARD 6  *************** -->
 
-<app-dolos-rework-card title="6. Start Next Device">
-  <app-dolos-rework-card-row>
-    <app-dolos-rework-card-column column="1">
-      <button (click)="onReload()" mat-raised-button color="primary">
-        Reset Page
-      </button>
-    </app-dolos-rework-card-column>
-  </app-dolos-rework-card-row>
-</app-dolos-rework-card>
+<dolos-rework-card title="6. Start Next Device">
+
+  <dolos-rework-card-column column="1">
+    <button (click)="onReload()" mat-raised-button color="primary">
+      Reset Page
+    </button>
+  </dolos-rework-card-column>
+
+</dolos-rework-card>

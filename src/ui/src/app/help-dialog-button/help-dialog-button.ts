@@ -8,7 +8,7 @@ import { MAT_DIALOG_DATA, MatDialog, MatDialogActions, MatDialogContent, MatDial
 import { MatIconModule } from '@angular/material/icon';
 
 @Component({
-  selector: 'app-help-dialog-button',
+  selector: 'help-dialog-button',
   standalone: true,
   templateUrl: './help-dialog-button.html',
   styleUrl: './help-dialog-button.scss',

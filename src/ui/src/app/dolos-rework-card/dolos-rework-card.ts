@@ -9,7 +9,7 @@ import { MatProgressBarModule } from '@angular/material/progress-bar';
 
 
 @Component({
-  selector: 'app-dolos-rework-card',
+  selector: 'dolos-rework-card',
   standalone: true,
   templateUrl: './dolos-rework-card.html',
   styleUrl: './dolos-rework-card.scss',

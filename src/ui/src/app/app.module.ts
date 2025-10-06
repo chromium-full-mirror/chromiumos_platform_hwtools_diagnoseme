@@ -34,7 +34,7 @@ import { FormsModule } from '@angular/forms';
 
 import {MatAutocompleteModule} from '@angular/material/autocomplete';
 import { MatIconRegistry } from '@angular/material/icon';
-import { DomSanitizer } from '@angular/platform-browser'; // Required for security
+import { DomSanitizer } from '@angular/platform-browser';
 
 @NgModule({
   imports: [
@@ -63,8 +63,6 @@ import { DomSanitizer } from '@angular/platform-browser'; // Required for securi
     provideAnimationsAsync()
   ],
   bootstrap: [AppComponent],
-  declarations: [
-    ]
 })
 
 

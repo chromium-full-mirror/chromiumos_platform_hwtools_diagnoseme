@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import { Component, ElementRef, Inject, QueryList, ViewChildren } from '@angular/core';
+import { Component, ElementRef, Inject, QueryList, ViewChild, ViewChildren } from '@angular/core';
 import { TestStatus, BoardModel } from '../../proto/diagnoseme-dolos.pb';
 import { DolosService } from '../services/dolos.service';
 import { FormsModule } from '@angular/forms'
@@ -28,11 +28,11 @@ import { CommandExecutionResults } from '../../proto/diagnoseme-dolos.pb';
 import { ServodService } from '../services/servod-service';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { DolosReworkCard } from '../dolos-rework-card/dolos-rework-card';
-import { DolosReworkCardRow } from '../dolos-rework-card-row/dolos-rework-card-row';
 import { DolosReworkCardColumn } from '../dolos-rework-card-column/dolos-rework-card-column';
 import { HelpDialogButton } from '../help-dialog-button/help-dialog-button';
 
- import { NgxMatSelectSearchModule } from 'ngx-mat-select-search';
+import { NgxMatSelectSearchModule } from 'ngx-mat-select-search';
+import { TestPassFailButton } from '../test-pass-fail-button/test-pass-fail-button';
 
 interface Model {
   name: string;
@@ -51,7 +51,7 @@ export enum TestResult {
 }
 
 @Component({
-  selector: 'app-dolos-provision',
+  selector: 'dolos-provision',
   templateUrl: './dolos-provision.component.html',
   styleUrl: './dolos-provision.component.scss',
   imports: [
@@ -66,10 +66,10 @@ export enum TestResult {
     MatInputModule,
     MatCheckboxModule,
     DolosReworkCard,
-    DolosReworkCardRow,
     DolosReworkCardColumn,
     HelpDialogButton,
     NgxMatSelectSearchModule,
+    TestPassFailButton
   ]
 })
 
@@ -77,6 +77,11 @@ export class DolosProvisionComponent {
 
   @ViewChildren("gpn") gpnScanInput?: QueryList<ElementRef>;
   @ViewChildren("dolosserial") dolosSerialInput?: QueryList<ElementRef>;
+
+  @ViewChild("ecpassfail") ecPassFail!: TestPassFailButton;
+  @ViewChild("dolospassfail") dolosPassFail!: TestPassFailButton;
+  @ViewChild("appassfail") apPassFail!: TestPassFailButton;
+  @ViewChild("serialpassfail") serialPassFail!: TestPassFailButton;
 
   public TestResultEnum = TestResult;
 
@@ -93,11 +98,9 @@ export class DolosProvisionComponent {
   model: string = "";
   board: string = "";
 
-  hostTestPass: TestResult = TestResult.NoResult;
-  dolosSerialPass: TestResult = TestResult.NoResult;
-
-  testVoltage: string = "";
+  testVoltage: number = 0;
   testPowerstate: string = "";
+  testVoltageTestRun: boolean = false;
 
   dolosSerialScan: string = '';
   gpnScan: string = '';
@@ -128,14 +131,10 @@ export class DolosProvisionComponent {
   internalDolosSerialNumber: string = '';
   gpnPass: TestResult = TestResult.NoResult;
 
+  showCableReflash: boolean = false;
+
   constructor(public dialog: MatDialog, private dolosService: DolosService, private servodService: ServodService) {
     this.dolosService.getModels(this.updateModels)
-    this.models.sort((a, b) =>
-      a.name > b.name ? 1 : b.name > a.name ? -1 : 0
-    );
-    this.filteredModels.sort((a, b) =>
-      a.name > b.name ? 1 : b.name > a.name ? -1 : 0
-    );
     this.dolosService.getFirmwareVersions(this.updateFirmwareVersions)
     this.dolosService.getBoardModelMapping(this.updateBoardModelMapping)
   }
@@ -152,8 +151,11 @@ export class DolosProvisionComponent {
     this.filteredModels = []
     models.forEach((model: string) => {
       this.models.push({ name: model, config: this.configs[2] })
-      this.filteredModels.push({ name: model, config: this.configs[2] })
     });
+    this.models.sort((a, b) =>
+      a.name > b.name ? 1 : b.name > a.name ? -1 : 0
+    );
+    this.filteredModels = this.models;
   }
 
   updateFirmwareVersions = (firmwareVersions: string[], defaultFirmwareVersion: string) => {
@@ -164,7 +166,7 @@ export class DolosProvisionComponent {
 
   onProbeHardware() {
     this.hwidProgress = true;
-    this.servodService.startServod(this.board, this.model, this.servodStarted);
+    this.servodService.startServod(this.board, this.model, this.getHWIDAfterServoStart);
   }
 
   onChangeModel(newValue: Model) {
@@ -184,10 +186,19 @@ export class DolosProvisionComponent {
     } else {
       this.board = board;
     }
-
   }
 
-  servodStarted = (started: boolean, console_output: string) => {
+  servoStart = (started: boolean, console_output: string) => {
+    console.log(started);
+    if (started != true) {
+      console.log(console_output)
+      const dialogRef = this.dialog.open(DialogOops, {
+        data: console_output
+      });
+    }
+  }
+
+  getHWIDAfterServoStart = (started: boolean, console_output: string) => {
     console.log(started);
     if (started == true) {
       this.servodService.getHWID(this.updateHWID);
@@ -240,13 +251,20 @@ export class DolosProvisionComponent {
   }
 
   onStartTests() {
-    this.servodService.startServod(this.board, this.model, this.servodStarted);
+    this.servodService.startServod(this.board, this.model, this.servoStart);
 
-    this.hostTestPass = TestResult.NoResult;
     this.internalDolosSerialNumber = '';
     this.dolosSerialScan = '';
-    this.dolosSerialPass = TestResult.NoResult;
     this.hostTestProgress = true;
+
+    this.ecPassFail.showWorking();
+    this.apPassFail.showWorking();
+    this.dolosPassFail.showWorking();
+
+    setTimeout(() => {
+        this.dolosSerialInput?.get(0)?.nativeElement.focus()
+    }, 200);
+
     this.dolosService.checkDolosFromHost(this.afterDolosCheck);
     this.servodService.runDutControl('servo_uart_cmd:"cc off"', this.afterCCOff);
   }
@@ -254,35 +272,42 @@ export class DolosProvisionComponent {
   afterCCOff = async (result: string) => {
     await sleep(2000);  // 2 second wait for cc off to take effect
     this.servodService.runDutControl('ppvar_vbat_mv', this.afterVoltage);
-    this.servodService.runDutControl('ec_system_powerstate', this.afterPowerstate);
-    this.servodService.runDutControl('servo_uart_cmd:"cc on"', this.afterCCOn);
   }
 
-  afterVoltage = (result: string) => { this.testVoltage = result }
-  afterPowerstate = (result: string) => { this.testPowerstate = result }
+  afterVoltage = (result: string) => {
+    this.testVoltage = +result;
+    this.testVoltageTestRun = true;
+    if (this.testVoltage > 0) {
+      this.ecPassFail.showPassed();
+    } else {
+      this.ecPassFail.showFailed();
+    }
+    this.servodService.runDutControl('ec_system_powerstate', this.afterPowerstate);
+  }
+  afterPowerstate = (result: string) => {
+    this.testPowerstate = result
+    if (this.testPowerstate == "S0") {
+      this.apPassFail.showPassed();
+    } else {
+      this.apPassFail.showFailed();
+    }
+    this.servodService.runDutControl('servo_uart_cmd:"cc on"', this.afterCCOn);
+  }
   afterCCOn = (result: string) => { }
 
   afterDolosCheck = (result: TestStatus, dolosSerialNumber: string, error: string) => {
     this.hostTestProgress = false;
 
     if (result == TestStatus.PASS) {
-      this.hostTestPass = TestResult.Pass
-      setTimeout(() => {
-        this.dolosSerialInput?.get(0)?.nativeElement.focus()
-      }, 200);
+      this.dolosPassFail.showPassed();
     } else {
-      this.hostTestPass = TestResult.Fail
+      this.dolosPassFail.showFailed();
     }
     this.internalDolosSerialNumber = dolosSerialNumber;
 
-    console.log("host" + this.hostTestPass);
+    console.log("doloscheck" + result);
     this.hostErrorMsg = error;
   };
-
-  isTestPass(result: TestResult) {
-    return result == TestResult.Pass;
-    console.log("Is test pass: " + result)
-  }
 
   showTestResult(result: TestResult, inProgress: boolean) {
     return !inProgress && result != TestResult.NoResult;
@@ -291,9 +316,11 @@ export class DolosProvisionComponent {
 
   dolosSerialChange(event: any) {
     if (this.dolosSerialScan.trim() != '' && this.dolosSerialScan.trim() == this.internalDolosSerialNumber.trim()) {
-      this.dolosSerialPass = TestResult.Pass;
+      this.serialPassFail.showPassed();
+      this.showCableReflash = false;
     } else {
-      this.dolosSerialPass = TestResult.Fail;
+      this.serialPassFail.showFailed();
+      this.showCableReflash = true;
     }
   }
 
