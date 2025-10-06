@@ -200,7 +200,12 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             dolos = doloses[0]
             dolos.open()
             try:
-                dolos.program_cable(request.hwid, new_serial=request.new_serial_number)
+                if request.new_serial_number:
+                    dolos.program_cable(
+                        request.hwid, new_serial=request.new_serial_number
+                    )
+                else:
+                    dolos.program_cable(request.hwid)
             except DolosConsoleError as e:
                 response.error_message = str(e)
                 logging.exception("Failed to program cable.")
