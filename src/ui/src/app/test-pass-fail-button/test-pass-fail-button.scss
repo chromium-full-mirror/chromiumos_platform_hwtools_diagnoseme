@@ -1,0 +1,28 @@
+// Copyright 2025 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+.icon-display {
+    transform: scale(.8);
+}
+
+.test-button {
+    display: flex;
+
+}
+
+.test-pass-button {
+    @extend .test-button;
+    background-color: green;
+}
+
+.test-fail-button {
+    @extend .test-button;
+    background-color: #f44336;
+}
+
+.test-working-button {
+    @extend .test-button;
+    background-color: yellow;
+    color: black;
+}
