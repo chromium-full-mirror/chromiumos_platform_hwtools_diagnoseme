@@ -5,7 +5,9 @@
 import csv
 from io import StringIO
 import logging
+import os
 import pathlib
+import tempfile
 import time
 
 from doloscmd import console_lib
@@ -176,6 +178,9 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             response.dolos_status = dolos.determine_status(dolos_status_map)
             if response.dolos_status == diagnoseme_dolos_pb2.DOLOS_STATUS.DOLOS_OK:
                 response.status = diagnoseme_dolos_pb2.TEST_STATUS.PASS
+            response.error = diagnoseme_dolos_pb2.DOLOS_STATUS.Name(
+                response.dolos_status
+            )
 
         return response
 
@@ -199,18 +204,34 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
         if len(doloses) > 0:
             dolos = doloses[0]
             dolos.open()
+            eeprom_data_filename = None
+            new_serial_number = None
+
+            if request.eeprom_data:
+                with tempfile.NamedTemporaryFile(delete=False) as datafile:
+                    datafile.write(request.eeprom_data.encode("utf-8"))
+                    datafile.close()
+                    eeprom_data_filename = datafile.name
+
+            if request.new_serial_number:
+                new_serial_number = request.new_serial_number
+
             try:
-                if request.new_serial_number:
-                    dolos.program_cable(
-                        request.hwid, new_serial=request.new_serial_number
-                    )
-                else:
-                    dolos.program_cable(request.hwid)
+                dolos.program_cable(
+                    request.hwid,
+                    file=eeprom_data_filename,
+                    new_serial=new_serial_number,
+                )
             except DolosConsoleError as e:
                 response.error_message = str(e)
                 logging.exception("Failed to program cable.")
+                return response
+            finally:
+                if eeprom_data_filename:
+                    os.remove(eeprom_data_filename)
 
             time.sleep(5)
+
             try:
                 dolos.repair()
                 response.success = True

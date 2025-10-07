@@ -133,6 +133,8 @@ export class DolosProvisionComponent {
 
   showCableReflash: boolean = false;
 
+  eepromData: string = "";
+
   constructor(public dialog: MatDialog, private dolosService: DolosService, private servodService: ServodService) {
     this.dolosService.getModels(this.updateModels)
     this.dolosService.getFirmwareVersions(this.updateFirmwareVersions)
@@ -262,7 +264,7 @@ export class DolosProvisionComponent {
     this.dolosPassFail.showWorking();
 
     setTimeout(() => {
-        this.dolosSerialInput?.get(0)?.nativeElement.focus()
+      this.dolosSerialInput?.get(0)?.nativeElement.focus()
     }, 200);
 
     this.dolosService.checkDolosFromHost(this.afterDolosCheck);
@@ -293,10 +295,9 @@ export class DolosProvisionComponent {
     }
     this.servodService.runDutControl('servo_uart_cmd:"cc on"', this.afterCCOn);
   }
-  afterCCOn = (result: string) => { }
+  afterCCOn = (result: string) => { this.hostTestProgress = false; }
 
   afterDolosCheck = (result: TestStatus, dolosSerialNumber: string, error: string) => {
-    this.hostTestProgress = false;
 
     if (result == TestStatus.PASS) {
       this.dolosPassFail.showPassed();
@@ -305,14 +306,8 @@ export class DolosProvisionComponent {
     }
     this.internalDolosSerialNumber = dolosSerialNumber;
 
-    console.log("doloscheck" + result);
     this.hostErrorMsg = error;
   };
-
-  showTestResult(result: TestResult, inProgress: boolean) {
-    return !inProgress && result != TestResult.NoResult;
-    console.log("Show result: " + inProgress + " " + result)
-  }
 
   dolosSerialChange(event: any) {
     if (this.dolosSerialScan.trim() != '' && this.dolosSerialScan.trim() == this.internalDolosSerialNumber.trim()) {
@@ -335,7 +330,7 @@ export class DolosProvisionComponent {
   onCableProgram() {
     console.log('Cable Program');
     this.cableProgramProgress = true;
-    this.dolosService.programCable(this.hwid, this.afterProgramCable);
+    this.dolosService.programCable(this.hwid, this.eepromData, this.afterProgramCable);
   }
 
   afterProgramCable = (success: boolean, errorMessage: string) => {
@@ -356,7 +351,7 @@ export class DolosProvisionComponent {
   };
 
   afterSerialNumberUpdate = (success: boolean, errorMessage: string) => {
-    this.cableProgramProgress = false;
+    this.hostTestProgress = false;
 
     if (success == false) {
       console.log("Program Failed")
@@ -375,10 +370,10 @@ export class DolosProvisionComponent {
 
   onUpdateSerialNumber() {
     console.log('Serial Number Program');
-    this.cableProgramProgress = true;
+    this.hostTestProgress = true;
     var model = String(this.selectedModel?.name)
     var serialNumber = String(this.dolosSerialInput?.get(0)?.nativeElement.value)
-    this.dolosService.updateSerialNumber(model.toString(), serialNumber, this.afterSerialNumberUpdate);
+    this.dolosService.updateSerialNumber(this.hwid, this.eepromData, serialNumber, this.afterSerialNumberUpdate);
   }
 
   onReload() {
@@ -394,6 +389,26 @@ export class DolosProvisionComponent {
     this.filteredModels = this.models.filter(model =>
       model.name.toLowerCase().startsWith(filterValue)
     );
+  }
+
+  onEepromDataFileSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      const selectedFile = input.files[0];
+      console.log('Selected file:', selectedFile.name);
+      const reader = new FileReader();
+      reader.onload = (e: ProgressEvent<FileReader>) => {
+        if (e.target && e.target.result) {
+          this.eepromData = e.target.result as string;
+        }
+        console.log(this.eepromData);
+      }
+      reader.onerror = (e: ProgressEvent<FileReader>) => {
+        console.error('Error reading file:', reader.error);
+        this.eepromData = 'Error reading file.';
+      }
+      reader.readAsText(selectedFile);
+    }
   }
 
 }

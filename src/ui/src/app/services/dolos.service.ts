@@ -62,17 +62,7 @@ export class DolosService {
     }
   }
 
-  checkDolosFromDut(callbackfn: (result: TestStatus, error: string) => void) {
-    if (isDevMode()) {
-      callbackfn(TestStatus.PASS, 'This is a DUT error');
-    } else {
-      this.client.checkDolosFromDut(new Empty()).subscribe(res => {
-        callbackfn(res.status, res.error);
-      });
-    }
-  }
-
-  async programCable(hwid: string,
+  async programCable(hwid: string, eepromData: string,
     callbackfn: (success: boolean, error_message: string) => void) {
     if (isDevMode()) {
       await this.sleep(10000);
@@ -80,6 +70,9 @@ export class DolosService {
     } else {
       var request = new ProgramCableRequest()
       request.hwid = hwid;
+      if (eepromData != '') {
+        request.eepromData = eepromData;
+      }
       this.client.programCable(request).subscribe(res => {
         console.log(res);
         callbackfn(res.success, res.errorMessage);
@@ -113,7 +106,7 @@ export class DolosService {
     }
   }
 
-  async updateSerialNumber(hwid: string, serialNumber: string, callbackfn: (success: boolean, error_message: string) => void) {
+  async updateSerialNumber(hwid: string, eepromData:string, serialNumber: string, callbackfn: (success: boolean, error_message: string) => void) {
     if (isDevMode()) {
       let result: CommandExecutionResults = new CommandExecutionResults();
       result.exitCode = 0;
@@ -122,6 +115,9 @@ export class DolosService {
     } else {
       var request = new ProgramCableRequest()
       request.hwid = hwid;
+      if (eepromData != ''){
+        request.eepromData = eepromData;
+      }
       request.newSerialNumber = serialNumber;
       this.client.programCable(request).subscribe(res => {
         callbackfn(res.success, res.errorMessage);

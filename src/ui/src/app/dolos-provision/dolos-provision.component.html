@@ -148,7 +148,7 @@
   <dolos-rework-card-column column="1">Probed HWID Value:</dolos-rework-card-column>
   <dolos-rework-card-column column="2and3">
     <mat-form-field subscriptSizing="dynamic">
-      <input #hwidDisplay [(ngModel)]="hwid" matInput placeholder="HWID being probed...." readonly />
+      <input #hwidDisplay [(ngModel)]="hwid" matInput placeholder="HWID being probed...."  />
     </mat-form-field>
   </dolos-rework-card-column>
 
@@ -158,12 +158,20 @@
 
 <dolos-rework-card [progress]="cableProgramProgress" title="4. Cable Programming:">
 
+  <dolos-rework-card-column column="1">(Expert Only) Choose file to program cable with:</dolos-rework-card-column>
+  <dolos-rework-card-column column="2">
+      <input type="file" #fileInput style="display: none;" (change)="onEepromDataFileSelected($event)">
+      <button mat-raised-button color="primary" (click)="fileInput.click()">
+        <mat-icon>cloud_upload</mat-icon> Upload File
+      </button>
+  </dolos-rework-card-column>
+  <dolos-rework-card-column column="3"></dolos-rework-card-column>
   <dolos-rework-card-column column="1">Program the cable for model {{ selectedModel?.name
     }}:
   </dolos-rework-card-column>
 
   <dolos-rework-card-column column="2">
-    <button (click)="onCableProgram()" [disabled]="hwidProgress || hwid == ''" mat-raised-button color="primary">
+    <button (click)="onCableProgram()" [disabled]="hwidProgress || hwid == '' && eepromData == ''" mat-raised-button color="primary">
       Program Cable
     </button>
   </dolos-rework-card-column>
@@ -204,7 +212,7 @@
     Dolos status reports:
   </dolos-rework-card-column>
   <dolos-rework-card-column column="2">
-      {{ hostErrorMsg }}
+    {{ hostErrorMsg }}
   </dolos-rework-card-column>
   <dolos-rework-card-column column="3"><test-pass-fail-button #dolospassfail></test-pass-fail-button>
   </dolos-rework-card-column>
@@ -243,7 +251,7 @@
       Flash Serial Number
     </button>
   </dolos-rework-card-column>
-   <dolos-rework-card-column column="3"> </dolos-rework-card-column>
+  <dolos-rework-card-column column="3"> </dolos-rework-card-column>
 
 
 </dolos-rework-card>

@@ -60,6 +60,7 @@ message CheckDolosFromHostResponse {
 message ProgramCableRequest {
   string hwid = 1;
   string new_serial_number = 2;
+  string eeprom_data = 3;
 }
 // NEXT_TAG = 2
 message ProgramCableResponse {
