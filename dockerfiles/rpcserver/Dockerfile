@@ -2,15 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 ####################################################################
-FROM alpine/git AS test_keys
-WORKDIR /
-RUN git clone --filter=blob:none --no-checkout --depth 1 --sparse https://chromium.googlesource.com/chromiumos/chromite
-WORKDIR /chromite
-RUN git sparse-checkout init --cone
-RUN git sparse-checkout add ssh_keys/testing_rsa
-RUN git checkout
-
-#####################################################################
 FROM python:3.11-bookworm AS dolostools
 
 RUN apt-get update --no-install-recommends \
@@ -59,11 +50,6 @@ RUN mkdir /var/log/rpcserver
 RUN mkdir /usr/local/tmp
 
 WORKDIR /usr/local/server
-
-RUN mkdir -p .ssh
-COPY dockerfiles/rpcserver/ssh_config .ssh/config
-COPY --from=test_keys /chromite/ssh_keys/testing_rsa .ssh/
-RUN chmod -R 600 .ssh/*
 
 WORKDIR /install_tmp
 COPY --from=dolostools /dolos/tools/doloscmd/dist .
