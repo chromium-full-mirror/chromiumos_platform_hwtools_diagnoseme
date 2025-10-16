@@ -19,7 +19,7 @@ ENV PATH="$PATH:/workspace/node_modules/.bin"
 RUN mkdir -p generated
 RUN mkdir -p server
 COPY src/common/protos/*.proto server/
-RUN npx protoc --plugin=protoc-gen-ng=$(which protoc-gen-ng) --ng_out=./generated server/diagnoseme-*.proto
+RUN npx protoc --plugin=protoc-gen-ng=$(which protoc-gen-ng) --ng_out=./generated server/*.proto
 
 ##############################################################################
 

@@ -22,12 +22,17 @@ from grpc_reflection.v1alpha import reflection
 from server import diagnoseme_dolos_pb2
 from server import diagnoseme_servod_pb2
 from server import dolos
+from server import servo_manufacturing
+from server import servo_manufacturing_pb2
 from server import servod
 from server.diagnoseme_dolos_pb2_grpc import (
     add_DolosRpcServiceServicer_to_server,
 )
 from server.diagnoseme_servod_pb2_grpc import (
     add_ServodRpcServiceServicer_to_server,
+)
+from server.servo_manufacturing_pb2_grpc import (
+    add_ServoV41ManufacturingServicer_to_server,
 )
 
 
@@ -90,6 +95,17 @@ async def serve():
                 reflection.SERVICE_NAME,
             )
             reflection.enable_server_reflection(service_name, server)
+
+        add_ServoV41ManufacturingServicer_to_server(
+            servo_manufacturing.ServoV41ManufacturingServicer(), server
+        )
+        service_name = (
+            servo_manufacturing_pb2.DESCRIPTOR.services_by_name[
+                "ServoV41Manufacturing"
+            ].full_name,
+            reflection.SERVICE_NAME,
+        )
+        reflection.enable_server_reflection(service_name, server)
 
         serving_port = BACKEND_GRPC_SERVICE_PORT
         server.add_insecure_port(f"[::]:{serving_port}")

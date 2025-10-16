@@ -1,0 +1,70 @@
+// Copyright 2025 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+syntax = "proto3";
+package diagnoseme;
+import "google/protobuf/empty.proto";
+
+service ServoV41Manufacturing {
+  // Example RPC call
+  rpc GetStatus(google.protobuf.Empty) returns (StatusResponse) {}
+
+  // New RPC call
+  rpc ProgramGenesysHub(ProgramGenesysHubRequest) returns (ProgramGenesysHubResponse) {}
+
+  // Program MCU RPC call
+  rpc ProgramMcu(ProgramMcuRequest) returns (ProgramMcuResponse) {}
+
+  // Program Ethernet RPC call
+  rpc ProgramEthernet(ProgramEthernetRequest) returns (ProgramEthernetResponse) {}
+
+  // Run Tests RPC call
+  rpc RunTests(RunTestsRequest) returns (RunTestsResponse) {}
+}
+
+message StatusResponse {
+  string status = 1;
+}
+
+message ProgramGenesysHubRequest {
+  // Add request fields here
+}
+
+message ProgramGenesysHubResponse {
+  // Add response fields here
+  bool success = 1;
+  string message = 2;
+}
+
+message ProgramMcuRequest {
+  // Add request fields here
+  string firmware_path = 1;
+}
+
+message ProgramMcuResponse {
+  // Add response fields here
+  bool success = 1;
+  string message = 2;
+}
+
+message ProgramEthernetRequest {
+  // Add request fields here
+  string mac_address = 1;
+}
+
+message ProgramEthernetResponse {
+  // Add response fields here
+  bool success = 1;
+  string message = 2;
+}
+
+message RunTestsRequest {
+  // Add request fields here
+  repeated string tests_to_run = 1;
+}
+
+message RunTestsResponse {
+  // Add response fields here
+  bool all_passed = 1;
+  string summary = 2;
+}
