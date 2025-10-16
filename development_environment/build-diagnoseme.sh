@@ -7,14 +7,10 @@ export DOCKER_BUILDKIT=1
 IMAGE="servod:dev"
 set -ex
 
-SOURCE="${BASH_SOURCE[0]}"
-while [ -L "${SOURCE}" ]; do # resolve $SOURCE until the file is no longer a symlink
-  DIR=$( cd -P "$( dirname "${SOURCE}" )" >/dev/null 2>&1 && pwd )
-  SOURCE=$(readlink "${SOURCE}")
-done
-DIR=$( cd -P "${DIR}/$( dirname "${SOURCE}" )" >/dev/null 2>&1 && pwd )
+# Get the absolute path to the project root
+PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-pushd "${DIR}/../"
+pushd "${PROJECT_ROOT}"
 
 rm -rf ./src/generated
 docker build -t envoy:latest -f dockerfiles/envoy/Dockerfile .

@@ -8,7 +8,6 @@ import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatIconModule } from '@angular/material/icon';
 import { MatCardModule } from '@angular/material/card';
 import { DolosProvisionComponent } from './dolos-provision/dolos-provision.component';
-import { DolosService } from './services/dolos.service';
 
 @Component({
   selector: 'app-root',
@@ -25,7 +24,6 @@ import { DolosService } from './services/dolos.service';
 export class AppComponent {
   title = 'HW Tools Diagnose Me&#8482';
   constructor(
-    private dolosService: DolosService,
   ) {}
 
 

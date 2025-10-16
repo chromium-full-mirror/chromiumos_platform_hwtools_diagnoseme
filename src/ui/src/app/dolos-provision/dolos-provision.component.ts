@@ -194,7 +194,7 @@ export class DolosProvisionComponent {
     console.log(started);
     if (started != true) {
       console.log(console_output)
-      const dialogRef = this.dialog.open(DialogOops, {
+      this.dialog.open(DialogOops, {
         data: console_output
       });
     }
@@ -207,7 +207,7 @@ export class DolosProvisionComponent {
     } else {
       this.hwidProgress = false
       console.log(console_output)
-      const dialogRef = this.dialog.open(DialogOops, {
+      this.dialog.open(DialogOops, {
         data: console_output
       });
     }
@@ -218,7 +218,7 @@ export class DolosProvisionComponent {
     if (hwid != "") {
       this.hwid = hwid
     } else {
-      const dialogRef = this.dialog.open(DialogOops, {
+      this.dialog.open(DialogOops, {
         data: output
       });
       this.hwid = this.model;
@@ -238,7 +238,7 @@ export class DolosProvisionComponent {
       }
     });
 
-    const dialogRef = this.dialog.open(DialogFirmwareComplete, {
+    this.dialog.open(DialogFirmwareComplete, {
       data: {
         title: 'Firmware Update',
         success: success,
@@ -271,7 +271,7 @@ export class DolosProvisionComponent {
     this.servodService.runDutControl('servo_uart_cmd:"cc off"', this.afterCCOff);
   }
 
-  afterCCOff = async (result: string) => {
+  afterCCOff = async () => {
     await sleep(2000);  // 2 second wait for cc off to take effect
     this.servodService.runDutControl('ppvar_vbat_mv', this.afterVoltage);
   }
@@ -295,7 +295,7 @@ export class DolosProvisionComponent {
     }
     this.servodService.runDutControl('servo_uart_cmd:"cc on"', this.afterCCOn);
   }
-  afterCCOn = (result: string) => { this.hostTestProgress = false; }
+  afterCCOn = () => { this.hostTestProgress = false; }
 
   afterDolosCheck = (result: TestStatus, dolosSerialNumber: string, error: string) => {
 
@@ -309,7 +309,7 @@ export class DolosProvisionComponent {
     this.hostErrorMsg = error;
   };
 
-  dolosSerialChange(event: any) {
+  dolosSerialChange() {
     if (this.dolosSerialScan.trim() != '' && this.dolosSerialScan.trim() == this.internalDolosSerialNumber.trim()) {
       this.serialPassFail.showPassed();
       this.showCableReflash = false;
@@ -319,7 +319,7 @@ export class DolosProvisionComponent {
     }
   }
 
-  gpnChange(event: any) {
+  gpnChange() {
     if (this.gpnScan.trim() == this.selectedModel?.config.gpn.trim()) {
       this.gpnPass = TestResult.Pass;
     } else {
@@ -341,7 +341,7 @@ export class DolosProvisionComponent {
       console.log(errorMessage);
     }
 
-    const dialogRef = this.dialog.open(DialogFirmwareComplete, {
+    this.dialog.open(DialogFirmwareComplete, {
       data: {
         title: 'Cable Program',
         success: success ? 1 : 0,
@@ -358,7 +358,7 @@ export class DolosProvisionComponent {
       console.log(errorMessage);
     }
 
-    const dialogRef = this.dialog.open(DialogFirmwareComplete, {
+    this.dialog.open(DialogFirmwareComplete, {
       data: {
         title: 'Serial Update',
         success: success ? 1 : 0,
@@ -371,7 +371,6 @@ export class DolosProvisionComponent {
   onUpdateSerialNumber() {
     console.log('Serial Number Program');
     this.hostTestProgress = true;
-    var model = String(this.selectedModel?.name)
     var serialNumber = String(this.dolosSerialInput?.get(0)?.nativeElement.value)
     this.dolosService.updateSerialNumber(this.hwid, this.eepromData, serialNumber, this.afterSerialNumberUpdate);
   }
@@ -403,7 +402,7 @@ export class DolosProvisionComponent {
         }
         console.log(this.eepromData);
       }
-      reader.onerror = (e: ProgressEvent<FileReader>) => {
+      reader.onerror = () => {
         console.error('Error reading file:', reader.error);
         this.eepromData = 'Error reading file.';
       }

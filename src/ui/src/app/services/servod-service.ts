@@ -5,7 +5,7 @@
 import { Injectable } from '@angular/core';
 
 import { ServodRpcServiceClient } from '../../proto/diagnoseme-servod.pbsc';
-import { GetHardwareIDRequest, RunDutControlRequest, StartServodRequest } from 'src/proto/diagnoseme-servod.pb';
+import { GetHardwareIDRequest, RunDutControlRequest, StartServodRequest, RunDutControlResponse } from '../../proto/diagnoseme-servod.pb';
 
 @Injectable({
   providedIn: 'root'
@@ -39,7 +39,7 @@ export class ServodService {
   runDutControl(command: string, callbackfn: ( result: string ) => void) {
      let request: RunDutControlRequest = new RunDutControlRequest();
      request.command = command;
-     this.client.runDutControl(request).subscribe(res => {
+     this.client.runDutControl(request).subscribe((res: RunDutControlResponse) => {
       callbackfn(res.result);
      })
 

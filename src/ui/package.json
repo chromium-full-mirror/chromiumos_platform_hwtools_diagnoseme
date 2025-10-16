@@ -7,7 +7,7 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "proto:generate": "npx protoc --plugin=protoc-gen-ng=$(which protoc-gen-ng) --ng_out=./src/protos -I ./src/protos ./src/protos/*.proto",
+    "proto:generate": "cd ../.. && npx protoc --plugin=protoc-gen-ng=$(which protoc-gen-ng) --ng_out=./src/ui/src/proto -I ./src/common/protos ./src/common/protos/*.proto",
     "lint": "gts lint",
     "clean": "gts clean",
     "compile": "tsc",

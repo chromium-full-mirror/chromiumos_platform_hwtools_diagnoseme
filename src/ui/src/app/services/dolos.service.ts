@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 import { Injectable, isDevMode } from '@angular/core';
-import { CommandExecutionResults, TestStatus, BoardModel } from '../../proto/diagnoseme-dolos.pb';
+import { CommandExecutionResults, TestStatus, BoardModel, BoardModelMappingResponse } from '../../proto/diagnoseme-dolos.pb';
 import { DolosRpcServiceClient } from '../../proto/diagnoseme-dolos.pbsc';
 
 import { Empty } from '@ngx-grpc/well-known-types';
@@ -91,7 +91,7 @@ export class DolosService {
   }
 
   async getBoardModelMapping(callbackfn: (mapping: BoardModel[] ) => void) {
-      this.client.getBoardModelMapping(new Empty()).subscribe(res => {
+      this.client.getBoardModelMapping(new Empty()).subscribe((res: BoardModelMappingResponse) => {
         if (res.boardModelMappings == undefined) {callbackfn([])} else {callbackfn(res.boardModelMappings)};
       });
   }
