@@ -4,8 +4,14 @@
 
 import { NgModule } from '@angular/core';
 import { RouterModule, Routes } from '@angular/router';
+import { DolosProvisionComponent } from './dolos-provision/dolos-provision.component';
+import { ServoManufacturing } from './servo-manufacturing/servo-manufacturing';
 
-const routes: Routes = [];
+const routes: Routes = [
+  { path: 'dolos-rework', component: DolosProvisionComponent },
+  { path: 'servo-manufacturing', component: ServoManufacturing },
+  { path: '', redirectTo: '/dolos-rework', pathMatch: 'full' },
+];
 
 @NgModule({
   imports: [RouterModule.forRoot(routes)],

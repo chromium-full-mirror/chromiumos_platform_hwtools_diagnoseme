@@ -4,6 +4,7 @@
 
 import { NgModule } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
+import { RouterModule } from '@angular/router'; // Import RouterModule
 
 import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
@@ -35,6 +36,7 @@ import { FormsModule } from '@angular/forms';
 import { MatAutocompleteModule } from '@angular/material/autocomplete';
 
 import { MatIconRegistry } from '@angular/material/icon';
+import { ServoManufacturing } from './servo-manufacturing/servo-manufacturing';
 
 
 
@@ -43,6 +45,7 @@ import { MatIconRegistry } from '@angular/material/icon';
     BrowserModule,
     AppComponent,
     AppRoutingModule,
+    RouterModule, // Add RouterModule here
     MatSlideToggleModule,
     DolosProvisionComponent,
     MatToolbarModule,
@@ -60,6 +63,7 @@ import { MatIconRegistry } from '@angular/material/icon';
     MatCheckboxModule,
     FormsModule,
     MatAutocompleteModule,
+    ServoManufacturing,
     ],
   providers: [
     provideAnimationsAsync()

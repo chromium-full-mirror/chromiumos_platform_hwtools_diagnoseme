@@ -8,11 +8,12 @@
     <mat-icon>menu</mat-icon>
   </button>
   <mat-menu #menu="matMenu">
-    <button mat-menu-item>Dolos Rework</button>
+    <button mat-menu-item routerLink="/dolos-rework">Dolos Rework</button>
+    <button mat-menu-item routerLink="/servo-manufacturing">Servo Manufacturing</button>
   </mat-menu>
   <span>HW Tools Diagnose Me</span>
 </mat-toolbar>
 
 <div class=top-level>
-<dolos-provision></dolos-provision>
+<router-outlet></router-outlet>
 </div>

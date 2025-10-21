@@ -7,7 +7,7 @@ import { MatMenuModule} from '@angular/material/menu';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatIconModule } from '@angular/material/icon';
 import { MatCardModule } from '@angular/material/card';
-import { DolosProvisionComponent } from './dolos-provision/dolos-provision.component';
+import { RouterModule } from '@angular/router';
 
 @Component({
   selector: 'app-root',
@@ -18,7 +18,7 @@ import { DolosProvisionComponent } from './dolos-provision/dolos-provision.compo
       MatToolbarModule,
       MatIconModule,
       MatCardModule,
-      DolosProvisionComponent
+      RouterModule,
   ]
 })
 export class AppComponent {
