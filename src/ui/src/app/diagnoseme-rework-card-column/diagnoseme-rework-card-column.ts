@@ -5,11 +5,11 @@
 import { Component, Input } from '@angular/core';
 
 @Component({
-  selector: 'dolos-rework-card-column',
+  selector: 'diagnoseme-rework-card-column',
   standalone: true,
-  templateUrl: './dolos-rework-card-column.html',
-  styleUrl: './dolos-rework-card-column.scss'
+  templateUrl: './diagnoseme-rework-card-column.html',
+  styleUrl: './diagnoseme-rework-card-column.scss'
 })
-export class DolosReworkCardColumn {
+export class DiagnosemeReworkCardColumn {
   @Input() column: string = "";
 }

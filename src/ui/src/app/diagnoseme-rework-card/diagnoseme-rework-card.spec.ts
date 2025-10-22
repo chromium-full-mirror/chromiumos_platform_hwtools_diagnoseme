@@ -4,19 +4,19 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import { DolosProvisionComponent } from './dolos-provision.component';
+import { DiagnosemeReworkCard } from './diagnoseme-rework-card';
 
-describe('DolosProvisionComponent', () => {
-  let component: DolosProvisionComponent;
-  let fixture: ComponentFixture<DolosProvisionComponent>;
+describe('DiagnosemeReworkCard', () => {
+  let component: DiagnosemeReworkCard;
+  let fixture: ComponentFixture<DiagnosemeReworkCard>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      declarations: [DolosProvisionComponent]
+      declarations: [DiagnosemeReworkCard]
     })
     .compileComponents();
 
-    fixture = TestBed.createComponent(DolosProvisionComponent);
+    fixture = TestBed.createComponent(DiagnosemeReworkCard);
     component = fixture.componentInstance;
     fixture.detectChanges();
   });

@@ -4,19 +4,19 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import { ServoManufacturingComponent } from './servo-manufacturing.component';
+import { DiagnosemeReworkCardColumn } from './diagnoseme-rework-card-column';
 
-describe('ServoManufacturingComponent', () => {
-  let component: ServoManufacturingComponent;
-  let fixture: ComponentFixture<ServoManufacturingComponent>;
+describe('DiagnosemeReworkCardColumn', () => {
+  let component: DiagnosemeReworkCardColumn;
+  let fixture: ComponentFixture<DiagnosemeReworkCardColumn>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      declarations: [ServoManufacturingComponent]
+      declarations: [DiagnosemeReworkCardColumn]
     })
     .compileComponents();
 
-    fixture = TestBed.createComponent(ServoManufacturingComponent);
+    fixture = TestBed.createComponent(DiagnosemeReworkCardColumn);
     component = fixture.componentInstance;
     fixture.detectChanges();
   });

@@ -4,12 +4,12 @@
 
 import { NgModule } from '@angular/core';
 import { RouterModule, Routes } from '@angular/router';
-import { DolosProvisionComponent } from './dolos-provision/dolos-provision.component';
-import { ServoManufacturing } from './servo-manufacturing/servo-manufacturing';
+import { DolosProvisionComponent } from './dolos-provision/dolos-provision';
+import { ServoV4p1ManufacturingComponent } from './servo-v4p1-manufacturing/servo-v4p1-manufacturing';
 
 const routes: Routes = [
   { path: 'dolos-rework', component: DolosProvisionComponent },
-  { path: 'servo-manufacturing', component: ServoManufacturing },
+  { path: 'servo-v4p1-manufacturing', component: ServoV4p1ManufacturingComponent },
   { path: '', redirectTo: '/dolos-rework', pathMatch: 'full' },
 ];
 

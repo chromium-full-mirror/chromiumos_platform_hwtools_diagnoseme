@@ -9,17 +9,17 @@ import { MatProgressBarModule } from '@angular/material/progress-bar';
 
 
 @Component({
-  selector: 'dolos-rework-card',
+  selector: 'diagnoseme-rework-card',
   standalone: true,
-  templateUrl: './dolos-rework-card.html',
-  styleUrl: './dolos-rework-card.scss',
+  templateUrl: './diagnoseme-rework-card.html',
+  styleUrl: './diagnoseme-rework-card.scss',
   imports: [
     MatCardModule,
     MatProgressBarModule,
     CommonModule
   ]
 })
-export class DolosReworkCard {
+export class DiagnosemeReworkCard {
   @Input() title: string = "Placeholder for Title";
   @Input() progress: boolean = false;
 }

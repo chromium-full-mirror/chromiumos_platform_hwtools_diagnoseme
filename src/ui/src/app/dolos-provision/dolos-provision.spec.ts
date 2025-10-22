@@ -4,19 +4,19 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import { DolosReworkCardColumn } from './dolos-rework-card-column';
+import { DolosProvisionComponent } from './dolos-provision';
 
-describe('DolosReworkCardColumn', () => {
-  let component: DolosReworkCardColumn;
-  let fixture: ComponentFixture<DolosReworkCardColumn>;
+describe('DolosProvisionComponent', () => {
+  let component: DolosProvisionComponent;
+  let fixture: ComponentFixture<DolosProvisionComponent>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      declarations: [DolosReworkCardColumn]
+      declarations: [DolosProvisionComponent]
     })
     .compileComponents();
 
-    fixture = TestBed.createComponent(DolosReworkCardColumn);
+    fixture = TestBed.createComponent(DolosProvisionComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
   });

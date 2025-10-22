@@ -27,8 +27,8 @@ import { MatInputModule } from '@angular/material/input';
 import { CommandExecutionResults } from '../../proto/diagnoseme-dolos.pb';
 import { ServodService } from '../services/servod-service';
 import { MatCheckboxModule } from '@angular/material/checkbox';
-import { DolosReworkCard } from '../dolos-rework-card/dolos-rework-card';
-import { DolosReworkCardColumn } from '../dolos-rework-card-column/dolos-rework-card-column';
+import { DiagnosemeReworkCard } from '../diagnoseme-rework-card/diagnoseme-rework-card';
+import { DiagnosemeReworkCardColumn } from '../diagnoseme-rework-card-column/diagnoseme-rework-card-column';
 import { HelpDialogButton } from '../help-dialog-button/help-dialog-button';
 
 import { NgxMatSelectSearchModule } from 'ngx-mat-select-search';
@@ -52,8 +52,8 @@ export enum TestResult {
 
 @Component({
   selector: 'dolos-provision',
-  templateUrl: './dolos-provision.component.html',
-  styleUrl: './dolos-provision.component.scss',
+  templateUrl: './dolos-provision.html',
+  styleUrl: './dolos-provision.scss',
   imports: [
     MatIconModule,
     MatCardModule,
@@ -65,8 +65,8 @@ export enum TestResult {
     CommonModule,
     MatInputModule,
     MatCheckboxModule,
-    DolosReworkCard,
-    DolosReworkCardColumn,
+    DiagnosemeReworkCard,
+    DiagnosemeReworkCardColumn,
     HelpDialogButton,
     NgxMatSelectSearchModule,
     TestPassFailButton
@@ -414,8 +414,8 @@ export class DolosProvisionComponent {
 
 @Component({
   selector: 'dialog-action-complete',
-  templateUrl: 'dialog-action-complete.html',
-  styleUrl: './dolos-provision.component.scss',
+  templateUrl: './dialog-action-complete.html',
+  styleUrl: './dolos-provision.scss',
   standalone: true,
   imports: [
     MatButtonModule,
@@ -439,7 +439,7 @@ export class DialogFirmwareComplete {
 @Component({
   selector: 'dialog-oops',
   templateUrl: 'dialog-oops.html',
-  styleUrl: './dolos-provision.component.scss',
+  styleUrl: './dolos-provision.scss',
   standalone: true,
   imports: [
     MatButtonModule,

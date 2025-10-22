@@ -7,7 +7,7 @@ import { BrowserModule } from '@angular/platform-browser';
 import { RouterModule } from '@angular/router'; // Import RouterModule
 
 import { AppRoutingModule } from './app-routing.module';
-import { AppComponent } from './app.component';
+import { AppComponent } from './app';
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
@@ -24,7 +24,7 @@ import {MatButtonModule} from '@angular/material/button';
 import {MatInputModule} from '@angular/material/input';
 import {MatSelectModule} from '@angular/material/select';
 import {MatFormFieldModule} from '@angular/material/form-field';
-import { DolosProvisionComponent } from './dolos-provision/dolos-provision.component';
+import { DolosProvisionComponent } from './dolos-provision/dolos-provision';
 
 import {MatProgressBarModule} from '@angular/material/progress-bar';
 
@@ -36,7 +36,7 @@ import { FormsModule } from '@angular/forms';
 import { MatAutocompleteModule } from '@angular/material/autocomplete';
 
 import { MatIconRegistry } from '@angular/material/icon';
-import { ServoManufacturing } from './servo-manufacturing/servo-manufacturing';
+import { ServoV4p1ManufacturingComponent } from './servo-v4p1-manufacturing/servo-v4p1-manufacturing';
 
 
 
@@ -63,7 +63,7 @@ import { ServoManufacturing } from './servo-manufacturing/servo-manufacturing';
     MatCheckboxModule,
     FormsModule,
     MatAutocompleteModule,
-    ServoManufacturing,
+    ServoV4p1ManufacturingComponent,
     ],
   providers: [
     provideAnimationsAsync()

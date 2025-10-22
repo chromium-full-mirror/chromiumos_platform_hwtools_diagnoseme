@@ -4,19 +4,19 @@
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import { DolosReworkCard } from './dolos-rework-card';
+import { ServoV4p1ManufacturingComponent } from './servo-v4p1-manufacturing';
 
-describe('DolosReworkCard', () => {
-  let component: DolosReworkCard;
-  let fixture: ComponentFixture<DolosReworkCard>;
+describe('ServoV4p1ManufacturingComponent', () => {
+  let component: ServoV4p1ManufacturingComponent;
+  let fixture: ComponentFixture<ServoV4p1ManufacturingComponent>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      declarations: [DolosReworkCard]
+      declarations: [ServoV4p1ManufacturingComponent]
     })
     .compileComponents();
 
-    fixture = TestBed.createComponent(DolosReworkCard);
+    fixture = TestBed.createComponent(ServoV4p1ManufacturingComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
   });

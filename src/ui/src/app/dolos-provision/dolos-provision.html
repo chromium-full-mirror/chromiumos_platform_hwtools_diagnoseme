@@ -1,0 +1,269 @@
+<!-- Copyright 2025 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+<mat-toolbar color="primary">
+  <span>Dolos Rework</span>
+</mat-toolbar>
+
+<!--  ************* CARD 1  *************** -->
+<diagnoseme-rework-card [progress]="firmwareProgress" title="1. Dolos Firmware Update">
+
+  <diagnoseme-rework-card-column column="1">
+    Connect the Dolos pink box host port to the host machine (the machine running this web
+    app).
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="dolos-host-connect.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+
+  <diagnoseme-rework-card-column column="1">
+    Select firmware version [recommended version - {{defaultFirmwareVersion}}] :
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <mat-form-field subscriptSizing="dynamic">
+      <mat-select [(value)]="selectedFirmwareVersion">
+        @for (version of firmwareVersions; track version) {
+        <mat-option [value]="version">{{version}}
+        </mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">
+    If you are repairing a broken Dolos check this box for BSL mode.
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <mat-checkbox [(ngModel)]="bslMode">
+    </mat-checkbox>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="dolos-bsl-mode.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">
+    Update firmware by pressing:
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <button mat-raised-button (click)="onFirmwareUpdate()" [disabled]="firmwareProgress" color="primary">
+      Firmware Update
+    </button>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+</diagnoseme-rework-card>
+
+
+<!--  ************* CARD 2  *************** -->
+
+<diagnoseme-rework-card title="2. Battery Cable Selection:">
+  <diagnoseme-rework-card-column column="1">
+    Select the Chromebook model you are reworking:
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <mat-form-field subscriptSizing="dynamic">
+      <mat-select (selectionChange)="onChangeModel($event.value)">
+        <mat-option>
+          <ngx-mat-select-search ngModel (ngModelChange)="filterModels($event)" placeholderLabel="Search:"
+            noEntriesFoundLabel="No matching model found."></ngx-mat-select-search>
+        </mat-option>
+        @for (model of filteredModels; track model) {
+        <mat-option [value]="model">{{
+          model.name | titlecase
+          }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+  <!-- <diagnoseme-rework-card-column column="1">
+    Use battery cable with GPN
+    <b class="bold">{{ selectedModel?.config?.gpn }}</b>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">
+    Scan the barcode on box the cable was selected from:
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <mat-form-field subscriptSizing="dynamic">
+      <input #gpn [(ngModel)]="gpnScan" (input)="gpnChange()" matInput placeholder="GPN" />
+    </mat-form-field>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <button *ngIf="gpnPass == TestResultEnum.Pass" class="test-pass-button" mat-mini-fab color="primary">
+      <mat-icon class="icon-display">check</mat-icon>
+    </button>
+    <button *ngIf="gpnPass == TestResultEnum.Fail" class="test-fail-button" mat-mini-fab color="primary">
+      <mat-icon class="icon-display">close</mat-icon>
+    </button>
+  </diagnoseme-rework-card-column> -->
+</diagnoseme-rework-card>
+
+<!--  ************* CARD 3  *************** -->
+
+<diagnoseme-rework-card [progress]="hwidProgress" title="3. DUT Hardware Identification:">
+
+  <diagnoseme-rework-card-column column="1">
+    Connect your servo white USB cable to the DUT CCD port.
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="servo-ccd-connect.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+
+  <diagnoseme-rework-card-column column="1">
+    Connect at least a 65W charger to the servo DUT Power port.
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="servo-dut-power-connect.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">
+    Connect the servo host port to the host machine (the machine running this web
+    app).
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="servo-host-connect.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Detect hardware:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <button (click)="onProbeHardware()" [disabled]="hwidProgress || selectedModel == null" mat-raised-button
+      color="primary">
+      Start Identification
+    </button>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Probed HWID Value:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2and3">
+    <mat-form-field subscriptSizing="dynamic">
+      <input #hwidDisplay [(ngModel)]="hwid" matInput placeholder="HWID being probed...."  />
+    </mat-form-field>
+  </diagnoseme-rework-card-column>
+
+</diagnoseme-rework-card>
+
+<!--  ************* CARD 4  *************** -->
+
+<diagnoseme-rework-card [progress]="cableProgramProgress" title="4. Cable Programming:">
+
+  <diagnoseme-rework-card-column column="1">(Expert Only) Choose file to program cable with:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+      <input type="file" #fileInput style="display: none;" (change)="onEepromDataFileSelected($event)">
+      <button mat-raised-button color="primary" (click)="fileInput.click()">
+        <mat-icon>cloud_upload</mat-icon> Upload File
+      </button>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="1">Program the cable for model {{ selectedModel?.name
+    }}:
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="2">
+    <button (click)="onCableProgram()" [disabled]="hwidProgress || hwid == '' && eepromData == ''" mat-raised-button color="primary">
+      Program Cable
+    </button>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+</diagnoseme-rework-card>
+
+<!--  ************* CARD 5  *************** -->
+
+<diagnoseme-rework-card [progress]="hostTestProgress" title="5. Testing:">
+
+  <diagnoseme-rework-card-column column="1">
+    Open the DUT, remove the battery if installed, install the battery cable to the DUT.
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="dolos-battery-rework.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Connect the Dolos pink box power port to a 65W or better power adapter.
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="dolos-power-connect.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">
+    To verify that everything worked as expected:
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <button (click)="onStartTests()" [disabled]="hwidProgress || hwid == ''" mat-raised-button color="primary">
+      Start Tests
+    </button>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">
+    Dolos status reports:
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    {{ hostErrorMsg }}
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"><test-pass-fail-button #dolospassfail></test-pass-fail-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">EC Battery Voltage:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column *ngIf="testVoltageTestRun" column="2">{{ testVoltage }}</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column *ngIf="!testVoltageTestRun" column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"><test-pass-fail-button #ecpassfail></test-pass-fail-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">AP Power State:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">{{ testPowerstate }}</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <test-pass-fail-button #appassfail></test-pass-fail-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">
+    Scan the Dolos serial number barcode on the battery cable:
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <mat-form-field subscriptSizing="dynamic">
+      <input #dolosserial [(ngModel)]="dolosSerialScan" (input)="dolosSerialChange()" matInput />
+    </mat-form-field>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <test-pass-fail-button #serialpassfail></test-pass-fail-button>
+  </diagnoseme-rework-card-column>
+
+
+  <diagnoseme-rework-card-column column="1" *ngIf="showCableReflash">
+    The label does not match the internal number [{{ internalDolosSerialNumber }}] update cable ?
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2" *ngIf="showCableReflash">
+    <button (click)="onUpdateSerialNumber()" [disabled]="firmwareProgress" mat-raised-button color="primary"
+      *ngIf="selectedModel != null">
+      Flash Serial Number
+    </button>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"> </diagnoseme-rework-card-column>
+
+
+</diagnoseme-rework-card>
+
+<!--  ************* CARD 6  *************** -->
+
+<diagnoseme-rework-card title="6. Start Next Device">
+
+  <diagnoseme-rework-card-column column="1">
+    <button (click)="onReload()" mat-raised-button color="primary">
+      Reset Page
+    </button>
+  </diagnoseme-rework-card-column>
+
+</diagnoseme-rework-card>
