@@ -106,6 +106,33 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
             )
         return image
 
+    def _run_servod_container(self, client, image, name, servod_params):
+        """Remove old container and run a new servod container."""
+        try:
+            self.cont = client.containers.get(name)
+            self.cont.remove(force=True)
+        except (docker.errors.APIError, docker.errors.NotFound):
+            pass
+
+        volumes = ["/dev:/dev"]
+        logs_volume = f"{name}_log"
+        volumes += [f"{logs_volume}:/var/log/servod_9999/"]
+
+        nofile_limit = docker.types.Ulimit(name="nofile", soft=65535, hard=65535)
+        self.cont = client.containers.run(
+            image,
+            remove=True,
+            privileged=True,
+            name=name,
+            hostname=name,
+            cap_add=["NET_ADMIN"],
+            detach=True,
+            volumes=volumes,
+            ports={"9999": "9999"},
+            command=["bash", "/start_servod_dev.sh", servod_params],
+            ulimits=[nofile_limit],
+        )
+
     # pylint: disable=too-many-locals
     def start_servod(self, request, unused_context):
         """Start servod and return if successful or not."""
@@ -127,33 +154,11 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
         container_name = "diagnoseme"
         name = f"{container_name}-docker_servod"
 
-        try:
-            self.cont = client.containers.get(name)
-            self.cont.remove(force=True)
-        except (docker.errors.APIError, docker.errors.NotFound):
-            pass
-
-        volumes = ["/dev:/dev"]
-        logs_volume = f"{container_name}_log"
-        volumes += [f"{logs_volume}:/var/log/servod_9999/"]
-
-        nofile_limit = docker.types.Ulimit(name="nofile", soft=65535, hard=65535)
-        self.cont = client.containers.run(
-            image,
-            remove=True,
-            privileged=True,
-            name=name,
-            hostname=name,
-            cap_add=["NET_ADMIN"],
-            detach=True,
-            volumes=volumes,
-            ports={"9999": "9999"},
-            command=["bash", "/start_servod_dev.sh", servod_params],
-            ulimits=[nofile_limit],
-        )
+        self._run_servod_container(client, image, name, servod_params)
 
         started = False
         while not started:
+
             try:
                 (error_code, output) = self.cont.exec_run(
                     "servodtool instance wait-for-active --timeout 1 -p 9999"
@@ -165,13 +170,25 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
 
             if error_code == 0:
                 log_lines = None
-                log_lines = self.cont.logs()
-                response.console_output += log_lines.decode("utf-8")
-                started = True
+                try:
+                    log_lines = self.cont.logs()
+                    response.console_output += log_lines.decode("utf-8")
+                    started = True
+                except docker.errors.NotFound:
+                    logger.warning("Container not found while trying to fetch logs.")
+                    response.console_output += "Error: Container not found."
+                    started = False
+                    break
             else:
                 log_lines = None
-                log_lines = self.cont.logs()
-                response.console_output += log_lines.decode("utf-8")
+                try:
+                    log_lines = self.cont.logs()
+                    response.console_output += log_lines.decode("utf-8")
+                except docker.errors.NotFound:
+                    logger.warning("Container not found while trying to fetch logs.")
+                    response.console_output += "Error: Container not found."
+                    started = False
+                    break
 
         response.started = started
         return response
