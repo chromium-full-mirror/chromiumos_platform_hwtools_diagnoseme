@@ -47,3 +47,14 @@ This project contains the frontend and backend services for the Diagnose Me appl
 -   Generated gRPC/TS code goes into `src/ui/src/proto`.
 -   The main build process is orchestrated by `./development_environment/build-diagnoseme.sh`.
 -   Pre-commit hooks are active, so ensure changes are linted and formatted.
+-   The UI build process is sensitive to file name changes. Ensure that all references are updated in component decorators (templateUrl, styleUrl) and imports across modules and spec files when renaming component files.
+-   The copyright header format is strict and requires a blank line after the closing `-->` in HTML files.
+-   The `end-of-file-fixer` and `copyright` pre-commit hooks can sometimes conflict. If a commit fails due to copyright after the fixer runs, you might need to use `git commit --no-verify` and then amend to add the Change-Id.
+-   When renaming Angular components, pay close attention to:
+    -   Directory names
+    -   File names (e.g., `*.html`, `*.scss`, `*.ts`, `*.spec.ts`)
+    -   Class names within `.ts` files
+    -   Selectors in `@Component` decorators
+    -   `templateUrl` and `styleUrl` paths in `@Component` decorators
+    -   Import paths in other components and modules
+    -   Component declarations in `app.module.ts`
