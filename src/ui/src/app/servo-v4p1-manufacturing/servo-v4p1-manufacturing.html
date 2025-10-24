@@ -2,7 +2,111 @@
      Use of this source code is governed by a BSD-style license that can be
      found in the LICENSE file. -->
 
-<diagnoseme-rework-card title="Data Collection">
+<mat-toolbar color="primary">
+  <span>Servo V4.1 Manufacturing</span>
+</mat-toolbar>
+
+<diagnoseme-rework-card title="1. Data Collection">
+
+
+  <diagnoseme-rework-card-column column="1">Please scan the desired serial number:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <mat-form-field subscriptSizing="dynamic">
+      <input matInput placeholder="Servo Serial Number" [(ngModel)]="servoSerialNumber">
+    </mat-form-field>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="serial-label.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Please scan the desired mac address:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <mat-form-field subscriptSizing="dynamic">
+      <input matInput placeholder="Servo MAC Address" [(ngModel)]="servoMacAddress">
+    </mat-form-field>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="mac-label.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+</diagnoseme-rework-card>
+
+<diagnoseme-rework-card title="2. Host Side Programming">
+
+  <diagnoseme-rework-card-column column="1">Move the DFU switch to the right ( towards the ethernet port ):</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="dfu-switch-on.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Insert the host cable to the servo:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="host-cable-insert.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Start host side programming:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <button mat-raised-button color="primary">Start</button>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+</diagnoseme-rework-card>
+
+<diagnoseme-rework-card title="3. DUT Side Programming">
+
+  <diagnoseme-rework-card-column column="1">Unplug the host cable from the servo:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="remove-host.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Move the DFU switch to the left ( away from the ethernet port ):</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="dfu-left.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Insert the host cable to the servo:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="host-cable-insert.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Insert the servo cable top the DUT:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="servo-to-dut-insert.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Start DUT side programming:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <button mat-raised-button color="primary">Start</button>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
 
 
 </diagnoseme-rework-card>
+
+<diagnoseme-rework-card title="4. Testing">
+
+  <diagnoseme-rework-card-column column="1">Insert the host cable to the servo:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="host-cable-insert.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Insert the servo cable top the DUT:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="servo-to-dut-insert.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Plug a test USB stick into each servo Type A port ( 3 total ):</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="add-test-usb.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+</diagnoseme-rework-card>
+
