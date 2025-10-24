@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 import { Injectable } from '@angular/core';
-import { ServoV41ManufacturingServiceClient } from '../../proto/servo-manufacturing.pbsc';
+import { ServoV41ManufacturingClient } from '../../proto/servo-manufacturing.pbsc';
 import { Empty } from '@ngx-grpc/well-known-types';
 import { StatusResponse, ProgramGenesysHubRequest, ProgramGenesysHubResponse, ProgramMcuRequest, ProgramMcuResponse, ProgramEthernetRequest, ProgramEthernetResponse, RunTestsRequest, RunTestsResponse } from '../../proto/servo-manufacturing.pb';
 import { Observable } from 'rxjs';
@@ -13,7 +13,7 @@ import { Observable } from 'rxjs';
 })
 export class ServoManufacturingService {
 
-  constructor(private client: ServoV41ManufacturingServiceClient) { }
+  constructor(private client: ServoV41ManufacturingClient) { }
 
   getStatus(): Observable<StatusResponse> {
     return this.client.getStatus(new Empty());
