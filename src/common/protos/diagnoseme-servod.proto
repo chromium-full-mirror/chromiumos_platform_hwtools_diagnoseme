@@ -28,6 +28,7 @@ message GetHardwareIDRequest {
 message GetHardwareIDResponse {
   string hwid = 1;
   string console_output = 2;
+  int32 error_code = 3;
 }
 
 message RunDutControlRequest {
@@ -36,4 +37,5 @@ message RunDutControlRequest {
 
 message RunDutControlResponse {
   string result = 1;
+  int32 error_code = 2;
 }

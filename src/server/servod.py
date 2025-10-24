@@ -156,9 +156,14 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
 
         self._run_servod_container(client, image, name, servod_params)
 
+        if self.cont is None:
+            logger.error("Servod container not initialized.")
+            response.console_output += "Error: Servod container not initialized.\n"
+            response.started = False
+            return response
+
         started = False
         while not started:
-
             try:
                 (error_code, output) = self.cont.exec_run(
                     "servodtool instance wait-for-active --timeout 1 -p 9999"
@@ -196,9 +201,15 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
     def get_dut_hardware_id(self, unused_request, unused_context):
         """Call futility to get the information from the EC about the HWID."""
         response = diagnoseme_servod_pb2.GetHardwareIDResponse()
+        if self.cont is None:
+            logger.error("Servod container not initialized.")
+            response.console_output = "Error: Servod container not initialized."
+            response.error_code = 9999
+            return response
         (error_code, output) = self.cont.exec_run("futility gbb --hwid --get --servo")
         logger.debug("futility returns: %s", output.decode("utf-8"))
         logger.debug("futility error code: %s", error_code)
+        response.error_code = error_code
 
         hwid_regex = r"hardware_id:\s(.*)"
         if error_code == 0:
@@ -207,16 +218,22 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
                 response.hwid = hwid_match.group(1)
             else:
                 logger.info("No string match in futility output.")
-        response.console_output = output
+        response.console_output = output.decode("utf-8")
         return response
 
     def run_dut_control(self, request, unused_context):
         """Run a dut-control command inside the diagnoseme servod container."""
         response = diagnoseme_servod_pb2.RunDutControlResponse()
+        if self.cont is None:
+            logger.error("Servod container not initialized.")
+            response.error_code = 9999
+            response.result = "Unable to access servod container, may have exited."
+            return response
         cmd = ["dut-control", request.command]
         (error_code, output) = self.cont.exec_run(cmd)
         logger.debug("%s exit code: %s", cmd, error_code)
         logger.debug("%s output: %s", cmd, output)
+        response.error_code = error_code
         if error_code == 0:
             result = output.decode("utf-8").strip().split(":")
             if len(result) > 1 and result[1]:
