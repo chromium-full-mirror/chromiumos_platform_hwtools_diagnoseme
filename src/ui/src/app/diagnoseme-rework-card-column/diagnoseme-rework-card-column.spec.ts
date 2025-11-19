@@ -12,7 +12,7 @@ describe('DiagnosemeReworkCardColumn', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      declarations: [DiagnosemeReworkCardColumn]
+      imports: [DiagnosemeReworkCardColumn]
     })
     .compileComponents();
 

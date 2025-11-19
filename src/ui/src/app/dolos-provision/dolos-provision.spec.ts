@@ -3,8 +3,30 @@
 // found in the LICENSE file.
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { of } from 'rxjs';
 
 import { DolosProvisionComponent } from './dolos-provision';
+import { DolosService } from '../services/dolos.service';
+import { ServodService } from '../services/servod-service';
+import { NoopAnimationsModule } from '@angular/platform-browser/animations';
+import { FirmwareVersionsResponse, ModelsResponse, BoardModelMappingResponse, FirmwareUpdateResponse, CheckDolosFromHostResponse, ProgramCableResponse } from '../../proto/diagnoseme-dolos.pb';
+import { StartServodResponse, GetHardwareIDResponse, RunDutControlResponse } from '../../proto/diagnoseme-servod.pb';
+
+// Mock Services
+class MockDolosService {
+  getFirmwareVersions() { return of(new FirmwareVersionsResponse()); }
+  getModels() { return of(new ModelsResponse()); }
+  getBoardModelMapping() { return of(new BoardModelMappingResponse()); }
+  updateFirmware() { return of(new FirmwareUpdateResponse()); }
+  checkDolosFromHost() { return of(new CheckDolosFromHostResponse()); }
+  programCable() { return of(new ProgramCableResponse()); }
+}
+
+class MockServodService {
+  startServod() { return of(new StartServodResponse()); }
+  getDutHardwareId() { return of(new GetHardwareIDResponse()); }
+  runDutControl() { return of(new RunDutControlResponse()); }
+}
 
 describe('DolosProvisionComponent', () => {
   let component: DolosProvisionComponent;
@@ -12,7 +34,11 @@ describe('DolosProvisionComponent', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      declarations: [DolosProvisionComponent]
+      imports: [DolosProvisionComponent, NoopAnimationsModule],
+      providers: [
+        { provide: DolosService, useClass: MockDolosService },
+        { provide: ServodService, useClass: MockServodService },
+      ]
     })
     .compileComponents();
 

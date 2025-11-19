@@ -12,7 +12,7 @@ describe('DiagnosemeReworkCard', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      declarations: [DiagnosemeReworkCard]
+      imports: [DiagnosemeReworkCard]
     })
     .compileComponents();
 

@@ -12,7 +12,7 @@ describe('HelpDialogButton', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      declarations: [HelpDialogButton]
+      imports: [HelpDialogButton]
     })
     .compileComponents();
 
