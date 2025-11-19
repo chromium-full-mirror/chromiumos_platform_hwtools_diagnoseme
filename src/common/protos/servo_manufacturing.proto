@@ -7,19 +7,25 @@ import "google/protobuf/empty.proto";
 
 service ServoV41Manufacturing {
   // Example RPC call
-  rpc GetStatus(google.protobuf.Empty) returns (StatusResponse) {}
+  rpc get_status(google.protobuf.Empty) returns (StatusResponse) {}
 
   // New RPC call
-  rpc ProgramGenesysHub(ProgramGenesysHubRequest) returns (ProgramGenesysHubResponse) {}
+  rpc program_genesys_hub(ProgramGenesysHubRequest) returns (ProgramGenesysHubResponse) {}
 
   // Program MCU RPC call
-  rpc ProgramMcu(ProgramMcuRequest) returns (ProgramMcuResponse) {}
+  rpc program_mcu(ProgramMcuRequest) returns (ProgramMcuResponse) {}
 
   // Program Ethernet RPC call
-  rpc ProgramEthernet(ProgramEthernetRequest) returns (ProgramEthernetResponse) {}
+  rpc program_ethernet(ProgramEthernetRequest) returns (ProgramEthernetResponse) {}
 
   // Run Tests RPC call
-  rpc RunTests(RunTestsRequest) returns (RunTestsResponse) {}
+  rpc run_tests(RunTestsRequest) returns (RunTestsResponse) {}
+
+  // Validate Servo Serial RPC call
+  rpc validate_servo_serial(ValidateServoSerialRequest) returns (ValidationResponse) {}
+
+  // Validate Servo MAC Address RPC call
+  rpc validate_servo_mac_address(ValidateServoMacAddressRequest) returns (ValidationResponse) {}
 }
 
 message StatusResponse {
@@ -67,4 +73,17 @@ message RunTestsResponse {
   // Add response fields here
   bool all_passed = 1;
   string summary = 2;
+}
+
+message ValidateServoSerialRequest {
+  string serial_number = 1;
+}
+
+message ValidateServoMacAddressRequest {
+  string mac_address = 1;
+}
+
+message ValidationResponse {
+  bool is_valid = 1;
+  string error = 2;
 }
