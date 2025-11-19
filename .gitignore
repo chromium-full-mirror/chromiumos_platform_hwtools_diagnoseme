@@ -25,6 +25,6 @@ coverage.lcov
 TAGS
 
 src/generated/**
-src/ui/node_modules/**
+**/node_modules/**
 src/ui/package-lock.json
 src/ui/src/proto/**
