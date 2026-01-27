@@ -2,19 +2,42 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {of} from 'rxjs';
 
-import { ServoV4p1ManufacturingComponent } from './servo-v4p1-manufacturing';
+import {ServoV4p1ManufacturingComponent} from './servo-v4p1-manufacturing';
+import {ServoManufacturingService} from '../services/servo-manufacturing.service';
+import {NoopAnimationsModule} from '@angular/platform-browser/animations';
+import {ValidationResponse} from '../../proto/servo-manufacturing.pb';
 
 describe('ServoV4p1ManufacturingComponent', () => {
   let component: ServoV4p1ManufacturingComponent;
   let fixture: ComponentFixture<ServoV4p1ManufacturingComponent>;
+  let mockServoManufacturingService: jasmine.SpyObj<ServoManufacturingService>;
 
   beforeEach(async () => {
+    mockServoManufacturingService = jasmine.createSpyObj(
+      'ServoManufacturingService',
+      ['validateServoSerial', 'validateServoMacAddress'],
+    );
+    const mockValidationResponse = new ValidationResponse();
+    mockValidationResponse.isValid = true;
+    mockServoManufacturingService.validateServoSerial.and.returnValue(
+      of(mockValidationResponse),
+    );
+    mockServoManufacturingService.validateServoMacAddress.and.returnValue(
+      of(mockValidationResponse),
+    );
+
     await TestBed.configureTestingModule({
-      declarations: [ServoV4p1ManufacturingComponent]
-    })
-    .compileComponents();
+      imports: [ServoV4p1ManufacturingComponent, NoopAnimationsModule],
+      providers: [
+        {
+          provide: ServoManufacturingService,
+          useValue: mockServoManufacturingService,
+        },
+      ],
+    }).compileComponents();
 
     fixture = TestBed.createComponent(ServoV4p1ManufacturingComponent);
     component = fixture.componentInstance;

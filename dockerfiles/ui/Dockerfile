@@ -22,9 +22,9 @@ RUN npm install --ignore-scripts --legacy-peer-deps
 # add app
 
 COPY src/ui/ /app/
-RUN rm -rf /app/src/protos
-WORKDIR /app/src/protos
-COPY --chown=diagnoseme src/generated/*.ts /app/src/protos/
+RUN rm -rf /app/src/proto
+WORKDIR /app/src/proto
+COPY src/generated/*.ts /app/src/proto/
 
 WORKDIR /app
 RUN ng build --output-path=dist --output-hashing=all --configuration=production
@@ -35,7 +35,7 @@ FROM nginx:alpine
 
 RUN mkdir -p /var/cache/nginx/client_temp
 RUN mkdir -p /var/cache/nginx/proxy_temp
-RUN chmod -R uog+rw /var/run
+RUN chmod uog+rw /var/run
 
 # copy artifact build from the 'build environment'
 COPY --from=build /app/dist/browser /etc/nginx/html/

@@ -35,7 +35,7 @@ steps:
   args:
     - buildx
     - build
-    - --output=./generated
+    - --output=./src/generated
     - --target=copytohost
     - -f=dockerfiles/utilities/Dockerfile.protoc
     - /workspace
@@ -48,7 +48,16 @@ steps:
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/rpcserver/Dockerfile
-  waitFor: ['src-prep']
+  waitFor: ['src-prep', 'proto-gen']
+
+- name: 'gcr.io/kaniko-project/executor:latest'
+  id: 'ui'
+  args:
+  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/ui:$COMMIT_SHA
+  - --cache=true
+  - --cache-ttl=96h
+  - -f=/workspace/dockerfiles/ui/Dockerfile
+  waitFor: ['src-prep', 'proto-gen']
 
 - name: 'pyfound/black:24.2.0'
   id: 'test-black-formatting'
@@ -74,6 +83,19 @@ steps:
     - --rcfile=/workspace/pylintrc
     - /workspace/src
   waitFor: ['src-prep']
+
+- name: 'node:25'
+  id: 'ui-lint'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    mkdir -p src/ui/src/proto
+    cp src/generated/*.ts src/ui/src/proto/
+    cd src/ui
+    npm install --legacy-peer-deps
+    npm run lint
+  waitFor: ['src-prep', 'proto-gen']
 
 options:
   machineType: 'N1_HIGHCPU_32'

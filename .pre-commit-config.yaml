@@ -45,14 +45,13 @@ repos:
 
   - repo: local
     hooks:
-    - id: eslint
-      name: eslint
-      entry: npx gts lint
-      language: node
-      types: [javascript]
+    - id: ui-lint
+      name: ui-lint
+      entry: node:25
+      language: docker_image
+      args: ["bash", "-c", "cd src/ui && npm install --legacy-peer-deps && npm run lint"]
       files: ^src/ui/
       pass_filenames: false
-      additional_dependencies: ['gts@^6.0.2', 'typescript@^5.8.3']
 
   - repo: local
     hooks:
@@ -77,6 +76,7 @@ repos:
                 .*\.hex|
                 .gitignore|
                 LICENSE|
+                LICENCE|
                 DIR_METADATA|
                 PRESUBMIT.cfg|
                 .*\.json

@@ -1,3 +1,7 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
 #
 # NOTE! Please use 'git ls-files -i --exclude-standard'
 # command after changing this file, to see if there are

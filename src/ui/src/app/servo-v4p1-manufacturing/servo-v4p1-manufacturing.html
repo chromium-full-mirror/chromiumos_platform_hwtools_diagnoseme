@@ -1,6 +1,7 @@
 <!-- Copyright 2025 The ChromiumOS Authors
      Use of this source code is governed by a BSD-style license that can be
-     found in the LICENSE file. -->
+     found in the LICENSE file.
+-->
 
 <mat-toolbar color="primary">
   <span>Servo V4.1 Manufacturing</span>
@@ -12,8 +13,9 @@
   <diagnoseme-rework-card-column column="1">Please scan the desired serial number:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2">
     <mat-form-field subscriptSizing="dynamic">
-      <input matInput placeholder="Servo Serial Number" [(ngModel)]="servoSerialNumber">
+      <input matInput placeholder="Servo Serial Number" [(ngModel)]="servoSerialNumber" (input)="onServoSerialNumberChange($event)">
     </mat-form-field>
+    <test-pass-fail-button #isSerialNumberValid></test-pass-fail-button>
   </diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
     <help-dialog-button image="serial-label.jpg"></help-dialog-button>
@@ -47,7 +49,7 @@
 
   <diagnoseme-rework-card-column column="1">Start host side programming:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2">
-    <button mat-raised-button color="primary">Start</button>
+    <button mat-raised-button color="primary" (click)="startHostSideProgramming()">Start</button>
   </diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
 
@@ -81,7 +83,7 @@
 
   <diagnoseme-rework-card-column column="1">Start DUT side programming:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2">
-    <button mat-raised-button color="primary">Start</button>
+    <button mat-raised-button color="primary" (click)="startDutSideProgramming()">Start</button>
   </diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
 
@@ -109,4 +111,3 @@
   </diagnoseme-rework-card-column>
 
 </diagnoseme-rework-card>
-
