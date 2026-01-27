@@ -265,7 +265,7 @@ export class DolosProvisionComponent {
 
   onFirmwareUpdate() {
     this.firmwareProgress = true;
-    this.dolosService.updateFirmware(
+    void this.dolosService.updateFirmware(
       this.selectedFirmwareVersion,
       this.bslMode,
       this.afterFirmwareUpdate,
@@ -364,7 +364,7 @@ export class DolosProvisionComponent {
   onCableProgram() {
     console.log('Cable Program');
     this.cableProgramProgress = true;
-    this.dolosService.programCable(
+    void this.dolosService.programCable(
       this.hwid,
       this.eepromData,
       this.afterProgramCable,
@@ -411,7 +411,7 @@ export class DolosProvisionComponent {
     const serialNumber = String(
       this.dolosSerialInput?.get(0)?.nativeElement.value,
     );
-    this.dolosService.updateSerialNumber(
+    void this.dolosService.updateSerialNumber(
       this.hwid,
       this.eepromData,
       serialNumber,

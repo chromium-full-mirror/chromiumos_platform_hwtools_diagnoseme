@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 
 ######################################################################
-FROM node:24 AS build
+FROM node:25 AS build
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ ENV PATH=/app/node_modules/.bin:$PATH
 COPY src/ui/package.json /app
 
 RUN npm install -g npm@latest
-RUN npm install --ignore-scripts
+RUN npm install --ignore-scripts --legacy-peer-deps
 
 # install and cache app dependencies
 # add app
