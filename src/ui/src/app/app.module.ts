@@ -2,15 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import { NgModule } from '@angular/core';
-import { BrowserModule } from '@angular/platform-browser';
-import { RouterModule } from '@angular/router'; // Import RouterModule
+import {NgModule} from '@angular/core';
+import {RouterModule} from '@angular/router'; // Import RouterModule
 
-import { AppRoutingModule } from './app-routing.module';
-import { AppComponent } from './app';
-import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
+import {AppRoutingModule} from './app-routing.module';
+import {AppComponent} from './app';
+import {provideAnimationsAsync} from '@angular/platform-browser/animations/async';
 
-import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import {MatSlideToggleModule} from '@angular/material/slide-toggle';
 import {MatToolbarModule} from '@angular/material/toolbar';
 import {MatIconModule} from '@angular/material/icon';
 import {MatMenuModule} from '@angular/material/menu';
@@ -24,25 +23,22 @@ import {MatButtonModule} from '@angular/material/button';
 import {MatInputModule} from '@angular/material/input';
 import {MatSelectModule} from '@angular/material/select';
 import {MatFormFieldModule} from '@angular/material/form-field';
-import { DolosProvisionComponent } from './dolos-provision/dolos-provision';
+import {DolosProvisionComponent} from './dolos-provision/dolos-provision';
 
 import {MatProgressBarModule} from '@angular/material/progress-bar';
 
 import {MatGridListModule} from '@angular/material/grid-list';
 
 import {MatCheckboxModule} from '@angular/material/checkbox';
-import { FormsModule } from '@angular/forms';
+import {FormsModule} from '@angular/forms';
 
-import { MatAutocompleteModule } from '@angular/material/autocomplete';
+import {MatAutocompleteModule} from '@angular/material/autocomplete';
 
-import { MatIconRegistry } from '@angular/material/icon';
-import { ServoV4p1ManufacturingComponent } from './servo-v4p1-manufacturing/servo-v4p1-manufacturing';
-
-
+import {MatIconRegistry} from '@angular/material/icon';
+import {ServoV4p1ManufacturingComponent} from './servo-v4p1-manufacturing/servo-v4p1-manufacturing';
 
 @NgModule({
   imports: [
-    BrowserModule,
     AppComponent,
     AppRoutingModule,
     RouterModule, // Add RouterModule here
@@ -64,15 +60,9 @@ import { ServoV4p1ManufacturingComponent } from './servo-v4p1-manufacturing/serv
     FormsModule,
     MatAutocompleteModule,
     ServoV4p1ManufacturingComponent,
-    ],
-  providers: [
-    provideAnimationsAsync()
   ],
-  bootstrap: [AppComponent],
+  providers: [provideAnimationsAsync()],
 })
-
-
-
 export class AppModule {
   constructor(iconRegistry: MatIconRegistry) {
     iconRegistry.setDefaultFontSetClass('material-symbols-outlined');

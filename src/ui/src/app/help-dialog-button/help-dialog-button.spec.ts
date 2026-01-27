@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import {ComponentFixture, TestBed} from '@angular/core/testing';
 
-import { HelpDialogButton } from './help-dialog-button';
+import {HelpDialogButton} from './help-dialog-button';
 
 describe('HelpDialogButton', () => {
   let component: HelpDialogButton;
@@ -12,9 +12,8 @@ describe('HelpDialogButton', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [HelpDialogButton]
-    })
-    .compileComponents();
+      imports: [HelpDialogButton],
+    }).compileComponents();
 
     fixture = TestBed.createComponent(HelpDialogButton);
     component = fixture.componentInstance;

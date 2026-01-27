@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import {ComponentFixture, TestBed} from '@angular/core/testing';
 
-import { DiagnosemeReworkCardColumn } from './diagnoseme-rework-card-column';
+import {DiagnosemeReworkCardColumn} from './diagnoseme-rework-card-column';
 
 describe('DiagnosemeReworkCardColumn', () => {
   let component: DiagnosemeReworkCardColumn;
@@ -12,9 +12,8 @@ describe('DiagnosemeReworkCardColumn', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [DiagnosemeReworkCardColumn]
-    })
-    .compileComponents();
+      imports: [DiagnosemeReworkCardColumn],
+    }).compileComponents();
 
     fixture = TestBed.createComponent(DiagnosemeReworkCardColumn);
     component = fixture.componentInstance;

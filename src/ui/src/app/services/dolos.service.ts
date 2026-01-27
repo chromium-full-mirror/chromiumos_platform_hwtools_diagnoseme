@@ -2,15 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import { Injectable, isDevMode } from '@angular/core';
-import { CommandExecutionResults, TestStatus, BoardModel, BoardModelMappingResponse } from '../../proto/diagnoseme-dolos.pb';
-import { DolosRpcServiceClient } from '../../proto/diagnoseme-dolos.pbsc';
+import {Injectable, isDevMode} from '@angular/core';
+import {
+  CommandExecutionResults,
+  TestStatus,
+  BoardModel,
+  BoardModelMappingResponse,
+} from '../../proto/diagnoseme-dolos.pb';
+import {DolosRpcServiceClient} from '../../proto/diagnoseme-dolos.pbsc';
 
-import { Empty } from '@ngx-grpc/well-known-types';
-import { FirmwareUpdateRequest, ProgramCableRequest } from '../../proto/diagnoseme-dolos.pb';
+import {Empty} from '@ngx-grpc/well-known-types';
+import {
+  FirmwareUpdateRequest,
+  ProgramCableRequest,
+} from '../../proto/diagnoseme-dolos.pb';
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class DolosService {
   constructor(private client: DolosRpcServiceClient) {}
@@ -18,22 +26,22 @@ export class DolosService {
   async updateFirmware(
     firmwareVersion: string,
     bslMode: boolean,
-    callbackfn: (results: CommandExecutionResults[] | undefined) => void
+    callbackfn: (results: CommandExecutionResults[] | undefined) => void,
   ) {
     if (isDevMode()) {
-      let result: CommandExecutionResults = new CommandExecutionResults();
+      const result: CommandExecutionResults = new CommandExecutionResults();
       result.exitCode = 0;
-      let results: CommandExecutionResults[] = [];
+      const results: CommandExecutionResults[] = [];
       results.push(result);
       await this.sleep(10000);
       callbackfn(results);
     } else {
-      let request: FirmwareUpdateRequest = new FirmwareUpdateRequest();
+      const request: FirmwareUpdateRequest = new FirmwareUpdateRequest();
       request.firmwareVersion = firmwareVersion;
       request.bslMode = bslMode;
 
       this.client.updateFirmware(request).subscribe(res => {
-        let results: CommandExecutionResults[] | undefined = res.result;
+        const results: CommandExecutionResults[] | undefined = res.result;
         callbackfn(results);
       });
     }
@@ -43,15 +51,11 @@ export class DolosService {
     callbackfn: (
       result: TestStatus,
       dolosSerialNumber: string,
-      error: string
-    ) => void
+      error: string,
+    ) => void,
   ) {
     if (isDevMode()) {
-      callbackfn(
-        TestStatus.PASS,
-        'dolos-V1-2415-000A',
-        'This is a host error'
-      );
+      callbackfn(TestStatus.PASS, 'dolos-V1-2415-000A', 'This is a host error');
     } else {
       this.client.checkDolosFromHost(new Empty()).subscribe(res => {
         console.log(res.status);
@@ -62,15 +66,18 @@ export class DolosService {
     }
   }
 
-  async programCable(hwid: string, eepromData: string,
-    callbackfn: (success: boolean, error_message: string) => void) {
+  async programCable(
+    hwid: string,
+    eepromData: string,
+    callbackfn: (success: boolean, error_message: string) => void,
+  ) {
     if (isDevMode()) {
       await this.sleep(10000);
-      callbackfn(true, "");
+      callbackfn(true, '');
     } else {
-      var request = new ProgramCableRequest()
+      const request = new ProgramCableRequest();
       request.hwid = hwid;
-      if (eepromData != '') {
+      if (eepromData !== '') {
         request.eepromData = eepromData;
       }
       this.client.programCable(request).subscribe(res => {
@@ -80,9 +87,9 @@ export class DolosService {
     }
   }
 
-  getModels(callbackfn: (models: string[] ) => void) {
+  getModels(callbackfn: (models: string[]) => void) {
     if (isDevMode()) {
-      callbackfn(["foob360", "foob"]);
+      callbackfn(['foob360', 'foob']);
     } else {
       this.client.getModels(new Empty()).subscribe(res => {
         callbackfn(res.models);
@@ -90,15 +97,23 @@ export class DolosService {
     }
   }
 
-  async getBoardModelMapping(callbackfn: (mapping: BoardModel[] ) => void) {
-      this.client.getBoardModelMapping(new Empty()).subscribe((res: BoardModelMappingResponse) => {
-        if (res.boardModelMappings == undefined) {callbackfn([])} else {callbackfn(res.boardModelMappings)};
+  getBoardModelMapping(callbackfn: (mapping: BoardModel[]) => void) {
+    this.client
+      .getBoardModelMapping(new Empty())
+      .subscribe((res: BoardModelMappingResponse) => {
+        if (res.boardModelMappings === undefined) {
+          callbackfn([]);
+        } else {
+          callbackfn(res.boardModelMappings);
+        }
       });
   }
 
-  getFirmwareVersions(callbackfn: (versions: string[], default_version: string ) => void) {
+  getFirmwareVersions(
+    callbackfn: (versions: string[], default_version: string) => void,
+  ) {
     if (isDevMode()) {
-      callbackfn(["1", "2", "3"], "2");
+      callbackfn(['1', '2', '3'], '2');
     } else {
       this.client.getFirmwareVersions(new Empty()).subscribe(res => {
         callbackfn(res.firmwareVersion, res.defaultFirmwareVersion);
@@ -106,16 +121,21 @@ export class DolosService {
     }
   }
 
-  async updateSerialNumber(hwid: string, eepromData:string, serialNumber: string, callbackfn: (success: boolean, error_message: string) => void) {
+  async updateSerialNumber(
+    hwid: string,
+    eepromData: string,
+    serialNumber: string,
+    callbackfn: (success: boolean, error_message: string) => void,
+  ) {
     if (isDevMode()) {
-      let result: CommandExecutionResults = new CommandExecutionResults();
+      const result: CommandExecutionResults = new CommandExecutionResults();
       result.exitCode = 0;
       await this.sleep(10000);
-      callbackfn(true, "");
+      callbackfn(true, '');
     } else {
-      var request = new ProgramCableRequest()
+      const request = new ProgramCableRequest();
       request.hwid = hwid;
-      if (eepromData != ''){
+      if (eepromData !== '') {
         request.eepromData = eepromData;
       }
       request.newSerialNumber = serialNumber;

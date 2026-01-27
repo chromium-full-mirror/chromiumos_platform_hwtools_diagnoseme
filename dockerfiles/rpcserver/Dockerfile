@@ -41,7 +41,8 @@ RUN python3 -m build
 FROM python:3.11-bookworm
 
 RUN apt-get update && apt-get install -yq \
-    python3-docker
+    python3-docker \
+    dfu-util
 
 COPY dockerfiles/rpcserver/requirements.txt .
 RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
@@ -62,6 +63,8 @@ COPY --from=serverbuild /build/dist .
 RUN pip3 install *.whl --no-deps --no-index --break-system-packages
 
 RUN rm -rf /install_tmp
+
+RUN python3 -m unittest discover -s server
 
 RUN chmod og+w /var/log
 
