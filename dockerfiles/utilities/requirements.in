@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-protobuf==4.21.12
-grpcio-tools==1.51.1
-grpcio-reflection==1.51.1
-grpcio==1.51.1
+protobuf==6.33.4
+grpcio-tools==1.75.1
+grpcio-reflection==1.75.1
+grpcio==1.75.1

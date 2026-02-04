@@ -4,7 +4,7 @@
 # found in the LICENSE file.
 
 ##############################################################################
-FROM python:3.11-bookworm as map
+FROM python:3-trixie AS map
 
 RUN git clone --filter=blob:none --no-checkout --depth 1 --sparse https://chromium.googlesource.com/chromiumos/chromite
 WORKDIR chromite/
@@ -15,6 +15,6 @@ COPY mapping.py .
 RUN python3 mapping.py
 
 #######################################################################
-FROM scratch as copytohost
+FROM scratch AS copytohost
 
 COPY --link --from=map /chromite/mapping.csv /

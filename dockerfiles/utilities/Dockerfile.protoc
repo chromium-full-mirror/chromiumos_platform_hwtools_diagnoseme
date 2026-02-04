@@ -4,7 +4,7 @@
 # found in the LICENSE file.
 
 ##############################################################################
-FROM node:25 as protogen_node
+FROM node:25 AS protogen_node
 
 RUN apt-get update && apt-get install --no-install-recommends -yq \
     npm
@@ -23,11 +23,9 @@ RUN npx protoc --plugin=protoc-gen-ng=$(which protoc-gen-ng) --ng_out=./generate
 
 ##############################################################################
 
-FROM python:3.11-slim-bookworm as protogen_python
+FROM python:3-trixie AS protogen_python
 
-RUN apt-get update && apt-get install --no-install-recommends -yq \
-    python3-pip
-
+RUN pip3 install pip-tools
 WORKDIR /workspace
 COPY dockerfiles/utilities/requirements.txt .
 RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
@@ -39,7 +37,7 @@ RUN python3 -m grpc_tools.protoc -I. -I=$(python3 -c 'import site; print(site.ge
 
 
 #######################################################################
-FROM scratch as copytohost
+FROM scratch AS copytohost
 
 COPY --link --from=protogen_node /workspace/generated/server /
 COPY --link --from=protogen_python /workspace/generated/server /
