@@ -1,4 +1,4 @@
-<!-- Copyright 2025 The ChromiumOS Authors
+<!-- Copyright 2026 The ChromiumOS Authors
      Use of this source code is governed by a BSD-style license that can be
      found in the LICENSE file.
 -->
@@ -13,9 +13,9 @@
   <diagnoseme-rework-card-column column="1">Please scan the desired serial number:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2">
     <mat-form-field subscriptSizing="dynamic">
-      <input matInput placeholder="Servo Serial Number" [(ngModel)]="servoSerialNumber" (input)="onServoSerialNumberChange($event)">
+      <input #servoSerialNumberInput matInput placeholder="Servo Serial Number" [(ngModel)]="servoSerialNumber" (input)="onServoSerialNumberChange($event)" class="data-input">
     </mat-form-field>
-    <test-pass-fail-button #isSerialNumberValid></test-pass-fail-button>
+    <test-pass-fail-button #serialNumberStatus></test-pass-fail-button>
   </diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
     <help-dialog-button image="serial-label.jpg"></help-dialog-button>
@@ -24,8 +24,9 @@
   <diagnoseme-rework-card-column column="1">Please scan the desired mac address:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2">
     <mat-form-field subscriptSizing="dynamic">
-      <input matInput placeholder="Servo MAC Address" [(ngModel)]="servoMacAddress">
+      <input #servoMacAddressInput matInput placeholder="Servo MAC Address" [(ngModel)]="servoMacAddress" (input)="onServoMacAddressChange($event)" class="data-input">
     </mat-form-field>
+    <test-pass-fail-button #macAddressStatus></test-pass-fail-button>
   </diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
     <help-dialog-button image="mac-label.jpg"></help-dialog-button>
@@ -33,7 +34,7 @@
 
 </diagnoseme-rework-card>
 
-<diagnoseme-rework-card title="2. Host Side Programming">
+<diagnoseme-rework-card title="2. Host Side Programming" [progress]="hostSideProgrammingInProgress">
 
   <diagnoseme-rework-card-column column="1">Move the DFU switch to the right ( towards the ethernet port ):</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
@@ -49,7 +50,11 @@
 
   <diagnoseme-rework-card-column column="1">Start host side programming:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2">
-    <button mat-raised-button color="primary" (click)="startHostSideProgramming()">Start</button>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button mat-raised-button color="primary" (click)="startHostSideProgramming()" [disabled]="!canStartHostSideProgramming() || hostSideProgrammingInProgress">Start</button>
+      <test-pass-fail-button #genesysHubStatus></test-pass-fail-button>
+      <test-pass-fail-button #mcuStatus></test-pass-fail-button>
+    </div>
   </diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
 

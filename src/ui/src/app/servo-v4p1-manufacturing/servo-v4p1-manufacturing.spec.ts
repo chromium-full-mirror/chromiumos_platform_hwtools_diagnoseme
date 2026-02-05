@@ -1,4 +1,4 @@
-// Copyright 2025 The ChromiumOS Authors
+// Copyright 2026 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,5 +46,12 @@ describe('ServoV4p1ManufacturingComponent', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('should focus the serial number input on init', () => {
+    const inputElement = fixture.nativeElement.querySelector(
+      'input[placeholder="Servo Serial Number"]',
+    );
+    expect(document.activeElement).toBe(inputElement);
   });
 });
