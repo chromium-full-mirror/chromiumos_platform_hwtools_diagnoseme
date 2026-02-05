@@ -1,28 +1,29 @@
-# Copyright 2025 The ChromiumOS Authors
+# Copyright 2026 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """RPC service providing functionality to provision and test Dolos devices."""
+
 import csv
 from io import StringIO
 import logging
-import os
 import pathlib
 import tempfile
 import time
+from typing import Any
+from typing import Optional
 
 from doloscmd import console_lib
 from doloscmd.error import DolosConsoleError
 from google.cloud import storage
 
+# pylint: disable=no-member
 # pylint: disable=no-name-in-module
+# pylint: disable=import-error
 from server import diagnoseme_dolos_pb2
 from server import diagnoseme_dolos_pb2_grpc
 
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-file_handler = logging.FileHandler(f"/var/log/{__name__}.log")
-logger.addHandler(file_handler)
 
 FIRMWARE_CLOUD_BUCKET = "dolos-firmware"
 BOX_FIRMWARE_SUBDIR = "box_firmware/"
@@ -40,7 +41,9 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
     console library is used to access the box and the cable.
     """
 
-    def get_firmware_versions(self, unused_request, unused_context):
+    def get_firmware_versions(
+        self, unused_request: Any, unused_context: Any
+    ) -> diagnoseme_dolos_pb2.FirmwareVersionsResponse:
         """Retrieves available Dolos firmware versions.
 
         Fetches a list of available firmware versions from a Google Cloud Storage
@@ -70,7 +73,9 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
 
         return response
 
-    def get_models(self, unused_request, unused_context):
+    def get_models(
+        self, unused_request: Any, unused_context: Any
+    ) -> diagnoseme_dolos_pb2.ModelsResponse:
         """Retrieves supported Dolos models.
 
         Queries a Google Cloud Storage bucket to determine the available Dolos models.
@@ -96,7 +101,9 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
         response.models.extend(list(set(models)))
         return response
 
-    def get_board_model_mapping(self, unused_request, unused_context):
+    def get_board_model_mapping(
+        self, unused_request: Any, unused_context: Any
+    ) -> diagnoseme_dolos_pb2.BoardModelMappingResponse:
         """Reads public csv file with board model mapping.
 
         Args:
@@ -105,7 +112,6 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
 
         Returns:
             BoardModelMappingResponse which has the mapping.
-
         """
         logger.debug("Generating board model mapping.")
         response = diagnoseme_dolos_pb2.BoardModelMappingResponse()
@@ -121,7 +127,9 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             response.board_model_mappings.append(board_model_mapping)
         return response
 
-    def update_firmware(self, request, unused_context):
+    def update_firmware(
+        self, request: Any, unused_context: Any
+    ) -> diagnoseme_dolos_pb2.FirmwareUpdateResponse:
         """Updates the firmware on connected Dolos devices.
 
         Initiates a firmware update process on all detected Dolos consoles
@@ -151,7 +159,9 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             response.result.append(result)
         return response
 
-    def check_dolos_from_host(self, unused_request, unused_context):
+    def check_dolos_from_host(
+        self, unused_request: Any, unused_context: Any
+    ) -> diagnoseme_dolos_pb2.CheckDolosFromHostResponse:
         """Checks Dolos status from the host perspective.
 
         Queries a connected Dolos console for its status information, including
@@ -184,7 +194,9 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
 
         return response
 
-    def program_cable(self, request, unused_context):
+    def program_cable(
+        self, request: Any, unused_context: Any
+    ) -> diagnoseme_dolos_pb2.ProgramCableResponse:
         """Programs a Dolos cable.
 
         Performs a dolos repair ( resets the device ) after the update.
@@ -204,14 +216,15 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
         if len(doloses) > 0:
             dolos = doloses[0]
             dolos.open()
-            eeprom_data_filename = None
-            new_serial_number = None
+            eeprom_data_filename: Optional[str] = None
+            new_serial_number: Optional[str] = None
 
             if request.eeprom_data:
-                with tempfile.NamedTemporaryFile(delete=False) as datafile:
-                    datafile.write(request.eeprom_data.encode("utf-8"))
-                    datafile.close()
-                    eeprom_data_filename = datafile.name
+                # pylint: disable=consider-using-with
+                datafile = tempfile.NamedTemporaryFile(delete=False)
+                datafile.write(request.eeprom_data.encode("utf-8"))
+                datafile.close()
+                eeprom_data_filename = datafile.name
 
             if request.new_serial_number:
                 new_serial_number = request.new_serial_number
@@ -224,11 +237,11 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
                 )
             except DolosConsoleError as e:
                 response.error_message = str(e)
-                logging.exception("Failed to program cable.")
+                logger.exception("Failed to program cable.")
                 return response
             finally:
                 if eeprom_data_filename:
-                    os.remove(eeprom_data_filename)
+                    pathlib.Path(eeprom_data_filename).unlink(missing_ok=True)
 
             time.sleep(5)
 
@@ -238,7 +251,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
 
             except DolosConsoleError as e:
                 response.error_message = str(e)
-                logging.exception("Failed to reset the device.")
+                logger.exception("Failed to reset the device.")
         else:
             response.error_message = "No Dolos console found"
 
