@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Copyright 2025 The ChromiumOS Authors
+# Copyright 2026 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """The RPC server that encapsulates a set of services that diagnoseme front
 end can use.
 Current hosted services:
     dolos
+    servod
+    servo_manufacturing
 """
 import argparse
 import asyncio

@@ -10,6 +10,8 @@ import subprocess
 import time
 from typing import Optional
 
+from server import util
+
 
 class ServoProgrammerError(Exception):
     """Error type for servo programming issues."""
@@ -75,11 +77,8 @@ class ServoProgrammer:
         time.sleep(2)
         try:
             logging.debug("Running erase command: %s", " ".join(erase_cmd))
-            erase_result = subprocess.run(
+            erase_result = util.run_command(
                 erase_cmd,
-                capture_output=True,
-                text=True,
-                check=True,
                 timeout=self.PROCESS_TIMEOUT_S,
             )
             logging.debug("ERASE result: %s", erase_result.stdout)
@@ -99,11 +98,8 @@ class ServoProgrammer:
         time.sleep(2)
         try:
             logging.debug("Running write command: %s", " ".join(write_cmd))
-            write_result = subprocess.run(
+            write_result = util.run_command(
                 write_cmd,
-                capture_output=True,
-                text=True,
-                check=True,
                 timeout=self.PROCESS_TIMEOUT_S,
             )
             logging.debug("WRITE result: %s", write_result.stdout)

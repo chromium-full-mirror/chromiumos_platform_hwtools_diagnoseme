@@ -1,24 +1,32 @@
 #!/usr/bin/env python3
-# Copyright 2025 The ChromiumOS Authors
+# Copyright 2026 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
 """Servo Manufacturing service."""
-
+# pylint: disable=no-member
+import logging
 import re
 
 from google.protobuf import empty_pb2
 import grpc
 
 # pylint: disable=no-name-in-module
+from server import genesys_hub_programmer
 from server import servo_manufacturing_pb2
 from server import servo_manufacturing_pb2_grpc
+from server import servo_programmer
 
 
 class ServoV41ManufacturingServicer(
     servo_manufacturing_pb2_grpc.ServoV41ManufacturingServicer
 ):
     """Servo Manufacturing gRPC service."""
+
+    BOARD = "servo_v4p1"
+
+    # The VID/PID of the stm chip before programming/in DFU mode
+    STM_DFU_VID = 0x0483
+    STM_DFU_PID = 0xDF11
 
     RE = (
         r"^(SERVOV4P1-)?"  # device type
@@ -31,7 +39,6 @@ class ServoV41ManufacturingServicer(
     # The serial number is either the standard RE or one of the legacy serial
     # numbers.
     SERIALNO_RE = re.compile(RE)
-
     # Regex to validate mac address input.
     # Note: the mac address regex lives here since it's universal. The regex for
     # serial numbers lives inside each manager, as they change per device.
@@ -51,10 +58,18 @@ class ServoV41ManufacturingServicer(
     ) -> servo_manufacturing_pb2.ProgramGenesysHubResponse:
         """Program the Genesys Hub."""
         del request, context  # Unused
-        print("Programming Genesys Hub...")
-        return servo_manufacturing_pb2.ProgramGenesysHubResponse(
-            success=True, message="Genesys Hub programmed successfully"
-        )
+        logging.info("Programming Genesys Hub...")
+        try:
+            programmer = genesys_hub_programmer.GenesysHubProgrammer(force=False)
+            programmer.program()
+            return servo_manufacturing_pb2.ProgramGenesysHubResponse(
+                success=True, message="Genesys Hub programmed successfully"
+            )
+        except genesys_hub_programmer.GenesysHubProgrammerError as e:
+            logging.exception("Failed to program Genesys Hub")
+            return servo_manufacturing_pb2.ProgramGenesysHubResponse(
+                success=False, message=str(e)
+            )
 
     def program_mcu(
         self,
@@ -63,11 +78,21 @@ class ServoV41ManufacturingServicer(
     ) -> servo_manufacturing_pb2.ProgramMcuResponse:
         """Program the MCU."""
         del context  # Unused
-        print(f"Programming MCU with {request.firmware_path}...")
-        return servo_manufacturing_pb2.ProgramMcuResponse(
-            success=True,
-            message=f"MCU programmed successfully with {request.firmware_path}",
-        )
+        logging.info("Programming MCU with %s...", request.firmware_path)
+        try:
+            dfu_programmer = servo_programmer.ServoProgrammer(
+                self.BOARD, dfu_vid=self.STM_DFU_VID, dfu_pid=self.STM_DFU_PID
+            )
+            dfu_programmer.program()
+            return servo_manufacturing_pb2.ProgramMcuResponse(
+                success=True,
+                message=f"MCU programmed successfully with {request.firmware_path}",
+            )
+        except servo_programmer.ServoProgrammerError as e:
+            logging.exception("Failed to program MCU")
+            return servo_manufacturing_pb2.ProgramMcuResponse(
+                success=False, message=str(e)
+            )
 
     def program_ethernet(
         self,
@@ -76,7 +101,8 @@ class ServoV41ManufacturingServicer(
     ) -> servo_manufacturing_pb2.ProgramEthernetResponse:
         """Program the Ethernet MAC address."""
         del context  # Unused
-        print(f"Programming Ethernet with MAC {request.mac_address}...")
+        logging.info("Programming Ethernet with MAC %s...", request.mac_address)
+        # Actual ethernet programming logic will be added in a future update.
         return servo_manufacturing_pb2.ProgramEthernetResponse(
             success=True,
             message=(
@@ -92,7 +118,8 @@ class ServoV41ManufacturingServicer(
         """Run the specified tests."""
         del context  # Unused
         test_list = ", ".join(request.tests_to_run)
-        print(f"Running tests: {test_list}...")
+        logging.info("Running tests: %s...", test_list)
+        # Actual test execution logic will be added in a future update.
         return servo_manufacturing_pb2.RunTestsResponse(
             all_passed=True, summary=f"Tests {test_list} passed"
         )
@@ -104,7 +131,7 @@ class ServoV41ManufacturingServicer(
     ) -> servo_manufacturing_pb2.ValidationResponse:
         """Validate the Servo Serial number."""
         del context  # Unused
-        print(f"Validating Servo Serial: {request.serial_number}...")
+        logging.info("Validating Servo Serial: %s...", request.serial_number)
         is_valid = bool(self.SERIALNO_RE.match(request.serial_number))
         error_message = "" if is_valid else "Invalid serial number format"
         return servo_manufacturing_pb2.ValidationResponse(
@@ -118,7 +145,7 @@ class ServoV41ManufacturingServicer(
     ) -> servo_manufacturing_pb2.ValidationResponse:
         """Validate the Servo MAC address."""
         del context  # Unused
-        print(f"Validating Servo MAC Address: {request.mac_address}...")
+        logging.info("Validating Servo MAC Address: %s...", request.mac_address)
         is_valid = bool(self.MACADDR_RE.match(request.mac_address))
         error_message = "" if is_valid else "Invalid MAC address format"
         return servo_manufacturing_pb2.ValidationResponse(

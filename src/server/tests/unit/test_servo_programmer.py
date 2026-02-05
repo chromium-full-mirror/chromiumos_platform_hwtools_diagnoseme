@@ -20,7 +20,7 @@ class TestServoProgrammer(unittest.TestCase):
 
     @mock.patch("glob.glob")
     @mock.patch("pathlib.Path.stat")
-    @mock.patch("subprocess.run")
+    @mock.patch("server.util.run_command")
     @mock.patch("time.sleep")
     def test_program_success(self, mock_sleep, mock_run, mock_stat, mock_glob):
         """Test successful programming flow."""
@@ -48,9 +48,6 @@ class TestServoProgrammer(unittest.TestCase):
         ]
         mock_run.assert_called_with(
             expected_write_cmd,
-            capture_output=True,
-            text=True,
-            check=True,
             timeout=120,
         )
 
@@ -63,7 +60,7 @@ class TestServoProgrammer(unittest.TestCase):
 
     @mock.patch("glob.glob")
     @mock.patch("pathlib.Path.stat")
-    @mock.patch("subprocess.run")
+    @mock.patch("server.util.run_command")
     @mock.patch("time.sleep")
     def test_program_erase_fail_code_1(
         self, unused_mock_sleep, mock_run, mock_stat, mock_glob
@@ -80,7 +77,7 @@ class TestServoProgrammer(unittest.TestCase):
 
     @mock.patch("glob.glob")
     @mock.patch("pathlib.Path.stat")
-    @mock.patch("subprocess.run")
+    @mock.patch("server.util.run_command")
     @mock.patch("time.sleep")
     def test_program_write_fail_code_1(
         self, unused_mock_sleep, mock_run, mock_stat, mock_glob
@@ -99,7 +96,7 @@ class TestServoProgrammer(unittest.TestCase):
 
     @mock.patch("glob.glob")
     @mock.patch("pathlib.Path.stat")
-    @mock.patch("subprocess.run")
+    @mock.patch("server.util.run_command")
     @mock.patch("time.sleep")
     def test_program_erase_timeout(
         self, unused_mock_sleep, mock_run, mock_stat, mock_glob
@@ -114,7 +111,7 @@ class TestServoProgrammer(unittest.TestCase):
 
     @mock.patch("glob.glob")
     @mock.patch("pathlib.Path.stat")
-    @mock.patch("subprocess.run")
+    @mock.patch("server.util.run_command")
     @mock.patch("time.sleep")
     def test_program_fatal_error(
         self, unused_mock_sleep, mock_run, mock_stat, mock_glob
