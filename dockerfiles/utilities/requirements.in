@@ -6,3 +6,5 @@ protobuf==6.33.4
 grpcio-tools==1.75.1
 grpcio-reflection==1.75.1
 grpcio==1.75.1
+pip-tools
+setuptools==81.0.0

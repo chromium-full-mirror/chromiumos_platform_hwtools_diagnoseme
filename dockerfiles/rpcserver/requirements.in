@@ -8,3 +8,5 @@ grpcio-reflection==1.75.1
 grpcio==1.75.1
 google-cloud-storage
 pyserial
+pip-tools
+setuptools==81.0.0
