@@ -17,4 +17,5 @@ import {MatProgressBarModule} from '@angular/material/progress-bar';
 export class DiagnosemeReworkCard {
   @Input() title = 'Placeholder for Title';
   @Input() progress = false;
+  @Input() disabled = false;
 }

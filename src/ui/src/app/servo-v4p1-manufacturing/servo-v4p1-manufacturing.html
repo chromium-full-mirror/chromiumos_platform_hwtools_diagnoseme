@@ -34,7 +34,7 @@
 
 </diagnoseme-rework-card>
 
-<diagnoseme-rework-card title="2. Host Side Programming" [progress]="hostSideProgrammingInProgress">
+<diagnoseme-rework-card title="2. Host Side Programming" [progress]="hostSideProgrammingInProgress" [disabled]="!canStartHostSideProgramming()">
 
   <diagnoseme-rework-card-column column="1">Move the DFU switch to the right ( towards the ethernet port ):</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
@@ -51,7 +51,7 @@
   <diagnoseme-rework-card-column column="1">Start host side programming:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2">
     <div style="display: flex; align-items: center; gap: 8px;">
-      <button mat-raised-button color="primary" (click)="startHostSideProgramming()" [disabled]="!canStartHostSideProgramming() || hostSideProgrammingInProgress">Start</button>
+      <button #hostStartButton mat-raised-button color="primary" (click)="startHostSideProgramming()" [disabled]="!canStartHostSideProgramming() || hostSideProgrammingInProgress">Start</button>
       <test-pass-fail-button #genesysHubStatus></test-pass-fail-button>
       <test-pass-fail-button #mcuStatus></test-pass-fail-button>
     </div>
@@ -60,7 +60,7 @@
 
 </diagnoseme-rework-card>
 
-<diagnoseme-rework-card title="3. DUT Side Programming">
+<diagnoseme-rework-card title="3. Serial Number Programming" [progress]="serialNumberProgrammingInProgress" [disabled]="!hostSideProgrammingSuccessful">
 
   <diagnoseme-rework-card-column column="1">Unplug the host cable from the servo:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
@@ -80,6 +80,19 @@
     <help-dialog-button image="host-cable-insert.jpg"></help-dialog-button>
   </diagnoseme-rework-card-column>
 
+  <diagnoseme-rework-card-column column="1">Start serial number programming:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button #serialStartButton mat-raised-button color="primary" (click)="startSerialNumberProgramming()" [disabled]="!hostSideProgrammingSuccessful || serialNumberProgrammingInProgress">Start</button>
+      <test-pass-fail-button #serialStatus></test-pass-fail-button>
+    </div>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+</diagnoseme-rework-card>
+
+<diagnoseme-rework-card title="4. DUT Side Programming" [progress]="dutSideProgrammingInProgress" [disabled]="!serialNumberProgrammingSuccessful">
+
   <diagnoseme-rework-card-column column="1">Insert the servo cable top the DUT:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
@@ -88,14 +101,17 @@
 
   <diagnoseme-rework-card-column column="1">Start DUT side programming:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2">
-    <button mat-raised-button color="primary" (click)="startDutSideProgramming()">Start</button>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button mat-raised-button color="primary" (click)="startDutSideProgramming()" [disabled]="!serialNumberProgrammingSuccessful || dutSideProgrammingInProgress">Start</button>
+      <test-pass-fail-button #ethStatus></test-pass-fail-button>
+    </div>
   </diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
 
 
 </diagnoseme-rework-card>
 
-<diagnoseme-rework-card title="4. Testing">
+<diagnoseme-rework-card title="5. Testing" [disabled]="!dutSideProgrammingSuccessful">
 
   <diagnoseme-rework-card-column column="1">Insert the host cable to the servo:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>

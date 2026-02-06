@@ -11,6 +11,8 @@ import {
   ProgramGenesysHubResponse,
   ProgramMcuRequest,
   ProgramMcuResponse,
+  ProgramSerialRequest,
+  ProgramSerialResponse,
   ProgramEthernetRequest,
   ProgramEthernetResponse,
   RunTestsRequest,
@@ -43,9 +45,19 @@ export class ServoManufacturingService {
     return this.client.programMcu(request);
   }
 
-  programEthernet(macAddress: string): Observable<ProgramEthernetResponse> {
+  programSerial(serialNumber: string): Observable<ProgramSerialResponse> {
+    const request = new ProgramSerialRequest();
+    request.serialNumber = serialNumber;
+    return this.client.programSerial(request);
+  }
+
+  programEthernet(
+    macAddress: string,
+    serialNumber: string,
+  ): Observable<ProgramEthernetResponse> {
     const request = new ProgramEthernetRequest();
     request.macAddress = macAddress;
+    request.serialNumber = serialNumber;
     return this.client.programEthernet(request);
   }
 

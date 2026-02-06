@@ -7,6 +7,7 @@ import {
   ChangeDetectorRef,
   Component,
   ElementRef,
+  OnInit,
   ViewChild,
   inject,
 } from '@angular/core';
@@ -18,6 +19,8 @@ import {MatFormFieldModule} from '@angular/material/form-field';
 import {MatIconModule} from '@angular/material/icon';
 import {MatInputModule} from '@angular/material/input';
 import {MatToolbarModule} from '@angular/material/toolbar';
+import {Subject} from 'rxjs';
+import {debounceTime, switchMap} from 'rxjs/operators';
 import {DiagnosemeReworkCard} from '../diagnoseme-rework-card/diagnoseme-rework-card';
 import {DiagnosemeReworkCardColumn} from '../diagnoseme-rework-card-column/diagnoseme-rework-card-column';
 import {DialogOops} from '../dolos-provision/dolos-provision';
@@ -44,7 +47,7 @@ import {TestPassFailButton} from '../test-pass-fail-button/test-pass-fail-button
     TestPassFailButton,
   ],
 })
-export class ServoV4p1ManufacturingComponent implements AfterViewInit {
+export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
   private readonly servoManufacturingService = inject(
     ServoManufacturingService,
   );
@@ -56,6 +59,9 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit {
 
   @ViewChild('servoMacAddressInput')
   servoMacAddressInput!: ElementRef<HTMLInputElement>;
+
+  @ViewChild('hostStartButton', {read: ElementRef})
+  hostStartButton!: ElementRef<HTMLButtonElement>;
 
   @ViewChild('serialNumberStatus')
   serialNumberStatus!: TestPassFailButton;
@@ -69,11 +75,70 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit {
   @ViewChild('mcuStatus')
   mcuStatus!: TestPassFailButton;
 
+  @ViewChild('serialStatus')
+  serialStatus!: TestPassFailButton;
+
+  @ViewChild('ethStatus')
+  ethStatus!: TestPassFailButton;
+
   servoSerialNumber = '';
   servoMacAddress = '';
   isSerialNumberValid = false;
   isMacAddressValid = false;
   hostSideProgrammingInProgress = false;
+  hostSideProgrammingSuccessful = false;
+  serialNumberProgrammingInProgress = false;
+  serialNumberProgrammingSuccessful = false;
+  dutSideProgrammingInProgress = false;
+  dutSideProgrammingSuccessful = false;
+
+  private serialNumberSubject = new Subject<string>();
+  private macAddressSubject = new Subject<string>();
+
+  ngOnInit() {
+    this.serialNumberSubject
+      .pipe(
+        debounceTime(500),
+        switchMap(serial =>
+          this.servoManufacturingService.validateServoSerial(serial),
+        ),
+      )
+      .subscribe(response => {
+        this.isSerialNumberValid = response.isValid;
+        if (this.isSerialNumberValid) {
+          this.serialNumberStatus.showPassed();
+          this.servoMacAddressInput.nativeElement.focus();
+          this.cdr.detectChanges();
+          if (this.isMacAddressValid) {
+            this.hostStartButton.nativeElement.focus();
+          }
+        } else {
+          this.serialNumberStatus.showFailed();
+        }
+        this.cdr.detectChanges();
+      });
+
+    this.macAddressSubject
+      .pipe(
+        debounceTime(500),
+        switchMap(mac =>
+          this.servoManufacturingService.validateServoMacAddress(mac),
+        ),
+      )
+      .subscribe(response => {
+        this.isMacAddressValid = response.isValid;
+        if (this.isMacAddressValid) {
+          this.macAddressStatus.showPassed();
+          this.cdr.detectChanges();
+          if (this.isSerialNumberValid) {
+            this.hostStartButton.nativeElement.focus();
+          }
+        } else {
+          this.macAddressStatus.showFailed();
+        }
+        this.cdr.detectChanges();
+      });
+  }
 
   ngAfterViewInit() {
     this.servoSerialNumberInput.nativeElement.focus();
@@ -81,45 +146,30 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit {
 
   onServoSerialNumberChange(event: Event) {
     const target = event.target as HTMLInputElement;
-    this.servoSerialNumber = target.value;
+    this.servoSerialNumber = target.value.trim().toUpperCase();
+    target.value = this.servoSerialNumber;
     this.isSerialNumberValid = false;
-    if (!this.servoSerialNumber) {
-      this.serialNumberStatus.hide();
-      return;
+    this.hostSideProgrammingSuccessful = false;
+    this.serialNumberProgrammingSuccessful = false;
+    this.dutSideProgrammingSuccessful = false;
+    this.serialNumberStatus.hide();
+    if (this.servoSerialNumber) {
+      this.serialNumberSubject.next(this.servoSerialNumber);
     }
-    this.servoManufacturingService
-      .validateServoSerial(this.servoSerialNumber)
-      .subscribe(response => {
-        this.isSerialNumberValid = response.isValid;
-        if (this.isSerialNumberValid) {
-          this.serialNumberStatus.showPassed();
-          this.servoMacAddressInput.nativeElement.focus();
-        } else {
-          this.serialNumberStatus.showFailed();
-        }
-        this.cdr.detectChanges();
-      });
   }
 
   onServoMacAddressChange(event: Event) {
     const target = event.target as HTMLInputElement;
-    this.servoMacAddress = target.value;
+    this.servoMacAddress = target.value.trim().toUpperCase();
+    target.value = this.servoMacAddress;
     this.isMacAddressValid = false;
-    if (!this.servoMacAddress) {
-      this.macAddressStatus.hide();
-      return;
+    this.hostSideProgrammingSuccessful = false;
+    this.serialNumberProgrammingSuccessful = false;
+    this.dutSideProgrammingSuccessful = false;
+    this.macAddressStatus.hide();
+    if (this.servoMacAddress) {
+      this.macAddressSubject.next(this.servoMacAddress);
     }
-    this.servoManufacturingService
-      .validateServoMacAddress(this.servoMacAddress)
-      .subscribe(response => {
-        this.isMacAddressValid = response.isValid;
-        if (this.isMacAddressValid) {
-          this.macAddressStatus.showPassed();
-        } else {
-          this.macAddressStatus.showFailed();
-        }
-        this.cdr.detectChanges();
-      });
   }
 
   canStartHostSideProgramming(): boolean {
@@ -128,22 +178,26 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit {
 
   startHostSideProgramming() {
     this.hostSideProgrammingInProgress = true;
-    this.genesysHubStatus.showWorking();
+    this.hostSideProgrammingSuccessful = false;
+    this.serialNumberProgrammingSuccessful = false;
+    this.genesysHubStatus.hide();
     this.mcuStatus.hide();
 
     this.servoManufacturingService.programGenesysHub().subscribe({
       next: response => {
         if (response.success) {
           this.genesysHubStatus.showPassed();
-          this.mcuStatus.showWorking();
           this.servoManufacturingService.programMcu('').subscribe({
             next: mcuResponse => {
               if (mcuResponse.success) {
                 this.mcuStatus.showPassed();
+                this.hostSideProgrammingSuccessful = true;
               } else {
                 this.mcuStatus.showFailed();
                 this.dialog.open(DialogOops, {
-                  data: mcuResponse.message,
+                  data:
+                    mcuResponse.message +
+                    (mcuResponse.logs ? '\n\n' + mcuResponse.logs : ''),
                 });
               }
               this.hostSideProgrammingInProgress = false;
@@ -162,7 +216,8 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit {
           this.genesysHubStatus.showFailed();
           this.hostSideProgrammingInProgress = false;
           this.dialog.open(DialogOops, {
-            data: response.message,
+            data:
+              response.message + (response.logs ? '\n\n' + response.logs : ''),
           });
           this.cdr.detectChanges();
         }
@@ -177,8 +232,73 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit {
       },
     });
   }
+
+  startSerialNumberProgramming() {
+    this.serialNumberProgrammingInProgress = true;
+    this.serialNumberProgrammingSuccessful = false;
+    this.dutSideProgrammingSuccessful = false;
+    this.serialStatus.hide();
+
+    this.servoManufacturingService
+      .programSerial(this.servoSerialNumber)
+      .subscribe({
+        next: serialResponse => {
+          if (serialResponse.success) {
+            this.serialStatus.showPassed();
+            this.serialNumberProgrammingSuccessful = true;
+          } else {
+            this.serialStatus.showFailed();
+            this.dialog.open(DialogOops, {
+              data:
+                serialResponse.message +
+                (serialResponse.logs ? '\n\n' + serialResponse.logs : ''),
+            });
+          }
+          this.serialNumberProgrammingInProgress = false;
+          this.cdr.detectChanges();
+        },
+        error: err => {
+          this.serialStatus.showFailed();
+          this.serialNumberProgrammingInProgress = false;
+          this.dialog.open(DialogOops, {
+            data: err.message || 'Unknown error during serial programming',
+          });
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
   startDutSideProgramming() {
-    // TODO(b/362261913): Implement DUT side programming
-    console.log('Start DUT side programming');
+    this.dutSideProgrammingInProgress = true;
+    this.dutSideProgrammingSuccessful = false;
+    this.ethStatus.hide();
+
+    this.servoManufacturingService
+      .programEthernet(this.servoMacAddress, this.servoSerialNumber)
+      .subscribe({
+        next: response => {
+          if (response.success) {
+            this.ethStatus.showPassed();
+            this.dutSideProgrammingSuccessful = true;
+          } else {
+            this.ethStatus.showFailed();
+            this.dialog.open(DialogOops, {
+              data:
+                response.message +
+                (response.logs ? '\n\n' + response.logs : ''),
+            });
+          }
+          this.dutSideProgrammingInProgress = false;
+          this.cdr.detectChanges();
+        },
+        error: err => {
+          this.ethStatus.showFailed();
+          this.dutSideProgrammingInProgress = false;
+          this.dialog.open(DialogOops, {
+            data: err.message || 'Unknown error during Ethernet programming',
+          });
+          this.cdr.detectChanges();
+        },
+      });
   }
 }

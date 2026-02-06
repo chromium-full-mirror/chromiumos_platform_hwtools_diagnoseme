@@ -3,13 +3,19 @@
 // found in the LICENSE file.
 
 .reworkcard {
-    padding-bottom: 10px;
+    margin-bottom: 24px;
+
+    &.disabled-card {
+      opacity: 0.3;
+      pointer-events: none;
+    }
 }
 
 .f-container {
   width: 100%;
   display: grid;
-  grid-template-columns: 800px 270px 50px;
+  grid-template-columns: 550px 400px 60px;
   grid-auto-rows: minmax(60px, auto);
-  grid-gap: 3px;
+  grid-gap: 8px;
+  align-items: center;
 }

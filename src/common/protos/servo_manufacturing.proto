@@ -1,105 +1,84 @@
+
 // Copyright 2025 The ChromiumOS Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 syntax = "proto3";
 package diagnoseme;
 import "google/protobuf/empty.proto";
-
 service ServoV41Manufacturing {
   // Example RPC call
   rpc get_status(google.protobuf.Empty) returns (StatusResponse) {}
-
   // New RPC call
   rpc program_genesys_hub(ProgramGenesysHubRequest) returns (ProgramGenesysHubResponse) {}
-
   // Program MCU RPC call
   rpc program_mcu(ProgramMcuRequest) returns (ProgramMcuResponse) {}
-
   // Program Serial RPC call
   rpc program_serial(ProgramSerialRequest) returns (ProgramSerialResponse) {}
-
   // Program Ethernet RPC call
   rpc program_ethernet(ProgramEthernetRequest) returns (ProgramEthernetResponse) {}
-
   // Run Tests RPC call
   rpc run_tests(RunTestsRequest) returns (RunTestsResponse) {}
-
   // Validate Servo Serial RPC call
   rpc validate_servo_serial(ValidateServoSerialRequest) returns (ValidationResponse) {}
-
   // Validate Servo MAC Address RPC call
   rpc validate_servo_mac_address(ValidateServoMacAddressRequest) returns (ValidationResponse) {}
 }
-
 message StatusResponse {
   string status = 1;
 }
-
 message ProgramGenesysHubRequest {
   // Add request fields here
 }
-
 message ProgramGenesysHubResponse {
   // Add response fields here
   bool success = 1;
   string message = 2;
   string logs = 3;
 }
-
 message ProgramMcuRequest {
   // Add request fields here
   string firmware_path = 1;
 }
-
 message ProgramMcuResponse {
   // Add response fields here
   bool success = 1;
   string message = 2;
   string logs = 3;
 }
-
 message ProgramSerialRequest {
   string serial_number = 1;
 }
-
 message ProgramSerialResponse {
   bool success = 1;
   string message = 2;
   string logs = 3;
 }
-
 message ProgramEthernetRequest {
   // Add request fields here
   string mac_address = 1;
   string serial_number = 2;
 }
-
 message ProgramEthernetResponse {
   // Add response fields here
   bool success = 1;
   string message = 2;
   string logs = 3;
 }
-
 message RunTestsRequest {
   // Add request fields here
   repeated string tests_to_run = 1;
 }
-
 message RunTestsResponse {
   // Add response fields here
   bool all_passed = 1;
   string summary = 2;
 }
-
 message ValidateServoSerialRequest {
   string serial_number = 1;
 }
-
 message ValidateServoMacAddressRequest {
   string mac_address = 1;
 }
-
 message ValidationResponse {
   bool is_valid = 1;
   string error = 2;

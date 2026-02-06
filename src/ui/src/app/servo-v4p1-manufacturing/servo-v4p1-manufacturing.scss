@@ -3,5 +3,14 @@
 // found in the LICENSE file.
 
 .data-input {
-  width: 22ch;
+  width: 100%;
+}
+
+mat-form-field {
+  width: 100%;
+}
+
+button:focus {
+  outline: 2px solid red;
+  outline-offset: 2px;
 }
