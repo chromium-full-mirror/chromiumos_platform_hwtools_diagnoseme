@@ -12,9 +12,14 @@ import grpc
 
 # pylint: disable=no-name-in-module
 from server import genesys_hub_programmer
+from server import rtk_eth_programmer
+from server import serial_programmer
 from server import servo_manufacturing_pb2
 from server import servo_manufacturing_pb2_grpc
 from server import servo_programmer
+from server import util
+from server.servo_console import ServoConsole
+from server.servo_console import ServoConsoleError
 
 
 class ServoV41ManufacturingServicer(
@@ -67,8 +72,9 @@ class ServoV41ManufacturingServicer(
             )
         except genesys_hub_programmer.GenesysHubProgrammerError as e:
             logging.exception("Failed to program Genesys Hub")
+            logs = util.get_logs_from_exception(e)
             return servo_manufacturing_pb2.ProgramGenesysHubResponse(
-                success=False, message=str(e)
+                success=False, message=str(e), logs=logs
             )
 
     def program_mcu(
@@ -90,8 +96,30 @@ class ServoV41ManufacturingServicer(
             )
         except servo_programmer.ServoProgrammerError as e:
             logging.exception("Failed to program MCU")
+            logs = util.get_logs_from_exception(e)
             return servo_manufacturing_pb2.ProgramMcuResponse(
-                success=False, message=str(e)
+                success=False, message=str(e), logs=logs
+            )
+
+    def program_serial(
+        self,
+        request: servo_manufacturing_pb2.ProgramSerialRequest,
+        context: grpc.ServicerContext,
+    ) -> servo_manufacturing_pb2.ProgramSerialResponse:
+        """Program the serial number."""
+        del context  # Unused
+        logging.info("Programming serial number: %s...", request.serial_number)
+        try:
+            programmer = serial_programmer.SerialProgrammer(request.serial_number)
+            programmer.program()
+            return servo_manufacturing_pb2.ProgramSerialResponse(
+                success=True, message="Serial number programmed successfully"
+            )
+        except serial_programmer.SerialProgrammerError as e:
+            logging.exception("Failed to program serial number")
+            logs = util.get_logs_from_exception(e)
+            return servo_manufacturing_pb2.ProgramSerialResponse(
+                success=False, message=str(e), logs=logs
             )
 
     def program_ethernet(
@@ -101,14 +129,43 @@ class ServoV41ManufacturingServicer(
     ) -> servo_manufacturing_pb2.ProgramEthernetResponse:
         """Program the Ethernet MAC address."""
         del context  # Unused
-        logging.info("Programming Ethernet with MAC %s...", request.mac_address)
-        # Actual ethernet programming logic will be added in a future update.
-        return servo_manufacturing_pb2.ProgramEthernetResponse(
-            success=True,
-            message=(
-                f"Ethernet MAC address {request.mac_address} programmed successfully"
-            ),
+        logging.info(
+            "Programming Ethernet with MAC %s for serial %s...",
+            request.mac_address,
+            request.serial_number,
         )
+
+        # Construct serial path based on the serial number
+        # If serial_number is missing, we might assume Uninitialized, but for this step
+        # it should be initialized.
+        serial_path = (
+            f"/dev/serial/by-id/usb-Google_LLC_Servo_V4p1_{request.serial_number}"
+            "-if00-port0"
+        )
+        # Fallback if the user hasn't rebooted or if it's still uninitialized?
+        # For now, strictly use the provided serial number.
+
+        servo_mcu_connector = ServoConsole(serial_path)
+
+        try:
+            programmer = rtk_eth_programmer.RTKEthProgrammer(force=False)
+            programmer.program(request.mac_address, servo_mcu_connector)
+            return servo_manufacturing_pb2.ProgramEthernetResponse(
+                success=True,
+                message=(
+                    f"Ethernet MAC address {request.mac_address} "
+                    "programmed successfully"
+                ),
+            )
+        except (
+            rtk_eth_programmer.RTKEthProgrammerError,
+            ServoConsoleError,
+        ) as e:
+            logging.exception("Failed to program Ethernet")
+            logs = util.get_logs_from_exception(e)
+            return servo_manufacturing_pb2.ProgramEthernetResponse(
+                success=False, message=str(e), logs=logs
+            )
 
     def run_tests(
         self,

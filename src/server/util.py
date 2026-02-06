@@ -49,3 +49,17 @@ def run_command(cmd: List[str], **kwargs: Any) -> subprocess.CompletedProcess:
     kwargs.setdefault("text", True)
     check = kwargs.pop("check", True)
     return subprocess.run(cmd, check=check, **kwargs)
+
+
+def get_logs_from_exception(e: Exception) -> str:
+    """Helper to extract stdout and stderr from exception if available.
+
+    Args:
+      e: The exception object.
+
+    Returns:
+      Formatted string containing stdout and stderr.
+    """
+    stdout = getattr(e, "stdout", "") or ""
+    stderr = getattr(e, "stderr", "") or ""
+    return f"STDOUT:\n{stdout}\nSTDERR:\n{stderr}"

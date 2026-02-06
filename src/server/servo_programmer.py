@@ -16,6 +16,16 @@ from server import util
 class ServoProgrammerError(Exception):
     """Error type for servo programming issues."""
 
+    def __init__(
+        self,
+        message: str,
+        stdout: Optional[str] = None,
+        stderr: Optional[str] = None,
+    ):
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
+
 
 # pylint: disable=too-few-public-methods
 class ServoProgrammer:
@@ -90,10 +100,16 @@ class ServoProgrammer:
                 )
                 return False
             logging.exception("Error during erase: %s", e.stderr)
-            raise ServoProgrammerError("Issue on erase. Giving up.") from e
+            raise ServoProgrammerError(
+                "Issue on erase. Giving up.", stdout=e.stdout, stderr=e.stderr
+            ) from e
         except subprocess.TimeoutExpired as e:
             logging.exception("Erase command timed out")
-            raise ServoProgrammerError("Erase command timed out.") from e
+            raise ServoProgrammerError(
+                "Erase command timed out.",
+                stdout=getattr(e, "stdout", None),
+                stderr=getattr(e, "stderr", None),
+            ) from e
 
         time.sleep(2)
         try:
@@ -111,9 +127,15 @@ class ServoProgrammer:
                 )
                 return False
             logging.exception("Error during write: %s", e.stderr)
-            raise ServoProgrammerError("Issue on write. Giving up.") from e
+            raise ServoProgrammerError(
+                "Issue on write. Giving up.", stdout=e.stdout, stderr=e.stderr
+            ) from e
         except subprocess.TimeoutExpired as e:
             logging.exception("Write command timed out")
-            raise ServoProgrammerError("Write command timed out.") from e
+            raise ServoProgrammerError(
+                "Write command timed out.",
+                stdout=getattr(e, "stdout", None),
+                stderr=getattr(e, "stderr", None),
+            ) from e
 
         return True

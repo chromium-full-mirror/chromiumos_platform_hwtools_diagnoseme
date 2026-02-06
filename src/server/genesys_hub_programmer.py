@@ -15,6 +15,16 @@ from server import util
 class GenesysHubProgrammerError(Exception):
     """Genesys hub (GL3590) error class."""
 
+    def __init__(
+        self,
+        message: str,
+        stdout: os.PathLike | str | None = None,
+        stderr: os.PathLike | str | None = None,
+    ):
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
+
 
 class GenesysHubProgrammer:
     """Class to program the genesys hub."""
@@ -82,7 +92,9 @@ class GenesysHubProgrammer:
                     )
                     return False
                 logging.exception("Error during programming: %s", e.stderr)
-                raise GenesysHubProgrammerError("Issue on write. Giving up.") from e
+                raise GenesysHubProgrammerError(
+                    "Issue on write. Giving up.", stdout=e.stdout, stderr=e.stderr
+                ) from e
         return True
 
     def verify(self):
@@ -102,7 +114,9 @@ class GenesysHubProgrammer:
             logging.debug("READ result: %s", read_result.stdout)
         except subprocess.CalledProcessError as e:
             logging.exception("Error during validation: %s", e.stderr)
-            raise GenesysHubProgrammerError("Issue on read. Giving up.") from e
+            raise GenesysHubProgrammerError(
+                "Issue on read. Giving up.", stdout=e.stdout, stderr=e.stderr
+            ) from e
 
         match = self.VERSION_REGEX.search(read_result.stdout)
         return bool(match and match.group(1) == self.FW_VERSION)

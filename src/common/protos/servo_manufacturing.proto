@@ -15,6 +15,9 @@ service ServoV41Manufacturing {
   // Program MCU RPC call
   rpc program_mcu(ProgramMcuRequest) returns (ProgramMcuResponse) {}
 
+  // Program Serial RPC call
+  rpc program_serial(ProgramSerialRequest) returns (ProgramSerialResponse) {}
+
   // Program Ethernet RPC call
   rpc program_ethernet(ProgramEthernetRequest) returns (ProgramEthernetResponse) {}
 
@@ -40,6 +43,7 @@ message ProgramGenesysHubResponse {
   // Add response fields here
   bool success = 1;
   string message = 2;
+  string logs = 3;
 }
 
 message ProgramMcuRequest {
@@ -51,17 +55,30 @@ message ProgramMcuResponse {
   // Add response fields here
   bool success = 1;
   string message = 2;
+  string logs = 3;
+}
+
+message ProgramSerialRequest {
+  string serial_number = 1;
+}
+
+message ProgramSerialResponse {
+  bool success = 1;
+  string message = 2;
+  string logs = 3;
 }
 
 message ProgramEthernetRequest {
   // Add request fields here
   string mac_address = 1;
+  string serial_number = 2;
 }
 
 message ProgramEthernetResponse {
   // Add response fields here
   bool success = 1;
   string message = 2;
+  string logs = 3;
 }
 
 message RunTestsRequest {
