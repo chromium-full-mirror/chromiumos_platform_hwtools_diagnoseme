@@ -63,6 +63,9 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
   @ViewChild('hostStartButton', {read: ElementRef})
   hostStartButton!: ElementRef<HTMLButtonElement>;
 
+  @ViewChild('serialStartButton', {read: ElementRef})
+  serialStartButton!: ElementRef<HTMLButtonElement>;
+
   @ViewChild('serialNumberStatus')
   serialNumberStatus!: TestPassFailButton;
 
@@ -192,6 +195,9 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
               if (mcuResponse.success) {
                 this.mcuStatus.showPassed();
                 this.hostSideProgrammingSuccessful = true;
+                setTimeout(() => {
+                  this.serialStartButton.nativeElement.focus();
+                }, 0);
               } else {
                 this.mcuStatus.showFailed();
                 this.dialog.open(DialogOops, {
