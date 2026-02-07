@@ -11,6 +11,7 @@ RUN apt-get update --no-install-recommends \
 
 WORKDIR /
 RUN git clone https://chromium.googlesource.com/chromiumos/platform/dolos
+RUN git clone https://chromium.googlesource.com/chromiumos/third_party/hdctools
 RUN pip3 install -r /dolos/tools/requirements.txt --require-hashes --break-system-packages
 
 WORKDIR /dolos/tools/doloscmd
@@ -101,13 +102,13 @@ RUN apt-get update && apt-get install -yq \
     libxmlb2 \
     libjcat1
 
-RUN pip3 install pip-tools
-
 COPY dockerfiles/rpcserver/requirements.txt .
 RUN pip3 install -r requirements.txt --require-hashes  --break-system-packages
 
 RUN mkdir /var/log/rpcserver
 RUN mkdir /usr/local/tmp
+RUN mkdir -p /usr/local/server/binfiles
+RUN mkdir -p /usr/local/server/binfiles_shadow
 
 WORKDIR /usr/local/server
 
@@ -115,6 +116,7 @@ WORKDIR /install_tmp
 COPY --from=dolostools /dolos/tools/doloscmd/dist .
 COPY --from=dolostools /dolos/tools/dolosbattery/dist .
 COPY --from=dolostools /dolos/tools/requirements.txt .
+COPY --from=dolostools /hdctools/servo/firmware/usbkm/KeyboardSerial/Keyboard.hex /usr/local/server/binfiles_shadow/
 RUN pip3 install *.whl --no-deps --no-index --break-system-packages
 RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
 
@@ -143,4 +145,4 @@ ENV PYTHONPATH=/usr/lib/python3/dist-packages/
 
 EXPOSE 6002
 
-CMD ["rpcserver", "-v"]
+CMD cp -r /usr/local/server/binfiles_shadow/* /usr/local/server/binfiles/ && rpcserver -v
