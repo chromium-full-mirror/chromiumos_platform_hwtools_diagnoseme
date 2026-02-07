@@ -2,6 +2,17 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+####################################################################
+FROM debian:trixie AS hdctools-builder
+
+RUN apt-get update --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates
+
+WORKDIR /
+RUN git clone https://chromium.googlesource.com/chromiumos/third_party/hdctools
+
 ######################################################################
 FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:alpine AS rtk-fetcher
 WORKDIR /fetch
@@ -25,7 +36,6 @@ RUN apt-get update --no-install-recommends \
 
 WORKDIR /
 RUN git clone https://chromium.googlesource.com/chromiumos/platform/dolos
-RUN git clone https://chromium.googlesource.com/chromiumos/third_party/hdctools
 RUN pip3 install -r /dolos/tools/requirements.txt --require-hashes --break-system-packages
 
 WORKDIR /dolos/tools/doloscmd
@@ -176,7 +186,7 @@ WORKDIR /install_tmp
 COPY --from=dolostools /dolos/tools/doloscmd/dist .
 COPY --from=dolostools /dolos/tools/dolosbattery/dist .
 COPY --from=dolostools /dolos/tools/requirements.txt .
-COPY --from=dolostools /hdctools/servo/firmware/usbkm/KeyboardSerial/Keyboard.hex /usr/local/server/binfiles_shadow/
+COPY --from=hdctools-builder /hdctools/servo/firmware/usbkm/KeyboardSerial/Keyboard.hex /usr/local/server/binfiles_shadow/
 RUN pip3 install *.whl --no-deps --no-index --break-system-packages
 RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
 
