@@ -28,3 +28,4 @@ src/generated/**
 **/node_modules/**
 src/ui/package-lock.json
 src/ui/src/proto/**
+dist/**
