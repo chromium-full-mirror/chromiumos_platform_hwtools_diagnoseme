@@ -1,6 +1,20 @@
 # Copyright 2025 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+######################################################################
+FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:alpine AS rtk-fetcher
+WORKDIR /fetch
+# Copy files from dist if they exist. Kaniko and Docker will not fail if the
+# files are missing because of the wildcard.
+COPY "dist/rtunicpg-2.0.25.3.tar(24).bz2*" dist/r8152-2.21.4.tar.bz2* ./
+RUN if [ ! -f "rtunicpg-2.0.25.3.tar(24).bz2" ]; then \
+        gsutil cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar(24).bz2" .; \
+    fi && \
+    if [ ! -f r8152-2.21.4.tar.bz2 ]; then \
+        gsutil cp gs://rtk-tools/r8152-2.21.4.tar.bz2 .; \
+    fi
+
 ####################################################################
 FROM python:3-trixie AS dolostools
 
@@ -91,6 +105,42 @@ RUN printf "\noverride_dh_shlibdeps:\n\t-dh_shlibdeps --dpkg-shlibdeps-params=--
 
 RUN debuild -b -j$(nproc) -us -uc
 
+######################################################################
+FROM debian:trixie AS rtk-tools-builder
+
+RUN apt-get update && apt-get install -y bzip2
+WORKDIR /build
+COPY --from=rtk-fetcher "/fetch/rtunicpg-2.0.25.3.tar(24).bz2" rtunicpg.tar.bz2
+RUN tar -xvf rtunicpg.tar.bz2
+
+######################################################################
+FROM debian:trixie AS realtek-kernel-modules
+
+RUN apt-get update && apt-get install -y bzip2 build-essential kmod linux-headers-amd64 dkms
+WORKDIR /build
+COPY --from=rtk-fetcher /fetch/r8152-2.21.4.tar.bz2 .
+RUN tar -xvf r8152-2.21.4.tar.bz2
+
+# Create DKMS package
+RUN mkdir -p /usr/src/r8152-2.21.4
+RUN cp Makefile r8152.c compatibility.h /usr/src/r8152-2.21.4/
+RUN printf "PACKAGE_NAME=\"r8152\"\nPACKAGE_VERSION=\"2.21.4\"\nBUILT_MODULE_NAME[0]=\"r8152\"\nDEST_MODULE_LOCATION[0]=\"/updates\"\nAUTOINSTALL=\"yes\"" > /usr/src/r8152-2.21.4/dkms.conf
+
+# Manual DEB creation for DKMS source (doesn't require building in container)
+RUN apt-get install -y dpkg-dev
+RUN mkdir -p /build/deb/usr/src/r8152-2.21.4
+RUN cp -r /usr/src/r8152-2.21.4/* /build/deb/usr/src/r8152-2.21.4/
+RUN mkdir -p /build/deb/etc/udev/rules.d/
+RUN cp /build/50-usb-realtek-net.rules /build/deb/etc/udev/rules.d/
+RUN mkdir -p /build/deb/DEBIAN
+RUN printf "Package: r8152-dkms\nVersion: 2.21.4\nArchitecture: all\nMaintainer: DiagnoseMe\nDepends: dkms, build-essential\nDescription: Realtek r8152 driver DKMS source package\n" > /build/deb/DEBIAN/control
+RUN printf "#!/bin/sh\ndkms add -m r8152 -v 2.21.4\ndkms install -m r8152 -v 2.21.4 || echo \"Failed to build module, headers might be missing on host.\"\n" > /build/deb/DEBIAN/postinst
+RUN chmod 755 /build/deb/DEBIAN/postinst
+RUN dpkg-deb --build /build/deb /build/r8152-dkms.deb
+
+# Final make for immediate use if headers match container (optional/best effort)
+RUN KERNELDIR=$(ls -d /lib/modules/*/build | head -n 1) make || true
+
 #####################################################################
 FROM python:3-trixie
 
@@ -109,6 +159,15 @@ RUN mkdir /var/log/rpcserver
 RUN mkdir /usr/local/tmp
 RUN mkdir -p /usr/local/server/binfiles
 RUN mkdir -p /usr/local/server/binfiles_shadow
+
+COPY --from=rtk-tools-builder /build/*/rtunicpg-x86_64 /usr/local/bin/rtunicpg
+COPY --from=rtk-tools-builder /build/*/EF8152B* /usr/local/server/binfiles_shadow/
+COPY --from=rtk-tools-builder /build/*/EF8153B* /usr/local/server/binfiles_shadow/
+COPY --from=rtk-tools-builder /build/*/EE8153B* /usr/local/server/binfiles_shadow/
+
+COPY --from=realtek-kernel-modules /build/r8152.ko /usr/local/server/binfiles_shadow/
+COPY --from=realtek-kernel-modules /build/r8152-dkms.deb /usr/local/server/binfiles_shadow/
+COPY --from=realtek-kernel-modules /build/50-usb-realtek-net.rules /etc/udev/rules.d/
 
 WORKDIR /usr/local/server
 
