@@ -147,6 +147,7 @@ FROM python:3-trixie
 RUN apt-get update && apt-get install -yq \
     python3-docker \
     dfu-util \
+    dfu-programmer \
     usb.ids \
     libcurl3t64-gnutls \
     libxmlb2 \
