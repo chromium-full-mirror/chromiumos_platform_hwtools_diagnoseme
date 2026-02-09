@@ -15,6 +15,8 @@ import {
   ProgramSerialResponse,
   ProgramEthernetRequest,
   ProgramEthernetResponse,
+  ProgramAtmegaRequest,
+  ProgramAtmegaResponse,
   RunTestsRequest,
   RunTestsResponse,
   ValidateServoSerialRequest,
@@ -61,10 +63,30 @@ export class ServoManufacturingService {
     return this.client.programEthernet(request);
   }
 
-  runTests(testsToRun: string[]): Observable<RunTestsResponse> {
+  programAtmega(serialNumber: string): Observable<ProgramAtmegaResponse> {
+    const request = new ProgramAtmegaRequest();
+    request.serialNumber = serialNumber;
+    return this.client.programAtmega(request);
+  }
+
+  runInitialTests(
+    serialNumber: string,
+    macAddress: string,
+  ): Observable<RunTestsResponse> {
     const request = new RunTestsRequest();
-    request.testsToRun = testsToRun;
-    return this.client.runTests(request);
+    request.serialNumber = serialNumber;
+    request.macAddress = macAddress;
+    return this.client.runInitialTests(request);
+  }
+
+  runServodTests(
+    serialNumber: string,
+    macAddress: string,
+  ): Observable<RunTestsResponse> {
+    const request = new RunTestsRequest();
+    request.serialNumber = serialNumber;
+    request.macAddress = macAddress;
+    return this.client.runServodTests(request);
   }
 
   validateServoSerial(serialNumber: string): Observable<ValidationResponse> {

@@ -110,7 +110,7 @@ async def serve():
         reflection.enable_server_reflection(service_name, server)
 
         serving_port = BACKEND_GRPC_SERVICE_PORT
-        server.add_insecure_port(f"[::]:{serving_port}")
+        server.add_insecure_port(f"0.0.0.0:{serving_port}")
 
         async def run_grpc_server():
             await server.start()

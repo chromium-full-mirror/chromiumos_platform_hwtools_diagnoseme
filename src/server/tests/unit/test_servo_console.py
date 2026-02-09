@@ -26,7 +26,8 @@ class TestServoConsole(unittest.TestCase):
 
         # Should not raise exception
         self.console._check_connection(mock_ser)
-        mock_ser.write.assert_called_once_with(b"help\r")
+        # We expect a clean prompt \r\n and then help\r
+        mock_ser.write.assert_has_calls([mock.call(b"\r\n"), mock.call(b"help\r")])
 
     @mock.patch("serial.Serial")
     def test_check_connection_fail(self, mock_serial_class):

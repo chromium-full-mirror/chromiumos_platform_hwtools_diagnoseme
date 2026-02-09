@@ -87,6 +87,7 @@ class SerialProgrammer:
                     return True
 
                 cmd = f"serialno set {self._serial_number}"
+                logging.debug("Running console command: %s", cmd)
                 console.issue_cmd(cmd)
 
                 if not self._verify(console):

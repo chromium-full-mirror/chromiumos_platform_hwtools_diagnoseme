@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 """Unit tests for servo_manufacturing.py."""
 
+import asyncio
 import unittest
 from unittest import mock
 
@@ -25,6 +26,11 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
     def setUp(self):
         self.servicer = servo_manufacturing.ServoV41ManufacturingServicer()
         self.context = mock.MagicMock()
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+
+    def tearDown(self):
+        self.loop.close()
 
     def test_get_status(self):
         """Test case for get_status."""
@@ -143,9 +149,13 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
         self.assertIn("STDERR:\nerr", response.logs)
 
     @mock.patch("server.rtk_eth_programmer.RTKEthProgrammer.program")
-    @mock.patch("server.servo_console.ServoConsole")
-    def test_program_ethernet_success(self, unused_mock_console, mock_program):
+    @mock.patch("server.servo_manufacturing.ServoConsole")
+    @mock.patch("server.util.discover_servo_v4p1_serial_path")
+    def test_program_ethernet_success(
+        self, mock_discover, unused_mock_console, mock_program
+    ):
         """Test case for program_ethernet success."""
+        mock_discover.return_value = "/dev/ttyUSB0"
         mock_program.return_value = None
         request = servo_manufacturing_pb2.ProgramEthernetRequest(
             mac_address="00:11:22:33:44:55", serial_number="12345"
@@ -154,10 +164,52 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
         self.assertTrue(response.success)
         self.assertIn("programmed successfully", response.message)
 
+    @mock.patch("server.atmega_kb_programmer.AtmegaKBEmulatorProgrammer.program")
+    @mock.patch("server.servo_manufacturing.ServoConsole")
+    @mock.patch("server.util.discover_servo_v4p1_serial_path")
+    def test_program_atmega_success(
+        self, mock_discover, unused_mock_console, mock_program
+    ):
+        """Test case for program_atmega success."""
+        mock_discover.return_value = "/dev/ttyUSB0"
+        mock_program.return_value = True
+        request = servo_manufacturing_pb2.ProgramAtmegaRequest(serial_number="12345")
+        response = self.servicer.program_atmega(request, self.context)
+        self.assertTrue(response.success)
+        self.assertEqual(response.message, "Atmega programmed successfully")
+
+    @mock.patch("server.v4p1_tester.V4P1Tester.run_initial_tests")
+    @mock.patch("server.util.discover_servo_v4p1_serial_path")
+    def test_run_initial_tests_success(self, mock_discover, mock_run):
+        """Test case for run_initial_tests success."""
+        mock_discover.return_value = "/dev/ttyUSB0"
+        mock_run.return_value = [("test1", True)]
+        request = servo_manufacturing_pb2.RunTestsRequest(serial_number="12345")
+        response = self.loop.run_until_complete(
+            self.servicer.run_initial_tests(request, self.context)
+        )
+        self.assertTrue(response.all_passed)
+        self.assertIn("test1: PASS", response.summary)
+
+    @mock.patch("server.v4p1_tester.V4P1Tester.run_servod_tests")
+    def test_run_servod_tests_success(self, mock_run):
+        """Test case for run_servod_tests success."""
+        mock_run.return_value = [("test2", True)]
+        request = servo_manufacturing_pb2.RunTestsRequest(serial_number="12345")
+        response = self.loop.run_until_complete(
+            self.servicer.run_servod_tests(request, self.context)
+        )
+        self.assertTrue(response.all_passed)
+        self.assertIn("test2: PASS", response.summary)
+
     @mock.patch("server.rtk_eth_programmer.RTKEthProgrammer.program")
-    @mock.patch("server.servo_console.ServoConsole")
-    def test_program_ethernet_failure(self, unused_mock_console, mock_program):
+    @mock.patch("server.servo_manufacturing.ServoConsole")
+    @mock.patch("server.util.discover_servo_v4p1_serial_path")
+    def test_program_ethernet_failure(
+        self, mock_discover, unused_mock_console, mock_program
+    ):
         """Test case for program_ethernet failure."""
+        mock_discover.return_value = "/dev/ttyUSB0"
         mock_program.side_effect = rtk_eth_programmer.RTKEthProgrammerError(
             "Ethernet error", stdout="out", stderr="err"
         )

@@ -16,8 +16,12 @@ service ServoV41Manufacturing {
   rpc program_serial(ProgramSerialRequest) returns (ProgramSerialResponse) {}
   // Program Ethernet RPC call
   rpc program_ethernet(ProgramEthernetRequest) returns (ProgramEthernetResponse) {}
-  // Run Tests RPC call
-  rpc run_tests(RunTestsRequest) returns (RunTestsResponse) {}
+  // Program Atmega RPC call
+  rpc program_atmega(ProgramAtmegaRequest) returns (ProgramAtmegaResponse) {}
+  // Run Initial Tests (console/lsusb) RPC call
+  rpc run_initial_tests(RunTestsRequest) returns (RunTestsResponse) {}
+  // Run Servod Tests (dut-control) RPC call
+  rpc run_servod_tests(RunTestsRequest) returns (RunTestsResponse) {}
   // Validate Servo Serial RPC call
   rpc validate_servo_serial(ValidateServoSerialRequest) returns (ValidationResponse) {}
   // Validate Servo MAC Address RPC call
@@ -64,9 +68,19 @@ message ProgramEthernetResponse {
   string message = 2;
   string logs = 3;
 }
+message ProgramAtmegaRequest {
+  string serial_number = 1;
+}
+message ProgramAtmegaResponse {
+  bool success = 1;
+  string message = 2;
+  string logs = 3;
+}
 message RunTestsRequest {
   // Add request fields here
   repeated string tests_to_run = 1;
+  string serial_number = 2;
+  string mac_address = 3;
 }
 message RunTestsResponse {
   // Add response fields here

@@ -11,6 +11,7 @@ from google.protobuf import empty_pb2
 import grpc
 
 # pylint: disable=no-name-in-module
+from server import atmega_kb_programmer
 from server import genesys_hub_programmer
 from server import rtk_eth_programmer
 from server import serial_programmer
@@ -18,6 +19,7 @@ from server import servo_manufacturing_pb2
 from server import servo_manufacturing_pb2_grpc
 from server import servo_programmer
 from server import util
+from server import v4p1_tester
 from server.servo_console import ServoConsole
 from server.servo_console import ServoConsoleError
 
@@ -90,6 +92,7 @@ class ServoV41ManufacturingServicer(
                 self.BOARD, dfu_vid=self.STM_DFU_VID, dfu_pid=self.STM_DFU_PID
             )
             dfu_programmer.program()
+
             return servo_manufacturing_pb2.ProgramMcuResponse(
                 success=True,
                 message=f"MCU programmed successfully with {request.firmware_path}",
@@ -135,21 +138,22 @@ class ServoV41ManufacturingServicer(
             request.serial_number,
         )
 
-        # Construct serial path based on the serial number
-        # If serial_number is missing, we might assume Uninitialized, but for this step
-        # it should be initialized.
-        serial_path = (
-            f"/dev/serial/by-id/usb-Google_LLC_Servo_V4p1_{request.serial_number}"
-            "-if00-port0"
-        )
-        # Fallback if the user hasn't rebooted or if it's still uninitialized?
-        # For now, strictly use the provided serial number.
+        serial_path = util.discover_servo_v4p1_serial_path(request.serial_number)
+
+        if not serial_path:
+            # Final fallback to constructed path
+            serial_path = (
+                f"/dev/serial/by-id/usb-Google_LLC_Servo_V4p1_{request.serial_number}"
+                "-if00-port0"
+            )
+            logging.warning("Discovery failed, using fallback path: %s", serial_path)
 
         servo_mcu_connector = ServoConsole(serial_path)
 
         try:
             programmer = rtk_eth_programmer.RTKEthProgrammer(force=False)
             programmer.program(request.mac_address, servo_mcu_connector)
+
             return servo_manufacturing_pb2.ProgramEthernetResponse(
                 success=True,
                 message=(
@@ -167,18 +171,107 @@ class ServoV41ManufacturingServicer(
                 success=False, message=str(e), logs=logs
             )
 
-    def run_tests(
+    def program_atmega(
+        self,
+        request: servo_manufacturing_pb2.ProgramAtmegaRequest,
+        context: grpc.ServicerContext,
+    ) -> servo_manufacturing_pb2.ProgramAtmegaResponse:
+        """Program the Atmega Keyboard Emulator."""
+        del context  # Unused
+        logging.info(
+            "Programming Atmega for serial %s...",
+            request.serial_number,
+        )
+
+        serial_path = util.discover_servo_v4p1_serial_path(request.serial_number)
+
+        if not serial_path:
+            return servo_manufacturing_pb2.ProgramAtmegaResponse(
+                success=False,
+                message="Serial console not found for Atmega programming",
+            )
+
+        with ServoConsole(serial_path) as console:
+            try:
+                kb_programmer = atmega_kb_programmer.AtmegaKBEmulatorProgrammer(
+                    console=console, i2caddr=0x21, i2coffset=2
+                )
+                if kb_programmer.program():
+                    return servo_manufacturing_pb2.ProgramAtmegaResponse(
+                        success=True, message="Atmega programmed successfully"
+                    )
+                return servo_manufacturing_pb2.ProgramAtmegaResponse(
+                    success=False, message="Failed to program Atmega Keyboard Emulator"
+                )
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logging.exception("Failed to program Atmega")
+                logs = util.get_logs_from_exception(e)
+                return servo_manufacturing_pb2.ProgramAtmegaResponse(
+                    success=False, message=str(e), logs=logs
+                )
+
+    async def run_initial_tests(
         self,
         request: servo_manufacturing_pb2.RunTestsRequest,
         context: grpc.ServicerContext,
-    ) -> servo_manufacturing_pb2.RunTestsResponse:
-        """Run the specified tests."""
+    ) -> (
+        servo_manufacturing_pb2.RunTestsResponse
+    ):  # pylint: disable=invalid-overridden-method
+        """Run tests that only require console and lsusb."""
         del context  # Unused
-        test_list = ", ".join(request.tests_to_run)
-        logging.info("Running tests: %s...", test_list)
-        # Actual test execution logic will be added in a future update.
+        logging.info(
+            "Running initial manufacturing tests for serial %s...",
+            request.serial_number,
+        )
+
+        serial_path = util.discover_servo_v4p1_serial_path(request.serial_number)
+
+        if not serial_path:
+            return servo_manufacturing_pb2.RunTestsResponse(
+                all_passed=False,
+                summary="Error: Serial console not found for initial testing",
+            )
+
+        tester = v4p1_tester.V4P1Tester(
+            serial_number=request.serial_number, mac_address=request.mac_address
+        )
+        test_results = tester.run_initial_tests(serial_path)
+
+        all_passed = all(result for _, result in test_results)
+        summary_lines = [
+            f"{name}: {'PASS' if passed else 'FAIL'}" for name, passed in test_results
+        ]
+
         return servo_manufacturing_pb2.RunTestsResponse(
-            all_passed=True, summary=f"Tests {test_list} passed"
+            all_passed=all_passed, summary="\n".join(summary_lines)
+        )
+
+    async def run_servod_tests(
+        self,
+        request: servo_manufacturing_pb2.RunTestsRequest,
+        context: grpc.ServicerContext,
+    ) -> (
+        servo_manufacturing_pb2.RunTestsResponse
+    ):  # pylint: disable=invalid-overridden-method
+        """Run tests that require servod."""
+        del context  # Unused
+        logging.info(
+            "Running servod-based manufacturing tests for serial %s...",
+            request.serial_number,
+        )
+
+        tester = v4p1_tester.V4P1Tester(
+            serial_number=request.serial_number, mac_address=request.mac_address
+        )
+        test_results = await tester.run_servod_tests()
+
+        all_passed = all(result for _, result in test_results)
+        summary_lines = [
+            f"{name}: {'PASS' if passed else 'FAIL'}" for name, passed in test_results
+        ]
+
+        return servo_manufacturing_pb2.RunTestsResponse(
+            all_passed=all_passed, summary="\n".join(summary_lines)
         )
 
     def validate_servo_serial(

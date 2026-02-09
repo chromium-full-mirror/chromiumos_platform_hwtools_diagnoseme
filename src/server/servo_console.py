@@ -84,6 +84,12 @@ class ServoConsole:
             time.sleep(0.1)
         return response
 
+    def flush(self) -> None:
+        """Flush the serial buffers."""
+        if self._ser:
+            self._ser.reset_input_buffer()
+            self._ser.reset_output_buffer()
+
     def _check_connection(self, ser: serial.Serial) -> None:
         """Verify that we are connected to the correct device.
 
@@ -93,7 +99,9 @@ class ServoConsole:
         Raises:
           ServoConsoleError: if verification fails.
         """
-        # Flush input buffer to ensure we start clean
+        # Ensure we are at a clean prompt
+        ser.write(b"\r\n")
+        time.sleep(0.1)
         ser.reset_input_buffer()
 
         logging.debug("Verifying connection with 'help' command...")
@@ -103,10 +111,41 @@ class ServoConsole:
 
         logging.debug("Help command response: %s", help_response)
         if "serialno" not in help_response:
-            raise ServoConsoleError(
-                "unable to connect to serial device",
-                stdout=help_response,
+            # Try one more time with a newline
+            ser.write(b"\r\nhelp\r")
+            help_response = self._read_until(ser, lambda r: "serialno" in r)
+            if "serialno" not in help_response:
+                raise ServoConsoleError(
+                    "unable to connect to serial device",
+                    stdout=help_response,
+                )
+
+    def _issue_cmd_on_ser(self, ser: serial.Serial, cmd: str) -> str:
+        """Internal helper to issue command on a specific serial instance."""
+        # Try up to 3 times for flaky I2C/Serial commands
+        for attempt in range(3):
+            logging.info(
+                "Sending command to servo console (attempt %d): %s", attempt + 1, cmd
             )
+            ser.reset_input_buffer()
+            ser.write(f"{cmd}\r".encode("utf-8"))
+
+            # Give the device a moment to process and respond
+            time.sleep(0.5)
+            response = ser.read_all().decode(errors="ignore")
+
+            logging.debug("Console response: %s", response)
+
+            if response.strip() and "Unknown error" not in response:
+                return response
+
+            logging.warning(
+                "Retrying console command due to bad response: %s", response
+            )
+            ser.write(b"\r\n")  # Clear prompt
+            time.sleep(0.2)
+
+        return response
 
     def read_until(self, condition) -> str:
         """Read from the persistent serial port until condition is met or timeout.
@@ -124,18 +163,6 @@ class ServoConsole:
         if not self._ser:
             raise ServoConsoleError("Not connected to serial port.")
         return self._read_until(self._ser, condition)
-
-    def _issue_cmd_on_ser(self, ser: serial.Serial, cmd: str) -> str:
-        """Internal helper to issue command on a specific serial instance."""
-        logging.info("Sending command to servo console: %s", cmd)
-        ser.write(f"{cmd}\r".encode("utf-8"))
-
-        # Give the device a moment to process and respond
-        time.sleep(0.5)
-        response = ser.read_all().decode(errors="ignore")
-
-        logging.debug("Console response: %s", response)
-        return response
 
     def send_cmd(self, cmd: str) -> None:
         """Send a command to the console without waiting for response.

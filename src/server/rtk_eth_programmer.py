@@ -181,7 +181,10 @@ class RTKEthProgrammer:
         if not util.find_binfile(self.SECONDARY_CONFIG) or not util.find_binfile(
             self.CONFIG_TEMPLATE
         ):
-            raise RTKEthProgrammerError("Config files missing")
+            raise RTKEthProgrammerError(
+                f"Config files missing: {self.SECONDARY_CONFIG} and/or "
+                f"{self.CONFIG_TEMPLATE}"
+            )
 
         program_bin = shutil.which(self.PROGRAMMER_BIN)
         if not program_bin:
@@ -194,17 +197,21 @@ class RTKEthProgrammer:
             self._move_config(program_path, macaddr)
 
             try:
-                logging.info("Erasing RTK Ethernet EEPROM")
-                erase_result = util.run_command(self.ERASE_CMD, cwd=program_dir)
-                logging.debug("ERASE result: %s", erase_result.stdout)
+                if self.ERASE_CMD:
+                    logging.info("Erasing RTK Ethernet EEPROM")
+                    logging.debug("Running: %s", " ".join(self.ERASE_CMD))
+                    erase_result = util.run_command(self.ERASE_CMD, cwd=program_dir)
+                    logging.debug("ERASE result: %s", erase_result.stdout)
 
-                logging.info("Writing RTK Ethernet EEPROM")
+                logging.info("Writing RTK Ethernet EEPROM/eFUSE")
+                logging.debug("Running: %s", " ".join(self.WRITE_CMD))
                 write_result = util.run_command(self.WRITE_CMD, cwd=program_dir)
                 logging.debug("WRITE result: %s", write_result.stdout)
 
                 # If everything went well so far, then we can write the macaddr
                 # into the servo eeprom as well.
                 cmd = f"macaddr set {self._standardize_macaddr(macaddr)}"
+                logging.debug("Running console command: %s", cmd)
                 servo_mcu_connector.issue_cmd(cmd)
             except subprocess.CalledProcessError as e:
                 logging.exception("Error during RTK Ethernet programming")
