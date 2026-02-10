@@ -3,15 +3,17 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Servo Manufacturing service."""
-# pylint: disable=no-member
 import logging
+import os
 import re
 
 from google.protobuf import empty_pb2
 import grpc
 
-# pylint: disable=no-name-in-module
+# pylint: enable=no-name-in-module,import-error
+# pylint: disable=no-name-in-module,import-error
 from server import atmega_kb_programmer
+from server import diagnoseme_servod_pb2
 from server import genesys_hub_programmer
 from server import rtk_eth_programmer
 from server import serial_programmer
@@ -51,19 +53,24 @@ class ServoV41ManufacturingServicer(
     # serial numbers lives inside each manager, as they change per device.
     MACADDR_RE = re.compile("^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$")
 
+    def __init__(self, servod_service=None):
+        self._servod_service = servod_service
+
     def get_status(
         self, request: empty_pb2.Empty, context: grpc.ServicerContext
-    ) -> servo_manufacturing_pb2.StatusResponse:
+    ) -> servo_manufacturing_pb2.StatusResponse:  # pylint: disable=no-member
         """Get the status of the manufacturing service."""
+        # pylint: disable=no-member
         del request, context  # Unused
         return servo_manufacturing_pb2.StatusResponse(status="OK")
 
     def program_genesys_hub(
         self,
-        request: servo_manufacturing_pb2.ProgramGenesysHubRequest,
+        request: servo_manufacturing_pb2.ProgramGenesysHubRequest,  # pylint: disable=no-member
         context: grpc.ServicerContext,
-    ) -> servo_manufacturing_pb2.ProgramGenesysHubResponse:
+    ) -> servo_manufacturing_pb2.ProgramGenesysHubResponse:  # pylint: disable=no-member
         """Program the Genesys Hub."""
+        # pylint: disable=no-member
         del request, context  # Unused
         logging.info("Programming Genesys Hub...")
         try:
@@ -81,10 +88,11 @@ class ServoV41ManufacturingServicer(
 
     def program_mcu(
         self,
-        request: servo_manufacturing_pb2.ProgramMcuRequest,
+        request: servo_manufacturing_pb2.ProgramMcuRequest,  # pylint: disable=no-member
         context: grpc.ServicerContext,
-    ) -> servo_manufacturing_pb2.ProgramMcuResponse:
+    ) -> servo_manufacturing_pb2.ProgramMcuResponse:  # pylint: disable=no-member
         """Program the MCU."""
+        # pylint: disable=no-member
         del context  # Unused
         logging.info("Programming MCU with %s...", request.firmware_path)
         try:
@@ -106,10 +114,11 @@ class ServoV41ManufacturingServicer(
 
     def program_serial(
         self,
-        request: servo_manufacturing_pb2.ProgramSerialRequest,
+        request: servo_manufacturing_pb2.ProgramSerialRequest,  # pylint: disable=no-member
         context: grpc.ServicerContext,
-    ) -> servo_manufacturing_pb2.ProgramSerialResponse:
+    ) -> servo_manufacturing_pb2.ProgramSerialResponse:  # pylint: disable=no-member
         """Program the serial number."""
+        # pylint: disable=no-member
         del context  # Unused
         logging.info("Programming serial number: %s...", request.serial_number)
         try:
@@ -127,16 +136,34 @@ class ServoV41ManufacturingServicer(
 
     def program_ethernet(
         self,
-        request: servo_manufacturing_pb2.ProgramEthernetRequest,
+        request: servo_manufacturing_pb2.ProgramEthernetRequest,  # pylint: disable=no-member
         context: grpc.ServicerContext,
-    ) -> servo_manufacturing_pb2.ProgramEthernetResponse:
+    ) -> servo_manufacturing_pb2.ProgramEthernetResponse:  # pylint: disable=no-member
         """Program the Ethernet MAC address."""
+        # pylint: disable=no-member
         del context  # Unused
         logging.info(
             "Programming Ethernet with MAC %s for serial %s...",
             request.mac_address,
             request.serial_number,
         )
+
+        # Wait for Realtek (0bda:8153) and Atmega (03eb:2ff4 or 03eb:2042)
+        # We check both LUFA and DFU for Atmega.
+        logging.info("Waiting for DUT side USB devices to be enumerated...")
+        found = util.wait_for_usb_devices(
+            [
+                (0x0BDA, [0x8153]),
+                (0x03EB, [0x2FF4, 0x2042]),
+            ],
+            timeout=30.0,
+        )
+
+        if not found:
+            return servo_manufacturing_pb2.ProgramEthernetResponse(  # pylint: disable=no-member
+                success=False,
+                message="Error: Realtek or Atmega USB device not found after 30s",
+            )
 
         serial_path = util.discover_servo_v4p1_serial_path(request.serial_number)
 
@@ -154,7 +181,7 @@ class ServoV41ManufacturingServicer(
             programmer = rtk_eth_programmer.RTKEthProgrammer(force=False)
             programmer.program(request.mac_address, servo_mcu_connector)
 
-            return servo_manufacturing_pb2.ProgramEthernetResponse(
+            return servo_manufacturing_pb2.ProgramEthernetResponse(  # pylint: disable=no-member
                 success=True,
                 message=(
                     f"Ethernet MAC address {request.mac_address} "
@@ -167,15 +194,15 @@ class ServoV41ManufacturingServicer(
         ) as e:
             logging.exception("Failed to program Ethernet")
             logs = util.get_logs_from_exception(e)
-            return servo_manufacturing_pb2.ProgramEthernetResponse(
+            return servo_manufacturing_pb2.ProgramEthernetResponse(  # pylint: disable=no-member
                 success=False, message=str(e), logs=logs
             )
 
     def program_atmega(
         self,
-        request: servo_manufacturing_pb2.ProgramAtmegaRequest,
+        request: servo_manufacturing_pb2.ProgramAtmegaRequest,  # pylint: disable=no-member
         context: grpc.ServicerContext,
-    ) -> servo_manufacturing_pb2.ProgramAtmegaResponse:
+    ) -> servo_manufacturing_pb2.ProgramAtmegaResponse:  # pylint: disable=no-member
         """Program the Atmega Keyboard Emulator."""
         del context  # Unused
         logging.info(
@@ -186,7 +213,7 @@ class ServoV41ManufacturingServicer(
         serial_path = util.discover_servo_v4p1_serial_path(request.serial_number)
 
         if not serial_path:
-            return servo_manufacturing_pb2.ProgramAtmegaResponse(
+            return servo_manufacturing_pb2.ProgramAtmegaResponse(  # pylint: disable=no-member
                 success=False,
                 message="Serial console not found for Atmega programming",
             )
@@ -197,107 +224,187 @@ class ServoV41ManufacturingServicer(
                     console=console, i2caddr=0x21, i2coffset=2
                 )
                 if kb_programmer.program():
-                    return servo_manufacturing_pb2.ProgramAtmegaResponse(
+                    return servo_manufacturing_pb2.ProgramAtmegaResponse(  # pylint: disable=no-member
                         success=True, message="Atmega programmed successfully"
                     )
-                return servo_manufacturing_pb2.ProgramAtmegaResponse(
+                return servo_manufacturing_pb2.ProgramAtmegaResponse(  # pylint: disable=no-member
                     success=False, message="Failed to program Atmega Keyboard Emulator"
                 )
-            except Exception as e:  # pylint: disable=broad-exception-caught
+            except (
+                ServoConsoleError,
+                atmega_kb_programmer.AtmegaKBEmulatorProgrammerError,
+            ) as e:
                 logging.exception("Failed to program Atmega")
                 logs = util.get_logs_from_exception(e)
-                return servo_manufacturing_pb2.ProgramAtmegaResponse(
+                return servo_manufacturing_pb2.ProgramAtmegaResponse(  # pylint: disable=no-member
                     success=False, message=str(e), logs=logs
                 )
 
-    async def run_initial_tests(
+    async def run_console_tests(
         self,
-        request: servo_manufacturing_pb2.RunTestsRequest,
+        request: servo_manufacturing_pb2.RunTestsRequest,  # pylint: disable=no-member
         context: grpc.ServicerContext,
     ) -> (
-        servo_manufacturing_pb2.RunTestsResponse
+        servo_manufacturing_pb2.RunTestsResponse  # pylint: disable=no-member
     ):  # pylint: disable=invalid-overridden-method
-        """Run tests that only require console and lsusb."""
+        """Phase 1: Direct serial console tests (No servod)."""
         del context  # Unused
         logging.info(
-            "Running initial manufacturing tests for serial %s...",
+            "Running direct console tests for serial %s...",
             request.serial_number,
         )
 
         serial_path = util.discover_servo_v4p1_serial_path(request.serial_number)
 
         if not serial_path:
-            return servo_manufacturing_pb2.RunTestsResponse(
-                all_passed=False,
-                summary="Error: Serial console not found for initial testing",
+            return (
+                servo_manufacturing_pb2.RunTestsResponse(  # pylint: disable=no-member
+                    all_passed=False,
+                    summary="Error: Serial console not found for direct testing",
+                )
             )
 
         tester = v4p1_tester.V4P1Tester(
             serial_number=request.serial_number, mac_address=request.mac_address
         )
-        test_results = tester.run_initial_tests(serial_path)
+        test_results = tester.run_console_tests(serial_path)
 
         all_passed = all(result for _, result in test_results)
         summary_lines = [
             f"{name}: {'PASS' if passed else 'FAIL'}" for name, passed in test_results
         ]
 
-        return servo_manufacturing_pb2.RunTestsResponse(
+        return servo_manufacturing_pb2.RunTestsResponse(  # pylint: disable=no-member
             all_passed=all_passed, summary="\n".join(summary_lines)
         )
 
-    async def run_servod_tests(
+    async def run_functional_tests(
         self,
-        request: servo_manufacturing_pb2.RunTestsRequest,
+        request: servo_manufacturing_pb2.RunTestsRequest,  # pylint: disable=no-member
         context: grpc.ServicerContext,
     ) -> (
-        servo_manufacturing_pb2.RunTestsResponse
+        servo_manufacturing_pb2.RunTestsResponse  # pylint: disable=no-member
     ):  # pylint: disable=invalid-overridden-method
-        """Run tests that require servod."""
+        """Phase 2: Tests that require servod in recovery mode."""
         del context  # Unused
         logging.info(
-            "Running servod-based manufacturing tests for serial %s...",
+            "Running functional tests (servod recovery) for serial %s...",
             request.serial_number,
         )
+
+        if self._servod_service:
+            # Start servod in recovery mode
+            start_request = (
+                diagnoseme_servod_pb2.StartServodRequest(  # pylint: disable=no-member
+                    board=self.BOARD, serial=request.serial_number, recovery=True
+                )
+            )
+            start_resp = self._servod_service.start_servod(start_request, None)
+            if not start_resp.started:
+                return servo_manufacturing_pb2.RunTestsResponse(  # pylint: disable=no-member
+                    all_passed=False,
+                    summary=(
+                        "Error: Servod failed to start in recovery mode:\n"
+                        f"{start_resp.console_output}"
+                    ),
+                )
 
         tester = v4p1_tester.V4P1Tester(
             serial_number=request.serial_number, mac_address=request.mac_address
         )
-        test_results = await tester.run_servod_tests()
+        try:
+            test_results = await tester.run_functional_tests()
+        finally:
+            if self._servod_service:
+                self._servod_service.stop_servod(None, None)
 
         all_passed = all(result for _, result in test_results)
         summary_lines = [
             f"{name}: {'PASS' if passed else 'FAIL'}" for name, passed in test_results
         ]
 
-        return servo_manufacturing_pb2.RunTestsResponse(
+        return servo_manufacturing_pb2.RunTestsResponse(  # pylint: disable=no-member
+            all_passed=all_passed, summary="\n".join(summary_lines)
+        )
+
+    async def run_integration_tests(
+        self,
+        request: servo_manufacturing_pb2.RunTestsRequest,  # pylint: disable=no-member
+        context: grpc.ServicerContext,
+    ) -> (
+        servo_manufacturing_pb2.RunTestsResponse  # pylint: disable=no-member
+    ):  # pylint: disable=invalid-overridden-method
+        """Phase 3: Tests that require servod with a connected DUT."""
+        del context  # Unused
+        logging.info(
+            "Running integration tests (servod with DUT) for serial %s...",
+            request.serial_number,
+        )
+
+        board = os.environ.get("TEST_DUT", self.BOARD)
+        model = os.environ.get("TEST_MODEL")
+        if self._servod_service:
+            # Start servod normally (needs DUT)
+            start_request = (
+                diagnoseme_servod_pb2.StartServodRequest(  # pylint: disable=no-member
+                    board=board,
+                    model=model,
+                    serial=request.serial_number,
+                    recovery=False,
+                )
+            )
+            start_resp = self._servod_service.start_servod(start_request, None)
+            if not start_resp.started:
+                return servo_manufacturing_pb2.RunTestsResponse(  # pylint: disable=no-member
+                    all_passed=False,
+                    summary=(
+                        "Error: Servod failed to start for integration testing:\n"
+                        f"{start_resp.console_output}"
+                    ),
+                )
+
+        tester = v4p1_tester.V4P1Tester(
+            serial_number=request.serial_number, mac_address=request.mac_address
+        )
+        try:
+            test_results = await tester.run_integration_tests()
+        finally:
+            if self._servod_service:
+                self._servod_service.stop_servod(None, None)
+
+        all_passed = all(result for _, result in test_results)
+        summary_lines = [
+            f"{name}: {'PASS' if passed else 'FAIL'}" for name, passed in test_results
+        ]
+
+        return servo_manufacturing_pb2.RunTestsResponse(  # pylint: disable=no-member
             all_passed=all_passed, summary="\n".join(summary_lines)
         )
 
     def validate_servo_serial(
         self,
-        request: servo_manufacturing_pb2.ValidateServoSerialRequest,
+        request: servo_manufacturing_pb2.ValidateServoSerialRequest,  # pylint: disable=no-member
         context: grpc.ServicerContext,
-    ) -> servo_manufacturing_pb2.ValidationResponse:
+    ) -> servo_manufacturing_pb2.ValidationResponse:  # pylint: disable=no-member
         """Validate the Servo Serial number."""
         del context  # Unused
         logging.info("Validating Servo Serial: %s...", request.serial_number)
         is_valid = bool(self.SERIALNO_RE.match(request.serial_number))
         error_message = "" if is_valid else "Invalid serial number format"
-        return servo_manufacturing_pb2.ValidationResponse(
+        return servo_manufacturing_pb2.ValidationResponse(  # pylint: disable=no-member
             is_valid=is_valid, error=error_message
         )
 
     def validate_servo_mac_address(
         self,
-        request: servo_manufacturing_pb2.ValidateServoMacAddressRequest,
+        request: servo_manufacturing_pb2.ValidateServoMacAddressRequest,  # pylint: disable=no-member
         context: grpc.ServicerContext,
-    ) -> servo_manufacturing_pb2.ValidationResponse:
+    ) -> servo_manufacturing_pb2.ValidationResponse:  # pylint: disable=no-member
         """Validate the Servo MAC address."""
         del context  # Unused
         logging.info("Validating Servo MAC Address: %s...", request.mac_address)
         is_valid = bool(self.MACADDR_RE.match(request.mac_address))
         error_message = "" if is_valid else "Invalid MAC address format"
-        return servo_manufacturing_pb2.ValidationResponse(
+        return servo_manufacturing_pb2.ValidationResponse(  # pylint: disable=no-member
             is_valid=is_valid, error=error_message
         )

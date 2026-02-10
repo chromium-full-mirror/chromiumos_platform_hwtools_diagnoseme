@@ -19,8 +19,7 @@ import sys
 import grpc.aio
 from grpc_reflection.v1alpha import reflection
 
-# pylint: disable=no-name-in-module
-# pylint: disable=import-error
+# pylint: disable=no-name-in-module,import-error
 from server import diagnoseme_dolos_pb2
 from server import diagnoseme_servod_pb2
 from server import dolos
@@ -38,6 +37,9 @@ from server.servo_manufacturing_pb2_grpc import (
 )
 
 
+# pylint: enable=no-name-in-module,import-error
+
+
 BACKEND_GRPC_SERVICE_PORT = 6002
 
 
@@ -49,7 +51,7 @@ def setup_logging(level):
     """
     logging.getLogger().handlers = []
     logging.getLogger().setLevel(level)
-    fh = logging.FileHandler("/var/log/rpcserver/rpcserver.log")
+    fh = logging.FileHandler("/var/log/rpcserver/rpcserver.log", mode="w")
     fh.setLevel(level)
     # create formatter and add it to the handlers
     formatter = logging.Formatter(
@@ -81,7 +83,7 @@ async def serve():
     try:
         add_DolosRpcServiceServicer_to_server(dolos.DolosRpcService(), server)
         service_name = (
-            diagnoseme_dolos_pb2.DESCRIPTOR.services_by_name[
+            diagnoseme_dolos_pb2.DESCRIPTOR.services_by_name[  # pylint: disable=no-member
                 "DolosRpcService"
             ].full_name,
             reflection.SERVICE_NAME,
@@ -91,23 +93,26 @@ async def serve():
         with servod.ServodRpcService() as servod_service:
             add_ServodRpcServiceServicer_to_server(servod_service, server)
             service_name = (
-                diagnoseme_servod_pb2.DESCRIPTOR.services_by_name[
+                diagnoseme_servod_pb2.DESCRIPTOR.services_by_name[  # pylint: disable=no-member
                     "ServodRpcService"
                 ].full_name,
                 reflection.SERVICE_NAME,
             )
             reflection.enable_server_reflection(service_name, server)
 
-        add_ServoV41ManufacturingServicer_to_server(
-            servo_manufacturing.ServoV41ManufacturingServicer(), server
-        )
-        service_name = (
-            servo_manufacturing_pb2.DESCRIPTOR.services_by_name[
-                "ServoV41Manufacturing"
-            ].full_name,
-            reflection.SERVICE_NAME,
-        )
-        reflection.enable_server_reflection(service_name, server)
+            add_ServoV41ManufacturingServicer_to_server(
+                servo_manufacturing.ServoV41ManufacturingServicer(
+                    servod_service=servod_service
+                ),
+                server,
+            )
+            service_name = (
+                servo_manufacturing_pb2.DESCRIPTOR.services_by_name[  # pylint: disable=no-member
+                    "ServoV41Manufacturing"
+                ].full_name,
+                reflection.SERVICE_NAME,
+            )
+            reflection.enable_server_reflection(service_name, server)
 
         serving_port = BACKEND_GRPC_SERVICE_PORT
         server.add_insecure_port(f"0.0.0.0:{serving_port}")

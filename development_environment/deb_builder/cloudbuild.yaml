@@ -1,0 +1,23 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+steps:
+  # Build the DEB package using Docker
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'deb-builder', '-f', 'development_environment/deb_builder/Dockerfile', '.']
+
+  # Extract the DEB file from the image
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        docker create --name temp-container deb-builder
+        docker cp temp-container:/diagnoseme.deb .
+        docker rm temp-container
+
+artifacts:
+  objects:
+    location: 'gs://diagnoseme-artifacts/debs/'
+    paths: ['diagnoseme.deb']

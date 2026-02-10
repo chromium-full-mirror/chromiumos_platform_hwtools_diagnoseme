@@ -69,24 +69,34 @@ export class ServoManufacturingService {
     return this.client.programAtmega(request);
   }
 
-  runInitialTests(
+  runConsoleTests(
     serialNumber: string,
     macAddress: string,
   ): Observable<RunTestsResponse> {
     const request = new RunTestsRequest();
     request.serialNumber = serialNumber;
     request.macAddress = macAddress;
-    return this.client.runInitialTests(request);
+    return this.client.runConsoleTests(request);
   }
 
-  runServodTests(
+  runFunctionalTests(
     serialNumber: string,
     macAddress: string,
   ): Observable<RunTestsResponse> {
     const request = new RunTestsRequest();
     request.serialNumber = serialNumber;
     request.macAddress = macAddress;
-    return this.client.runServodTests(request);
+    return this.client.runFunctionalTests(request);
+  }
+
+  runIntegrationTests(
+    serialNumber: string,
+    macAddress: string,
+  ): Observable<RunTestsResponse> {
+    const request = new RunTestsRequest();
+    request.serialNumber = serialNumber;
+    request.macAddress = macAddress;
+    return this.client.runIntegrationTests(request);
   }
 
   validateServoSerial(serialNumber: string): Observable<ValidationResponse> {

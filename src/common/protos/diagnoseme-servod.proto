@@ -6,6 +6,7 @@ package diagnoseme;
 import "google/protobuf/empty.proto";
 service ServodRpcService {
   rpc start_servod(StartServodRequest) returns (StartServodResponse) {}
+  rpc stop_servod(google.protobuf.Empty) returns (google.protobuf.Empty) {}
   rpc get_dut_hardware_id(GetHardwareIDRequest) returns (GetHardwareIDResponse) {}
   rpc run_dut_control(RunDutControlRequest) returns (RunDutControlResponse) {}
 }
@@ -14,6 +15,7 @@ message StartServodRequest {
   string board = 1;
   optional string model = 2;
   optional string serial = 3;
+  bool recovery = 4;
 }
 
 message StartServodResponse {

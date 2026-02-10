@@ -7,7 +7,7 @@ services:
   ui:
     container_name: ui
     image: ui
-    pull_policy: never
+    pull_policy: if_not_present
     hostname: ui
     restart: unless-stopped
 
@@ -22,40 +22,43 @@ services:
   server:
     container_name: server
     image: server
-    pull_policy: never
+    pull_policy: if_not_present
     hostname: server
     restart: unless-stopped
     privileged: true
-
-    networks:
-      diagnoseme:
-        ipv4_address: 192.168.100.11
+    network_mode: host
+    environment:
+      - TEST_DUT=brya
+      - TEST_MODEL=banshee
 
     volumes:
       - logs:/var/log/rpcserver
       - /dev:/dev
+      - /sys:/sys
       - /var/run/docker.sock:/var/run/docker.sock
-      - /tmp/diagnoseme:/usr/local/server/binfiles
 
   #############################################################################
   envoy:
     container_name: envoy
     image: envoy
-    pull_policy: never
+    pull_policy: if_not_present
     restart: unless-stopped
+    network_mode: host
     environment:
       ENVOY_UID: 0
-
-    networks:
-      diagnoseme:
-        ipv4_address: 192.168.100.12
 
     hostname: envoy-proxy
     volumes:
       - logs:/var/log/envoy
 
-    ports:
-      - 8888:6001
+  #############################################################################
+  watchtower:
+    container_name: watchtower
+    image: nickfedor/watchtower:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 3600 --include-restarting ui server envoy
   #############################################################################
 
 volumes:

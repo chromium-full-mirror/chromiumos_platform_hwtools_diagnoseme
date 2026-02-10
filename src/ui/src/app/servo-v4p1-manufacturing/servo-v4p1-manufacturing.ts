@@ -66,6 +66,15 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
   @ViewChild('serialStartButton', {read: ElementRef})
   serialStartButton!: ElementRef<HTMLButtonElement>;
 
+  @ViewChild('dutStartButton', {read: ElementRef})
+  dutStartButton!: ElementRef<HTMLButtonElement>;
+
+  @ViewChild('functionalTestStartButton', {read: ElementRef})
+  functionalTestStartButton!: ElementRef<HTMLButtonElement>;
+
+  @ViewChild('integrationTestStartButton', {read: ElementRef})
+  integrationTestStartButton!: ElementRef<HTMLButtonElement>;
+
   @ViewChild('serialNumberStatus')
   serialNumberStatus!: TestPassFailButton;
 
@@ -84,6 +93,18 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
   @ViewChild('ethStatus')
   ethStatus!: TestPassFailButton;
 
+  @ViewChild('atmegaStatus')
+  atmegaStatus!: TestPassFailButton;
+
+  @ViewChild('consoleTestingStatus')
+  consoleTestingStatus!: TestPassFailButton;
+
+  @ViewChild('functionalTestingStatus')
+  functionalTestingStatus!: TestPassFailButton;
+
+  @ViewChild('integrationTestingStatus')
+  integrationTestingStatus!: TestPassFailButton;
+
   servoSerialNumber = '';
   servoMacAddress = '';
   isSerialNumberValid = false;
@@ -94,6 +115,12 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
   serialNumberProgrammingSuccessful = false;
   dutSideProgrammingInProgress = false;
   dutSideProgrammingSuccessful = false;
+  consoleTestingInProgress = false;
+  consoleTestingSuccessful = false;
+  functionalTestingInProgress = false;
+  functionalTestingSuccessful = false;
+  integrationTestingInProgress = false;
+  integrationTestingSuccessful = false;
 
   private serialNumberSubject = new Subject<string>();
   private macAddressSubject = new Subject<string>();
@@ -252,6 +279,9 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
           if (serialResponse.success) {
             this.serialStatus.showPassed();
             this.serialNumberProgrammingSuccessful = true;
+            setTimeout(() => {
+              this.dutStartButton.nativeElement.focus();
+            }, 0);
           } else {
             this.serialStatus.showFailed();
             this.dialog.open(DialogOops, {
@@ -278,6 +308,7 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
     this.dutSideProgrammingInProgress = true;
     this.dutSideProgrammingSuccessful = false;
     this.ethStatus.hide();
+    this.atmegaStatus.hide();
 
     this.servoManufacturingService
       .programEthernet(this.servoMacAddress, this.servoSerialNumber)
@@ -285,7 +316,37 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
         next: response => {
           if (response.success) {
             this.ethStatus.showPassed();
-            this.dutSideProgrammingSuccessful = true;
+            this.servoManufacturingService
+              .programAtmega(this.servoSerialNumber)
+              .subscribe({
+                next: atmegaResponse => {
+                  if (atmegaResponse.success) {
+                    this.atmegaStatus.showPassed();
+                    this.dutSideProgrammingSuccessful = true;
+                    this.runFunctionalTestingMerged();
+                  } else {
+                    this.atmegaStatus.showFailed();
+                    this.dialog.open(DialogOops, {
+                      data:
+                        atmegaResponse.message +
+                        (atmegaResponse.logs
+                          ? '\n\n' + atmegaResponse.logs
+                          : ''),
+                    });
+                  }
+                  this.dutSideProgrammingInProgress = false;
+                  this.cdr.detectChanges();
+                },
+                error: err => {
+                  this.atmegaStatus.showFailed();
+                  this.dutSideProgrammingInProgress = false;
+                  this.dialog.open(DialogOops, {
+                    data:
+                      err.message || 'Unknown error during Atmega programming',
+                  });
+                  this.cdr.detectChanges();
+                },
+              });
           } else {
             this.ethStatus.showFailed();
             this.dialog.open(DialogOops, {
@@ -293,15 +354,118 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
                 response.message +
                 (response.logs ? '\n\n' + response.logs : ''),
             });
+            this.dutSideProgrammingInProgress = false;
+            this.cdr.detectChanges();
           }
-          this.dutSideProgrammingInProgress = false;
-          this.cdr.detectChanges();
         },
         error: err => {
           this.ethStatus.showFailed();
           this.dutSideProgrammingInProgress = false;
           this.dialog.open(DialogOops, {
             data: err.message || 'Unknown error during Ethernet programming',
+          });
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  runFunctionalTestingMerged() {
+    this.consoleTestingInProgress = true;
+    this.consoleTestingSuccessful = false;
+    this.functionalTestingSuccessful = false;
+    this.consoleTestingStatus.hide();
+    this.functionalTestingStatus.hide();
+
+    this.servoManufacturingService
+      .runConsoleTests(this.servoSerialNumber, this.servoMacAddress)
+      .subscribe({
+        next: response => {
+          if (response.allPassed) {
+            this.consoleTestingStatus.showPassed();
+            this.consoleTestingSuccessful = true;
+            this.consoleTestingInProgress = false;
+
+            // Start the second part: Functional Tests (servod recovery)
+            this.functionalTestingInProgress = true;
+            this.servoManufacturingService
+              .runFunctionalTests(this.servoSerialNumber, this.servoMacAddress)
+              .subscribe({
+                next: functionalResponse => {
+                  if (functionalResponse.allPassed) {
+                    this.functionalTestingStatus.showPassed();
+                    this.functionalTestingSuccessful = true;
+                    setTimeout(() => {
+                      this.integrationTestStartButton.nativeElement.focus();
+                    }, 0);
+                  } else {
+                    this.functionalTestingStatus.showFailed();
+                    this.dialog.open(DialogOops, {
+                      data: functionalResponse.summary,
+                    });
+                  }
+                  this.functionalTestingInProgress = false;
+                  this.cdr.detectChanges();
+                },
+                error: err => {
+                  this.functionalTestingStatus.showFailed();
+                  this.functionalTestingInProgress = false;
+                  this.dialog.open(DialogOops, {
+                    data:
+                      err.message ||
+                      'Unknown error during functional verification',
+                  });
+                  this.cdr.detectChanges();
+                },
+              });
+          } else {
+            this.consoleTestingStatus.showFailed();
+            this.consoleTestingInProgress = false;
+            this.dialog.open(DialogOops, {
+              data: response.summary,
+            });
+          }
+          this.cdr.detectChanges();
+        },
+        error: err => {
+          this.consoleTestingStatus.showFailed();
+          this.consoleTestingInProgress = false;
+          this.dialog.open(DialogOops, {
+            data:
+              err.message ||
+              'Unknown error during direct hardware verification',
+          });
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  runIntegrationTests() {
+    this.integrationTestingInProgress = true;
+    this.integrationTestingSuccessful = false;
+    this.integrationTestingStatus.hide();
+
+    this.servoManufacturingService
+      .runIntegrationTests(this.servoSerialNumber, this.servoMacAddress)
+      .subscribe({
+        next: response => {
+          if (response.allPassed) {
+            this.integrationTestingStatus.showPassed();
+            this.integrationTestingSuccessful = true;
+          } else {
+            this.integrationTestingStatus.showFailed();
+            this.dialog.open(DialogOops, {
+              data: response.summary,
+            });
+          }
+          this.integrationTestingInProgress = false;
+          this.cdr.detectChanges();
+        },
+        error: err => {
+          this.integrationTestingStatus.showFailed();
+          this.integrationTestingInProgress = false;
+          this.dialog.open(DialogOops, {
+            data:
+              err.message || 'Unknown error during integration verification',
           });
           this.cdr.detectChanges();
         },

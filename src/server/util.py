@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 """Helper functions to find required files on the system."""
 
+import glob
 import logging
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ import time
 from typing import Any
 from typing import List
 from typing import Optional
+from typing import Tuple
 
 
 BIN_DIR = "binfiles"
@@ -114,6 +116,23 @@ def discover_servo_v4p1_serial_path(
                         break
                 if serial_path:
                     break
+        else:
+            logging.warning("/dev/serial/by-id not found, falling back to /dev/ttyUSB*")
+            tty_devs = sorted(glob.glob("/dev/ttyUSB*"))
+            # Servo V4.1 usually attaches to 3 ttyUSB devices.
+            # If there are exactly 3, we can reasonably guess the first one
+            # is the console (if00).
+            if len(tty_devs) == 3:
+                serial_path = tty_devs[0]
+                logging.info(
+                    "Found exactly 3 raw serial devices, guessing first: %s",
+                    serial_path,
+                )
+            elif tty_devs:
+                logging.warning(
+                    "Found %d raw serial devices (expected 3), skipping fallback.",
+                    len(tty_devs),
+                )
 
         if serial_path:
             logging.info("Found serial port: %s", serial_path)
@@ -128,3 +147,34 @@ def discover_servo_v4p1_serial_path(
             time.sleep(interval)
 
     return None
+
+
+def wait_for_usb_devices(
+    device_list: List[Tuple[int, List[int]]], timeout: float = 30.0
+) -> bool:
+    """Wait for all devices in the list to be present on the system.
+
+    Args:
+        device_list: List of (VID, [PID1, PID2, ...]) tuples to search for.
+        timeout: Maximum time to wait in seconds.
+
+    Returns:
+        True if all devices are found within the timeout, False otherwise.
+    """
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        lsusb = run_command(["lsusb"]).stdout.lower()
+        all_found = True
+        for vid, pids in device_list:
+            found_vid_any_pid = False
+            for pid in pids:
+                if f"{vid:04x}:{pid:04x}" in lsusb:
+                    found_vid_any_pid = True
+                    break
+            if not found_vid_any_pid:
+                all_found = False
+                break
+        if all_found:
+            return True
+        time.sleep(1.0)
+    return False

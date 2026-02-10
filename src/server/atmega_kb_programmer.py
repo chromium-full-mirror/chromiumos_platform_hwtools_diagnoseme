@@ -64,12 +64,13 @@ class AtmegaKBEmulatorProgrammer:
     # status. For Pin 1 on V4.1, this is 1 << 1 = 0x02.
     I2C_RD_MASK = 0x02
 
-    # pylint: disable=too-many-arguments, too-many-positional-arguments
+    # pylint: disable=too-many-arguments
     def __init__(
         self,
         console: ServoConsole,
         i2caddr: int,
         i2coffset: int,
+        *,
         parent_hub_vid: Optional[int] = None,
         parent_hub_pid: Optional[int] = None,
     ):

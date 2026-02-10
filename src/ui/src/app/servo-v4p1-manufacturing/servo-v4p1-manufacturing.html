@@ -42,7 +42,7 @@
     <help-dialog-button image="dfu-switch-on.jpg"></help-dialog-button>
   </diagnoseme-rework-card-column>
 
-  <diagnoseme-rework-card-column column="1">Insert the host cable to the servo:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="1">Insert the host cable to the servo - a blue LED should illuminate:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
     <help-dialog-button image="host-cable-insert.jpg"></help-dialog-button>
@@ -74,7 +74,7 @@
     <help-dialog-button image="dfu-left.jpg"></help-dialog-button>
   </diagnoseme-rework-card-column>
 
-  <diagnoseme-rework-card-column column="1">Insert the host cable to the servo:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="1">Insert the host cable to the servo - a blue LED should NOT be illuminated:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
     <help-dialog-button image="host-cable-insert.jpg"></help-dialog-button>
@@ -93,7 +93,19 @@
 
 <diagnoseme-rework-card title="4. DUT Side Programming" [progress]="dutSideProgrammingInProgress" [disabled]="!serialNumberProgrammingSuccessful">
 
-  <diagnoseme-rework-card-column column="1">Insert the servo cable top the DUT:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="1">Unplug the host cable from the servo:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="remove-host.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Insert the host cable to the servo:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="host-cable-insert.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Insert the servo cable into the DUT:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
     <help-dialog-button image="servo-to-dut-insert.jpg"></help-dialog-button>
@@ -102,8 +114,9 @@
   <diagnoseme-rework-card-column column="1">Start DUT side programming:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2">
     <div style="display: flex; align-items: center; gap: 8px;">
-      <button mat-raised-button color="primary" (click)="startDutSideProgramming()" [disabled]="!serialNumberProgrammingSuccessful || dutSideProgrammingInProgress">Start</button>
+      <button #dutStartButton mat-raised-button color="primary" (click)="startDutSideProgramming()" [disabled]="!serialNumberProgrammingSuccessful || dutSideProgrammingInProgress">Start</button>
       <test-pass-fail-button #ethStatus></test-pass-fail-button>
+      <test-pass-fail-button #atmegaStatus></test-pass-fail-button>
     </div>
   </diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
@@ -111,24 +124,35 @@
 
 </diagnoseme-rework-card>
 
-<diagnoseme-rework-card title="5. Testing" [disabled]="!dutSideProgrammingSuccessful">
+<diagnoseme-rework-card title="5. Functional Testing" [progress]="consoleTestingInProgress || functionalTestingInProgress" [disabled]="false">
 
-  <diagnoseme-rework-card-column column="1">Insert the host cable to the servo:</diagnoseme-rework-card-column>
-  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
-  <diagnoseme-rework-card-column column="3">
-    <help-dialog-button image="host-cable-insert.jpg"></help-dialog-button>
+  <diagnoseme-rework-card-column column="1">Start functional hardware verification:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button #functionalTestStartButton mat-raised-button color="primary" (click)="runFunctionalTestingMerged()" [disabled]="consoleTestingInProgress || functionalTestingInProgress">Start</button>
+      <test-pass-fail-button #consoleTestingStatus></test-pass-fail-button>
+      <test-pass-fail-button #functionalTestingStatus></test-pass-fail-button>
+    </div>
   </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
 
-  <diagnoseme-rework-card-column column="1">Insert the servo cable top the DUT:</diagnoseme-rework-card-column>
+</diagnoseme-rework-card>
+
+<diagnoseme-rework-card title="6. Integration Testing" [progress]="integrationTestingInProgress" [disabled]="false">
+
+  <diagnoseme-rework-card-column column="1">Remove the captive (white cable) and insert into the chromeos device:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
     <help-dialog-button image="servo-to-dut-insert.jpg"></help-dialog-button>
   </diagnoseme-rework-card-column>
 
-  <diagnoseme-rework-card-column column="1">Plug a test USB stick into each servo Type A port ( 3 total ):</diagnoseme-rework-card-column>
-  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
-  <diagnoseme-rework-card-column column="3">
-    <help-dialog-button image="add-test-usb.jpg"></help-dialog-button>
+  <diagnoseme-rework-card-column column="1">Start final integration verification:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button #integrationTestStartButton mat-raised-button color="primary" (click)="runIntegrationTests()" [disabled]="!functionalTestingSuccessful || integrationTestingInProgress">Start</button>
+      <test-pass-fail-button #integrationTestingStatus></test-pass-fail-button>
+    </div>
   </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
 
 </diagnoseme-rework-card>

@@ -15,11 +15,15 @@ from typing import Optional
 # pylint: disable=import-error
 import docker
 
-# pylint: disable=no-member
-# pylint: disable=no-name-in-module
-# pylint: disable=import-error
+# pylint: enable=import-error
+from google.protobuf import empty_pb2
+
+# pylint: disable=no-name-in-module,import-error
 from server import diagnoseme_servod_pb2
 from server import diagnoseme_servod_pb2_grpc
+
+
+# pylint: enable=no-name-in-module,import-error
 
 
 logger = logging.getLogger(__name__)
@@ -92,14 +96,11 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
                 raise
             logger.info("Failed to check for new version, offline mode specified.")
 
-    # pylint: disable=too-many-arguments,too-many-positional-arguments
     def _get_image(
         self,
         client: docker.DockerClient,
-        allow_offline: bool,
-        force_update: bool,
-        verbose: bool,
         channel: str = "release",
+        force_update: bool = False,
     ) -> str:
         image = self.ARTIFACT_URL_TEMPLATE % channel
         if force_update or self._needs_update_check():
@@ -107,7 +108,8 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
                 "Checking docker image is up to date and downloading updates as "
                 "necessary."
             )
-            self._pull_newest_image(client, image, allow_offline, verbose)
+            # allow_offline=True, verbose=True by default for this flow
+            self._pull_newest_image(client, image, allow_offline=True, verbose=True)
             logger.info("Image check complete.")
         else:
             logger.info(
@@ -130,6 +132,8 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
         volumes += [f"{logs_volume}:/var/log/servod_9999/"]
 
         nofile_limit = docker.types.Ulimit(name="nofile", soft=65535, hard=65535)
+        command = ["bash", "/start_servod_dev.sh", servod_params]
+        logger.info("Running servod container with command: %s", " ".join(command))
         self.cont = client.containers.run(
             image,
             remove=True,
@@ -144,11 +148,47 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
             ulimits=[nofile_limit],
         )
 
-    # pylint: disable=too-many-locals
+    def _construct_servod_params(self, request: Any) -> str:
+        """Construct the servod command parameters from the request."""
+        params = "--port 9999 "
+        if request.board:
+            params += f"--board {request.board} "
+        if request.model:
+            params += f"--model {request.model} "
+        if request.recovery:
+            params += "--recovery "
+        return params
+
+    def _wait_for_servod(self, response: Any) -> bool:
+        """Wait for the servod instance to become active."""
+        if self.cont is None:
+            return False
+
+        while True:
+            try:
+                (error_code, _) = self.cont.exec_run(
+                    "servodtool instance wait-for-active --timeout 1 -p 9999"
+                )
+            except docker.errors.APIError as e:
+                response.console_output += str(e)
+                return False
+
+            try:
+                log_lines = self.cont.logs()
+                response.console_output = log_lines.decode("utf-8")
+            except docker.errors.NotFound:
+                logger.warning("Container not found while trying to fetch logs.")
+                response.console_output += "Error: Container not found."
+                return False
+
+            if error_code == 0:
+                return True
+
     def start_servod(
         self, request: Any, unused_context: Any
-    ) -> diagnoseme_servod_pb2.StartServodResponse:
+    ) -> diagnoseme_servod_pb2.StartServodResponse:  # pylint: disable=no-member
         """Start servod and return if successful or not."""
+        # pylint: disable=no-member
         response = diagnoseme_servod_pb2.StartServodResponse()
         try:
             client = docker.from_env()
@@ -157,12 +197,8 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
             return response
 
         logger.info("Starting servod")
-        image = self._get_image(client, True, False, True)
-        servod_params = "--port 9999 "
-        if request.board:
-            servod_params += f"--board {request.board} "
-        if request.model:
-            servod_params += f"--model {request.model} "
+        image = self._get_image(client)
+        servod_params = self._construct_servod_params(request)
 
         container_name = "diagnoseme"
         name = f"{container_name}-docker_servod"
@@ -175,41 +211,26 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
             response.started = False
             return response
 
-        started = False
-        while not started:
-            try:
-                (error_code, _) = self.cont.exec_run(
-                    "servodtool instance wait-for-active --timeout 1 -p 9999"
-                )
-            except docker.errors.APIError as e:
-                response.console_output += str(e)
-                break
-
-            if error_code == 0:
-                try:
-                    log_lines = self.cont.logs()
-                    response.console_output += log_lines.decode("utf-8")
-                    started = True
-                except docker.errors.NotFound:
-                    logger.warning("Container not found while trying to fetch logs.")
-                    response.console_output += "Error: Container not found."
-                    break
-            else:
-                try:
-                    log_lines = self.cont.logs()
-                    response.console_output += log_lines.decode("utf-8")
-                except docker.errors.NotFound:
-                    logger.warning("Container not found while trying to fetch logs.")
-                    response.console_output += "Error: Container not found."
-                    break
-
-        response.started = started
+        response.started = self._wait_for_servod(response)
         return response
+
+    def stop_servod(self, unused_request: Any, unused_context: Any) -> empty_pb2.Empty:
+        """Stop and remove the servod container."""
+        if self.cont:
+            try:
+                logger.info("Stopping servod container: %s", self.cont.name)
+                self.cont.stop()
+            except docker.errors.APIError:
+                logger.warning("Failed to stop container.")
+            finally:
+                self.cont = None
+        return empty_pb2.Empty()
 
     def get_dut_hardware_id(
         self, unused_request: Any, unused_context: Any
-    ) -> diagnoseme_servod_pb2.GetHardwareIDResponse:
+    ) -> diagnoseme_servod_pb2.GetHardwareIDResponse:  # pylint: disable=no-member
         """Call futility to get the information from the EC about the HWID."""
+        # pylint: disable=no-member
         response = diagnoseme_servod_pb2.GetHardwareIDResponse()
         if self.cont is None:
             logger.error("Servod container not initialized.")
@@ -233,8 +254,9 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
 
     def run_dut_control(
         self, request: Any, unused_context: Any
-    ) -> diagnoseme_servod_pb2.RunDutControlResponse:
+    ) -> diagnoseme_servod_pb2.RunDutControlResponse:  # pylint: disable=no-member
         """Run a dut-control command inside the diagnoseme servod container."""
+        # pylint: disable=no-member
         response = diagnoseme_servod_pb2.RunDutControlResponse()
         if self.cont is None:
             logger.error("Servod container not initialized.")

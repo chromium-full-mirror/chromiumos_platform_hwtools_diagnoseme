@@ -16,11 +16,12 @@ from doloscmd import console_lib
 from doloscmd.error import DolosConsoleError
 from google.cloud import storage
 
-# pylint: disable=no-member
-# pylint: disable=no-name-in-module
-# pylint: disable=import-error
+# pylint: disable=no-name-in-module,import-error
 from server import diagnoseme_dolos_pb2
 from server import diagnoseme_dolos_pb2_grpc
+
+
+# pylint: enable=no-name-in-module,import-error
 
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
 
     def get_firmware_versions(
         self, unused_request: Any, unused_context: Any
-    ) -> diagnoseme_dolos_pb2.FirmwareVersionsResponse:
+    ) -> diagnoseme_dolos_pb2.FirmwareVersionsResponse:  # pylint: disable=no-member
         """Retrieves available Dolos firmware versions.
 
         Fetches a list of available firmware versions from a Google Cloud Storage
@@ -57,6 +58,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             A FirmwareVersionsResponse containing the available firmware versions
             and the default version.
         """
+        # pylint: disable=no-member
         logger.info("Getting firmware versions")
         response = diagnoseme_dolos_pb2.FirmwareVersionsResponse()
         storage_client = storage.Client.create_anonymous_client()
@@ -75,7 +77,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
 
     def get_models(
         self, unused_request: Any, unused_context: Any
-    ) -> diagnoseme_dolos_pb2.ModelsResponse:
+    ) -> diagnoseme_dolos_pb2.ModelsResponse:  # pylint: disable=no-member
         """Retrieves supported Dolos models.
 
         Queries a Google Cloud Storage bucket to determine the available Dolos models.
@@ -87,6 +89,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
         Returns:
             A ModelsResponse containing the supported Dolos models.
         """
+        # pylint: disable=no-member
         response = diagnoseme_dolos_pb2.ModelsResponse()
         storage_client = storage.Client.create_anonymous_client()
         models = []
@@ -103,7 +106,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
 
     def get_board_model_mapping(
         self, unused_request: Any, unused_context: Any
-    ) -> diagnoseme_dolos_pb2.BoardModelMappingResponse:
+    ) -> diagnoseme_dolos_pb2.BoardModelMappingResponse:  # pylint: disable=no-member
         """Reads public csv file with board model mapping.
 
         Args:
@@ -113,6 +116,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
         Returns:
             BoardModelMappingResponse which has the mapping.
         """
+        # pylint: disable=no-member
         logger.debug("Generating board model mapping.")
         response = diagnoseme_dolos_pb2.BoardModelMappingResponse()
         storage_client = storage.Client.create_anonymous_client()
@@ -129,7 +133,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
 
     def update_firmware(
         self, request: Any, unused_context: Any
-    ) -> diagnoseme_dolos_pb2.FirmwareUpdateResponse:
+    ) -> diagnoseme_dolos_pb2.FirmwareUpdateResponse:  # pylint: disable=no-member
         """Updates the firmware on connected Dolos devices.
 
         Initiates a firmware update process on all detected Dolos consoles
@@ -144,6 +148,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             A FirmwareUpdateResponse containing the results of the update operation
             for each Dolos device.
         """
+        # pylint: disable=no-member
         response = diagnoseme_dolos_pb2.FirmwareUpdateResponse()
         doloses = console_lib.DolosConsole.get_all_dolos_consoles()
         for dolos in doloses:
@@ -161,7 +166,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
 
     def check_dolos_from_host(
         self, unused_request: Any, unused_context: Any
-    ) -> diagnoseme_dolos_pb2.CheckDolosFromHostResponse:
+    ) -> diagnoseme_dolos_pb2.CheckDolosFromHostResponse:  # pylint: disable=no-member
         """Checks Dolos status from the host perspective.
 
         Queries a connected Dolos console for its status information, including
@@ -175,6 +180,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             A CheckDolosFromHostResponse containing the Dolos serial number,
             status, and the overall test status.
         """
+        # pylint: disable=no-member
         response = diagnoseme_dolos_pb2.CheckDolosFromHostResponse()
         response.status = diagnoseme_dolos_pb2.TEST_STATUS.FAIL
 
@@ -196,7 +202,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
 
     def program_cable(
         self, request: Any, unused_context: Any
-    ) -> diagnoseme_dolos_pb2.ProgramCableResponse:
+    ) -> diagnoseme_dolos_pb2.ProgramCableResponse:  # pylint: disable=no-member
         """Programs a Dolos cable.
 
         Performs a dolos repair ( resets the device ) after the update.
@@ -209,6 +215,7 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
         Returns:
             A ProgramCableResponse containing the results of the programming operation.
         """
+        # pylint: disable=no-member
         response = diagnoseme_dolos_pb2.ProgramCableResponse()
         response.success = False
 
@@ -220,11 +227,9 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             new_serial_number: Optional[str] = None
 
             if request.eeprom_data:
-                # pylint: disable=consider-using-with
-                datafile = tempfile.NamedTemporaryFile(delete=False)
-                datafile.write(request.eeprom_data.encode("utf-8"))
-                datafile.close()
-                eeprom_data_filename = datafile.name
+                with tempfile.NamedTemporaryFile(delete=False) as datafile:
+                    datafile.write(request.eeprom_data.encode("utf-8"))
+                    eeprom_data_filename = datafile.name
 
             if request.new_serial_number:
                 new_serial_number = request.new_serial_number

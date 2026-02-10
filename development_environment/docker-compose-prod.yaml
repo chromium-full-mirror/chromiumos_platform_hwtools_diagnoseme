@@ -26,14 +26,15 @@ services:
     restart: unless-stopped
     privileged: true
     pull_policy: always
-
-    networks:
-      diagnoseme:
-        ipv4_address: 192.168.100.11
+    network_mode: host
+    environment:
+      - TEST_DUT=brya
+      - TEST_MODEL=banshee
 
     volumes:
       - logs:/var/log/rpcserver
       - /dev:/dev
+      - /sys:/sys
       - /var/run/docker.sock:/var/run/docker.sock
 
   #############################################################################
@@ -42,19 +43,22 @@ services:
     image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/envoy:release
     restart: unless-stopped
     pull_policy: always
+    network_mode: host
     environment:
       ENVOY_UID: 0
-
-    networks:
-      diagnoseme:
-        ipv4_address: 192.168.100.12
 
     hostname: envoy-proxy
     volumes:
       - logs:/var/log/envoy
 
-    ports:
-      - 8888:6001
+  #############################################################################
+  watchtower:
+    container_name: watchtower
+    image: nickfedor/watchtower:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 3600 --include-restarting ui server envoy
   #############################################################################
 
 volumes:
