@@ -60,8 +60,11 @@ class RTKEthProgrammer:
     CONFIG_TEMPLATE = "EE8153BvB.cfg"
     SECONDARY_CONFIG = "EF8153BvB.cfg"
 
-    # These are the fields to write the desired macaddr into.
+    # These are the fields to write the desired values into.
     MACADDR_FIELDS = ["NODEID", "STARTID", "ENDID"]
+    LED_CFG_FIELD = "LED_SEL_CFG"
+    # Documented value for Servo V4.1: 24 8F
+    LED_CFG_VALUE = "24 8F"
 
     # .cfg files have ; as a comment delim
     COMMENT_DELIM = ";"
@@ -160,10 +163,12 @@ class RTKEthProgrammer:
                     output.append(line)
                 else:
                     k, _ = line.split(self.KEY_VALUE_SEP, 1)
-                    if k not in self.MACADDR_FIELDS:
-                        output.append(line)
-                    else:
+                    if k in self.MACADDR_FIELDS:
                         output.append(f"{k}{self.KEY_VALUE_SEP}{macaddr_out}\n")
+                    elif k == self.LED_CFG_FIELD:
+                        output.append(f"{k}{self.KEY_VALUE_SEP}{self.LED_CFG_VALUE}\n")
+                    else:
+                        output.append(line)
 
         with open(dst_file, "w", encoding="utf-8") as d:
             d.writelines(output)

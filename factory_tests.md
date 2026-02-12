@@ -15,6 +15,7 @@ These tests interact directly with the Servo's MCU console via the serial port t
 | **Verify Serial Number** | `serialno` | MCU console output must match the scanned serial number. |
 | **Verify MAC Address** | `macaddr` | MCU console output must match the scanned Ethernet MAC address. |
 | **PD Role Check** | `pd 0 state` | MCU must report a valid Power Delivery role (either `SRC` or `SNK`). |
+| **I2C Scan** | `i2cscan 1` | MCU must detect all 7 critical onboard devices (`0x21`, `0x40`, `0x41`, `0x42`, `0x48`, `0x49`, `0x50`). |
 
 ---
 

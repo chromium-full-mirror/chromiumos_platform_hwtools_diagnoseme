@@ -379,6 +379,46 @@ class V4P1Tester:
             results.append((f"INA {name} ({description}) Presence", False))
         return results
 
+    def test_i2c_scan(self, console: ServoConsole) -> bool:
+        """Verify all critical I2C devices are visible to the MCU."""
+        self._logger.info("Running I2C scan on Bus 1...")
+        # Expected addresses on I2C Bus 1 for Servo V4.1
+        # 0x21: TCA6416 (GPIO Expander)
+        # 0x40, 0x41, 0x42: INA231 (Power Monitors)
+        # 0x48, 0x49: DAC7578 (CC DACs)
+        # 0x50: EEPROM (Board ID)
+        expected_addresses = ["21", "40", "41", "42", "48", "49", "50"]
+
+        try:
+            output = console.issue_cmd("i2cscan 1")
+            self._logger.debug("i2cscan output: %s", output)
+
+            # We look for the presence of the hex addresses in the scan table.
+            # The output typically looks like:
+            #   0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+            # 20: -- 21 -- -- -- -- -- -- -- -- -- -- -- -- --
+            # 40: 40 41 42 -- -- -- -- -- 48 49 -- -- -- -- --
+            # 50: 50 -- -- -- -- -- -- -- -- -- -- -- -- -- --
+            missing = []
+            for addr in expected_addresses:
+                # Use regex to find the address as a standalone word in the output
+                # to avoid false positives (e.g., matching '21' inside '20:').
+                if not re.search(rf"\b{addr}\b", output):
+                    missing.append(f"0x{addr}")
+
+            if missing:
+                self._logger.error(
+                    "I2C Scan FAILED. Missing devices: %s", ", ".join(missing)
+                )
+                return False
+
+            self._logger.info("I2C Scan PASSED. All critical devices detected.")
+            return True
+
+        except (V4P1TesterError, ServoConsoleError) as e:
+            self._logger.error("I2C scan test encountered error: %s", e)
+            return False
+
     def run_console_tests(self, serial_path: str) -> List[Tuple[str, bool]]:
         """Phase 1: Run tests that only require direct console access (no servod)."""
         all_results = []
@@ -423,6 +463,9 @@ class V4P1Tester:
                     ),
                 )
             )
+
+            # I2C Scan Verification
+            all_results.append(("I2C Scan Verification", self.test_i2c_scan(console)))
 
         return all_results
 
