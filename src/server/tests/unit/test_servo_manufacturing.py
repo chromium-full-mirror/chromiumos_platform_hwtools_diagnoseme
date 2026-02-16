@@ -28,8 +28,28 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
         self.context = mock.MagicMock()
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
+        # Mock util.run_command to avoid failures on systems without lsusb
+        self.mock_run_command = mock.patch("server.util.run_command").start()
+        # Mock lsusb output so wait_for_usb_devices finds the devices immediately
+        self.mock_run_command.return_value = mock.Mock(
+            stdout=(
+                "Bus 001 Device 002: ID 0bda:8153\n"
+                "Bus 001 Device 003: ID 03eb:2ff4\n"
+                "Bus 001 Device 004: ID 18d1:520d\n"
+            ),
+            returncode=0,
+        )
+        # Mock reset_servo_v4p1_hub
+        self.mock_reset_hub = mock.patch("server.util.reset_servo_v4p1_hub").start()
+        self.mock_reset_hub.return_value = True
+        # Mock reset_servo_v4p1_dut_hub
+        self.mock_reset_dut_hub = mock.patch(
+            "server.util.reset_servo_v4p1_dut_hub"
+        ).start()
+        self.mock_reset_dut_hub.return_value = True
 
     def tearDown(self):
+        mock.patch.stopall()
         self.loop.close()
 
     def test_get_status(self):
@@ -37,6 +57,16 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
         request = empty_pb2.Empty()
         response = self.servicer.get_status(request, self.context)
         self.assertEqual(response.status, "OK")
+
+    @mock.patch("server.util.is_usb_device_present")
+    def test_get_device_presence(self, mock_is_present):
+        """Test case for get_device_presence."""
+        mock_is_present.side_effect = [True, False, True]
+        request = empty_pb2.Empty()
+        response = self.servicer.get_device_presence(request, self.context)
+        self.assertTrue(response.mcu_dfu_detected)
+        self.assertFalse(response.servo_v4p1_detected)
+        self.assertTrue(response.realtek_eth_detected)
 
     def test_validate_servo_serial_valid(self):
         """Test case for validate_servo_serial with valid input."""
@@ -178,26 +208,26 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
         self.assertTrue(response.success)
         self.assertEqual(response.message, "Atmega programmed successfully")
 
-    @mock.patch("server.v4p1_tester.V4P1Tester.run_initial_tests")
+    @mock.patch("server.v4p1_tester.V4P1Tester.run_console_tests")
     @mock.patch("server.util.discover_servo_v4p1_serial_path")
-    def test_run_initial_tests_success(self, mock_discover, mock_run):
-        """Test case for run_initial_tests success."""
+    def test_run_console_tests_success(self, mock_discover, mock_run):
+        """Test case for run_console_tests success."""
         mock_discover.return_value = "/dev/ttyUSB0"
         mock_run.return_value = [("test1", True)]
         request = servo_manufacturing_pb2.RunTestsRequest(serial_number="12345")
         response = self.loop.run_until_complete(
-            self.servicer.run_initial_tests(request, self.context)
+            self.servicer.run_console_tests(request, self.context)
         )
         self.assertTrue(response.all_passed)
         self.assertIn("test1: PASS", response.summary)
 
-    @mock.patch("server.v4p1_tester.V4P1Tester.run_servod_tests")
-    def test_run_servod_tests_success(self, mock_run):
-        """Test case for run_servod_tests success."""
+    @mock.patch("server.v4p1_tester.V4P1Tester.run_functional_tests")
+    def test_run_functional_tests_success(self, mock_run):
+        """Test case for run_functional_tests success."""
         mock_run.return_value = [("test2", True)]
         request = servo_manufacturing_pb2.RunTestsRequest(serial_number="12345")
         response = self.loop.run_until_complete(
-            self.servicer.run_servod_tests(request, self.context)
+            self.servicer.run_functional_tests(request, self.context)
         )
         self.assertTrue(response.all_passed)
         self.assertIn("test2: PASS", response.summary)

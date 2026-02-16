@@ -35,7 +35,7 @@ class V4P1Tester:
     # HH (Host Hub): Genesys GL3590
     HH_VID = 0x05E3
     HH_PID = 0x0610
-    HH_PID3 = 0x0625
+    HH_PID3 = 0x0626
 
     # DH (DUT Hub): Cypress
     DH_VID = 0x04B4
@@ -61,6 +61,7 @@ class V4P1Tester:
         self._servod_address = servod_address
         # Store results for report generation
         self._mux_results: Dict[str, Dict[str, str]] = {}
+        self._logger.info("V4P1Tester initialized (Revision traversal-v2)")
 
     async def _run_dut_control(self, command: str) -> str:
         """Run a dut-control command via RPC."""
@@ -115,31 +116,60 @@ class V4P1Tester:
 
         for dev in os.listdir(base_path):
             dev_path = os.path.join(base_path, dev)
-            id_vendor_path = os.path.join(dev_path, "idVendor")
-            id_product_path = os.path.join(dev_path, "idProduct")
+            # Skip if not a primary device (e.g. interfaces like 3-4:1.0)
+            if ":" in dev:
+                continue
 
-            if os.path.exists(id_vendor_path) and os.path.exists(id_product_path):
-                try:
-                    with open(id_vendor_path, "r", encoding="utf-8") as f:
-                        vid = int(f.read().strip(), 16)
-                    with open(id_product_path, "r", encoding="utf-8") as f:
-                        pid = int(f.read().strip(), 16)
+            # Check 'devpath' attribute which indicates the port number
+            devpath_file = os.path.join(dev_path, "devpath")
+            if not os.path.exists(devpath_file):
+                continue
 
-                    if vid == hub_vid and pid == hub_pid:
-                        target_port_path = f"{dev}.{port}"
-                        full_target_path = os.path.join(base_path, target_port_path)
-                        if os.path.exists(full_target_path):
-                            self._logger.info(
-                                "Found device path: %s (Hub %04x:%04x Port %d)",
-                                full_target_path,
-                                vid,
-                                pid,
-                                port,
-                            )
-                            return full_target_path
-                except (ValueError, IOError) as e:
-                    self._logger.debug("Error reading sysfs for %s: %s", dev, e)
-                    continue
+            try:
+                with open(devpath_file, "r", encoding="utf-8") as f:
+                    devpath_val = f.read().strip()
+                # devpath is like "1.4.2". The last component is the port on the parent.
+                current_port = devpath_val.split(".")[-1]
+            except (IOError, IndexError):
+                continue
+
+            # Check parent VID/PID by resolving symlink
+            real_path = os.path.realpath(dev_path)
+            parent_path = os.path.dirname(real_path)
+            p_vid, p_pid = 0, 0
+
+            try:
+                with open(
+                    os.path.join(parent_path, "idVendor"), "r", encoding="utf-8"
+                ) as f:
+                    p_vid = int(f.read().strip(), 16)
+                with open(
+                    os.path.join(parent_path, "idProduct"), "r", encoding="utf-8"
+                ) as f:
+                    p_pid = int(f.read().strip(), 16)
+            except (ValueError, IOError, FileNotFoundError):
+                # This is normal for root hubs or non-usb parents
+                continue
+
+            self._logger.debug(
+                "Inspecting device %s: DevPath=%s (Port %s), Parent=%04x:%04x",
+                dev,
+                devpath_val,
+                current_port,
+                p_vid,
+                p_pid,
+            )
+
+            if p_vid == hub_vid and p_pid == hub_pid and current_port == str(port):
+                self._logger.info(
+                    "MATCH FOUND: Device %s (Hub %04x:%04x Port %d)",
+                    dev_path,
+                    p_vid,
+                    p_pid,
+                    port,
+                )
+                return dev_path
+
         return None
 
     def _get_serial_at_path(self, sysfs_path: str) -> Optional[str]:
@@ -153,6 +183,37 @@ class V4P1Tester:
                     return f.read().strip()
             except IOError:
                 return None
+        return None
+
+    def _get_serial_with_retry(
+        self, host_path: str, timeout: float = 10.0
+    ) -> Optional[str]:
+        """Retry reading the serial number for a short period."""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            serial_file = os.path.join(host_path, "serial")
+            if not os.path.exists(serial_file):
+                self._logger.debug(
+                    "Serial file not yet present at %s (elapsed: %.2fs)",
+                    host_path,
+                    time.time() - start_time,
+                )
+            else:
+                serial = self._get_serial_at_path(host_path)
+                if serial:
+                    self._logger.debug(
+                        "Successfully read serial '%s' from %s", serial, host_path
+                    )
+                    return serial
+                self._logger.debug(
+                    "Serial file exists but is empty at %s (elapsed: %.2fs)",
+                    host_path,
+                    time.time() - start_time,
+                )
+            time.sleep(0.5)
+        self._logger.error(
+            "Timed out reading serial at %s after %.2fs", host_path, timeout
+        )
         return None
 
     def _find_device_by_serial(self, serial: str) -> Optional[str]:
@@ -184,7 +245,7 @@ class V4P1Tester:
         return False
 
     async def _wait_for_serial_on_system(
-        self, serial: str, timeout: float = 10.0
+        self, serial: str, timeout: float = 20.0
     ) -> Optional[str]:
         """Poll for a device with a specific serial to appear on the system."""
         start_time = time.time()
@@ -246,8 +307,10 @@ class V4P1Tester:
         name: str,
         port_number: int,
         mux_control: str,
+        strict_dut_check: bool = True,
     ) -> bool:
         """Test a USB port muxing using dut-control."""
+        # pylint: disable=too-many-return-statements,too-many-branches,too-many-statements
         self._logger.info("Verifying USB Mux '%s' (Mux Port %d)", name, port_number)
         self._mux_results[name] = {"serial": "Unknown", "host": "None", "dut": "None"}
 
@@ -288,7 +351,7 @@ class V4P1Tester:
             return False
 
         self._mux_results[name]["host"] = host_path
-        usb_serial = self._get_serial_at_path(host_path)
+        usb_serial = self._get_serial_with_retry(host_path)
         if not usb_serial:
             self._logger.error(
                 "FAILED: Could not read serial number from USB stick at %s", host_path
@@ -317,11 +380,21 @@ class V4P1Tester:
         dut_path = await self._wait_for_serial_on_system(usb_serial)
 
         if not dut_path:
-            self._logger.warning(
-                "Optional: Device serial '%s' not found on DUT side. "
-                "Is the DUT port connected to this machine?",
-                usb_serial,
+            msg = (
+                f"FAILED: Device serial '{usb_serial}' not found on DUT side. "
+                "Is the DUT port connected to this machine?"
             )
+            self._logger.error(msg)
+            try:
+                lsusb_out = util.run_command(["lsusb"]).stdout
+                self._logger.error("Current lsusb:\n%s", lsusb_out)
+            except (OSError, util.subprocess.SubprocessError):
+                pass
+
+            if strict_dut_check:
+                return False
+            self._logger.warning("Ignoring failure (strict_dut_check=False).")
+
         elif dut_path == host_path:
             self._logger.error(
                 "FAILED: Device found at SAME path %s. Mux didn't switch.", dut_path
@@ -358,6 +431,84 @@ class V4P1Tester:
                 data["dut"],
             )
         self._logger.info("------------------------------------")
+
+    def _find_atmega_hid_path(self) -> Optional[str]:
+        """Find the /dev/hidrawX path for the Atmega Keyboard."""
+        base_path = "/sys/bus/hid/devices"
+        if not os.path.exists(base_path):
+            self._logger.error("Sysfs HID devices path not found: %s", base_path)
+            return None
+
+        # Atmega LUFA VID:PID is 03EB:2042
+        target_id = "03EB:2042"
+
+        found_devices = []
+        for dev in os.listdir(base_path):
+            # Sysfs name format: BUS:VENDOR:PRODUCT.INTF
+            found_devices.append(dev)
+            if target_id in dev.upper():
+                # Found the device, look for hidraw
+                hidraw_dir = os.path.join(base_path, dev, "hidraw")
+                if os.path.exists(hidraw_dir):
+                    hidraws = os.listdir(hidraw_dir)
+                    if hidraws:
+                        return f"/dev/{hidraws[0]}"
+
+        self._logger.error(
+            "Atmega HID device %s not found in %s. Found: %s",
+            target_id,
+            base_path,
+            found_devices,
+        )
+        return None
+
+    async def test_usb_keyboard(self) -> bool:
+        """Verify USB Keyboard functionality."""
+        # pylint: disable=too-many-return-statements
+        self._logger.info("Verifying USB Keyboard...")
+
+        hid_path = self._find_atmega_hid_path()
+        if not hid_path:
+            # Often the keyboard is not plugged in or not enumerated if not needed.
+            # But for manufacturing test, it should be there if we are testing
+            # the atmega.
+            self._logger.error("FAILED: Atmega Keyboard HID device not found.")
+            return False
+
+        self._logger.info("Found Keyboard HID at %s", hid_path)
+
+        try:
+            # Open the device in non-blocking mode
+            fd = os.open(hid_path, os.O_RDONLY | os.O_NONBLOCK)
+
+            # Send keystrokes
+            test_str = "test"
+            await self._run_dut_control(f"usb_keyboard:{test_str}")
+
+            # Give it time to arrive
+            time.sleep(1.0)
+
+            # Read data
+            try:
+                data = os.read(fd, 1024)
+                os.close(fd)
+            except BlockingIOError:
+                os.close(fd)
+                self._logger.error("FAILED: No data received from keyboard.")
+                return False
+
+            if len(data) > 0:
+                self._logger.info(
+                    "Verified: Received %d bytes from keyboard.", len(data)
+                )
+                return True
+
+            self._logger.error("FAILED: Received empty data.")
+            return False
+
+        except OSError as e:
+            self._logger.error("Error accessing HID device: %s", e)
+            return False
 
     async def test_ina(
         self, name: str, address: int, description: str
@@ -401,9 +552,9 @@ class V4P1Tester:
             # 50: 50 -- -- -- -- -- -- -- -- -- -- -- -- -- --
             missing = []
             for addr in expected_addresses:
-                # Use regex to find the address as a standalone word in the output
-                # to avoid false positives (e.g., matching '21' inside '20:').
-                if not re.search(rf"\b{addr}\b", output):
+                # Use regex to find the address in the output (e.g. '0x21')
+                # We expect the address to be prefixed with 0x in the output.
+                if not re.search(rf"0x{addr}", output):
                     missing.append(f"0x{addr}")
 
             if missing:
@@ -499,10 +650,22 @@ class V4P1Tester:
             (
                 "uServo USB-A Port",
                 await self.test_usb_mux(
-                    "uServo USB-A Port", 4, "uservo_fastboot_mux_sel"
+                    "uServo USB-A Port",
+                    4,
+                    "uservo_fastboot_mux_sel",
+                    strict_dut_check=False,
                 ),
             )
         )
+
+        # USB Keyboard Test
+        # Skipped for now as enumeration is flaky after programming.
+        # all_results.append(
+        #     (
+        #         "USB Keyboard HID",
+        #         await self.test_usb_keyboard(),
+        #     )
+        # )
 
         # Output the report to logs
         self.log_mux_report()

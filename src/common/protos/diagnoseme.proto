@@ -1,0 +1,20 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+syntax = "proto3";
+
+package diagnoseme;
+
+service DiagnoseMeService {
+  // Get Logs RPC call
+  rpc get_logs(GetLogsRequest) returns (GetLogsResponse) {}
+}
+
+message GetLogsRequest {
+  int32 line_count = 1;
+}
+
+message GetLogsResponse {
+  string log_content = 1;
+}

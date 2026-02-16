@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 """Helper functions to find required files on the system."""
 
+import fcntl
 import glob
 import logging
 import os
@@ -16,6 +17,118 @@ from typing import Tuple
 
 
 BIN_DIR = "binfiles"
+
+
+def reset_usb_device(dev_path: str) -> bool:
+    """Reset a USB device using USBDEVFS_RESET ioctl.
+
+    Args:
+        dev_path: Path to the device node (e.g., /dev/bus/usb/001/002).
+
+    Returns:
+        True if reset successful.
+    """
+    # USBDEVFS_RESET = _IO('U', 20) = (ord('U') << 8) | 20 = 21780
+    usbdevfs_reset = 21780
+    try:
+        with open(dev_path, "wb") as f:
+            fcntl.ioctl(f, usbdevfs_reset, 0)
+        return True
+    except OSError as e:
+        logging.error("Failed to reset USB device %s: %s", dev_path, e)
+        return False
+
+
+def reset_servo_v4p1_hub() -> bool:
+    """Finds and resets the USB hub upstream of the Servo V4.1."""
+    base = "/sys/bus/usb/devices"
+    if not os.path.exists(base):
+        return False
+
+    for dev in os.listdir(base):
+        vid_path = os.path.join(base, dev, "idVendor")
+        pid_path = os.path.join(base, dev, "idProduct")
+        if os.path.exists(vid_path) and os.path.exists(pid_path):
+            try:
+                with open(vid_path, "r", encoding="utf-8") as f:
+                    vid = f.read().strip()
+                with open(pid_path, "r", encoding="utf-8") as f:
+                    pid = f.read().strip()
+
+                if vid == "18d1" and pid == "520d":
+                    # Found Servo V4.1. Get Parent.
+                    full_path = os.path.realpath(os.path.join(base, dev))
+                    parent_dir = os.path.dirname(full_path)
+
+                    with open(
+                        os.path.join(parent_dir, "busnum"), "r", encoding="utf-8"
+                    ) as f:
+                        bus = int(f.read().strip())
+                    with open(
+                        os.path.join(parent_dir, "devnum"), "r", encoding="utf-8"
+                    ) as f:
+                        dev_num = int(f.read().strip())
+
+                    dev_node = f"/dev/bus/usb/{bus:03d}/{dev_num:03d}"
+                    logging.info(
+                        "Found Servo Parent Hub at %s (Bus %d Dev %d). Resetting...",
+                        dev_node,
+                        bus,
+                        dev_num,
+                    )
+                    return reset_usb_device(dev_node)
+            except (IOError, ValueError):
+                continue
+    return False
+
+
+def reset_servo_v4p1_dut_hub() -> bool:
+    """Finds and resets the DUT USB hub on the Servo V4.1."""
+    base = "/sys/bus/usb/devices"
+    if not os.path.exists(base):
+        return False
+
+    # Cypress VID
+    target_vid = "04b4"
+    # PIDs observed: 6504 (USB3), 6502 (USB2)
+    target_pids = ["6504", "6502"]
+
+    reset_count = 0
+    for dev in os.listdir(base):
+        vid_path = os.path.join(base, dev, "idVendor")
+        pid_path = os.path.join(base, dev, "idProduct")
+        if os.path.exists(vid_path) and os.path.exists(pid_path):
+            try:
+                with open(vid_path, "r", encoding="utf-8") as f:
+                    vid = f.read().strip()
+                with open(pid_path, "r", encoding="utf-8") as f:
+                    pid = f.read().strip()
+
+                if vid == target_vid and pid in target_pids:
+                    # Found DUT Hub. Get Device Node.
+                    full_path = os.path.realpath(os.path.join(base, dev))
+
+                    with open(
+                        os.path.join(full_path, "busnum"), "r", encoding="utf-8"
+                    ) as f:
+                        bus = int(f.read().strip())
+                    with open(
+                        os.path.join(full_path, "devnum"), "r", encoding="utf-8"
+                    ) as f:
+                        dev_num = int(f.read().strip())
+
+                    dev_node = f"/dev/bus/usb/{bus:03d}/{dev_num:03d}"
+                    logging.info(
+                        "Found Servo DUT Hub at %s (Bus %d Dev %d). Resetting...",
+                        dev_node,
+                        bus,
+                        dev_num,
+                    )
+                    if reset_usb_device(dev_node):
+                        reset_count += 1
+            except (IOError, ValueError):
+                continue
+    return reset_count > 0
 
 
 def get_bindir() -> Path:
@@ -147,6 +260,23 @@ def discover_servo_v4p1_serial_path(
             time.sleep(interval)
 
     return None
+
+
+def is_usb_device_present(vid: int, pids: List[int]) -> bool:
+    """Check if a USB device is present on the system.
+
+    Args:
+        vid: Vendor ID.
+        pids: List of Product IDs.
+
+    Returns:
+        True if found.
+    """
+    lsusb = run_command(["lsusb"]).stdout.lower()
+    for pid in pids:
+        if f"{vid:04x}:{pid:04x}" in lsusb:
+            return True
+    return False
 
 
 def wait_for_usb_devices(

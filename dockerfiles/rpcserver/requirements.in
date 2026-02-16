@@ -8,5 +8,7 @@ grpcio-reflection==1.75.1
 grpcio==1.75.1
 google-cloud-storage
 pyserial
+pylint
+pylint-protobuf
 pip-tools
 setuptools==81.0.0

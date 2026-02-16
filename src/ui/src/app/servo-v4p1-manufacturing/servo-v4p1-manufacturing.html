@@ -5,6 +5,8 @@
 
 <mat-toolbar color="primary">
   <span>Servo V4.1 Manufacturing</span>
+  <span style="flex: 1 1 auto;"></span>
+  <mat-checkbox [(ngModel)]="autoAdvance" color="accent" style="color: white;">Auto-Advance</mat-checkbox>
 </mat-toolbar>
 
 <diagnoseme-rework-card title="1. Data Collection">

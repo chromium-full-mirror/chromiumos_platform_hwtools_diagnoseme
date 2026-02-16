@@ -59,7 +59,7 @@ steps:
   - -f=/workspace/dockerfiles/ui/Dockerfile
   waitFor: ['src-prep', 'proto-gen']
 
-- name: 'pyfound/black:24.2.0'
+- name: 'pyfound/black:25.1.0'
   id: 'test-black-formatting'
   entrypoint: 'black'
   args:
@@ -76,13 +76,16 @@ steps:
     - /workspace
   waitFor: ['src-prep']
 
-- name: 'pipelinecomponents/pylint'
+- name: 'python:3.13'
   id: 'test-pylint'
-  entrypoint: 'pylint'
+  entrypoint: 'bash'
   args:
-    - --rcfile=/workspace/pylintrc
-    - /workspace/src
-  waitFor: ['src-prep']
+  - '-c'
+  - |
+    pip install -r dockerfiles/rpcserver/requirements.txt --require-hashes --break-system-packages
+    cp src/generated/*.py src/server/
+    pylint --load-plugins=pylint_protobuf --rcfile=/workspace/pylintrc /workspace/src/server
+  waitFor: ['src-prep', 'proto-gen']
 
 - name: 'node:25'
   id: 'ui-lint'

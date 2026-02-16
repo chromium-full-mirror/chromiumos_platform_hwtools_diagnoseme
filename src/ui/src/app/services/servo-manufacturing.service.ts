@@ -22,6 +22,7 @@ import {
   ValidateServoSerialRequest,
   ValidationResponse,
   ValidateServoMacAddressRequest,
+  DevicePresenceResponse,
 } from '../../proto/servo-manufacturing.pb';
 import {Observable} from 'rxjs';
 
@@ -33,6 +34,10 @@ export class ServoManufacturingService {
 
   getStatus(): Observable<StatusResponse> {
     return this.client.getStatus(new Empty());
+  }
+
+  getDevicePresence(): Observable<DevicePresenceResponse> {
+    return this.client.getDevicePresence(new Empty());
   }
 
   programGenesysHub(): Observable<ProgramGenesysHubResponse> {

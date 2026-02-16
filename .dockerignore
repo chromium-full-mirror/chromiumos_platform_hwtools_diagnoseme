@@ -24,7 +24,7 @@ cscope.out
 cscope.po.out
 .coverage
 coverage.lcov
-**/node_modules/**
+**/node_modules
 **/package-lock.json
 
 # Ignore tags for those using TAGS

@@ -21,6 +21,8 @@ from grpc_reflection.v1alpha import reflection
 
 # pylint: disable=no-name-in-module,import-error
 from server import diagnoseme_dolos_pb2
+from server import diagnoseme_pb2
+from server import diagnoseme_service
 from server import diagnoseme_servod_pb2
 from server import dolos
 from server import servo_manufacturing
@@ -29,6 +31,7 @@ from server import servod
 from server.diagnoseme_dolos_pb2_grpc import (
     add_DolosRpcServiceServicer_to_server,
 )
+from server.diagnoseme_pb2_grpc import add_DiagnoseMeServiceServicer_to_server
 from server.diagnoseme_servod_pb2_grpc import (
     add_ServodRpcServiceServicer_to_server,
 )
@@ -85,6 +88,17 @@ async def serve():
         service_name = (
             diagnoseme_dolos_pb2.DESCRIPTOR.services_by_name[  # pylint: disable=no-member
                 "DolosRpcService"
+            ].full_name,
+            reflection.SERVICE_NAME,
+        )
+        reflection.enable_server_reflection(service_name, server)
+
+        add_DiagnoseMeServiceServicer_to_server(
+            diagnoseme_service.DiagnoseMeServicer(), server
+        )
+        service_name = (
+            diagnoseme_pb2.DESCRIPTOR.services_by_name[  # pylint: disable=no-member
+                "DiagnoseMeService"
             ].full_name,
             reflection.SERVICE_NAME,
         )

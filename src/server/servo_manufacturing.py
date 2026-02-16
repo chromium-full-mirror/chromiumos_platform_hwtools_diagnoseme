@@ -6,6 +6,7 @@
 import logging
 import os
 import re
+import time
 
 from google.protobuf import empty_pb2
 import grpc
@@ -57,21 +58,32 @@ class ServoV41ManufacturingServicer(
         self._servod_service = servod_service
 
     def get_status(
-        self, request: empty_pb2.Empty, context: grpc.ServicerContext
+        self, unused_request: empty_pb2.Empty, unused_context: grpc.ServicerContext
     ) -> servo_manufacturing_pb2.StatusResponse:  # pylint: disable=no-member
         """Get the status of the manufacturing service."""
         # pylint: disable=no-member
-        del request, context  # Unused
         return servo_manufacturing_pb2.StatusResponse(status="OK")
+
+    def get_device_presence(
+        self,
+        unused_request: empty_pb2.Empty,
+        unused_context: grpc.ServicerContext,
+    ) -> servo_manufacturing_pb2.DevicePresenceResponse:  # pylint: disable=no-member
+        """Check for connected devices."""
+        # pylint: disable=no-member
+        return servo_manufacturing_pb2.DevicePresenceResponse(
+            mcu_dfu_detected=util.is_usb_device_present(0x0483, [0xDF11]),
+            servo_v4p1_detected=util.is_usb_device_present(0x18D1, [0x520D]),
+            realtek_eth_detected=util.is_usb_device_present(0x0BDA, [0x8153]),
+        )
 
     def program_genesys_hub(
         self,
-        request: servo_manufacturing_pb2.ProgramGenesysHubRequest,  # pylint: disable=no-member
-        context: grpc.ServicerContext,
+        unused_request: servo_manufacturing_pb2.ProgramGenesysHubRequest,  # pylint: disable=no-member
+        unused_context: grpc.ServicerContext,
     ) -> servo_manufacturing_pb2.ProgramGenesysHubResponse:  # pylint: disable=no-member
         """Program the Genesys Hub."""
         # pylint: disable=no-member
-        del request, context  # Unused
         logging.info("Programming Genesys Hub...")
         try:
             programmer = genesys_hub_programmer.GenesysHubProgrammer(force=False)
@@ -89,11 +101,10 @@ class ServoV41ManufacturingServicer(
     def program_mcu(
         self,
         request: servo_manufacturing_pb2.ProgramMcuRequest,  # pylint: disable=no-member
-        context: grpc.ServicerContext,
+        unused_context: grpc.ServicerContext,
     ) -> servo_manufacturing_pb2.ProgramMcuResponse:  # pylint: disable=no-member
         """Program the MCU."""
         # pylint: disable=no-member
-        del context  # Unused
         logging.info("Programming MCU with %s...", request.firmware_path)
         try:
             dfu_programmer = servo_programmer.ServoProgrammer(
@@ -115,15 +126,28 @@ class ServoV41ManufacturingServicer(
     def program_serial(
         self,
         request: servo_manufacturing_pb2.ProgramSerialRequest,  # pylint: disable=no-member
-        context: grpc.ServicerContext,
+        unused_context: grpc.ServicerContext,
     ) -> servo_manufacturing_pb2.ProgramSerialResponse:  # pylint: disable=no-member
         """Program the serial number."""
         # pylint: disable=no-member
-        del context  # Unused
         logging.info("Programming serial number: %s...", request.serial_number)
+
+        logging.info("Waiting for Servo V4.1 to enumerate...")
+        if not util.wait_for_usb_devices([(0x18D1, [0x520D])], timeout=30.0):
+            return servo_manufacturing_pb2.ProgramSerialResponse(
+                success=False, message="Timeout waiting for Servo device"
+            )
+        # Give a small grace period for tty to enumerate
+        time.sleep(2.0)
+
         try:
             programmer = serial_programmer.SerialProgrammer(request.serial_number)
             programmer.program()
+
+            logging.info("Forcing re-enumeration of Servo V4.1 Hub...")
+            if not util.reset_servo_v4p1_hub():
+                logging.warning("Failed to force hub re-enumeration.")
+
             return servo_manufacturing_pb2.ProgramSerialResponse(
                 success=True, message="Serial number programmed successfully"
             )
@@ -137,11 +161,10 @@ class ServoV41ManufacturingServicer(
     def program_ethernet(
         self,
         request: servo_manufacturing_pb2.ProgramEthernetRequest,  # pylint: disable=no-member
-        context: grpc.ServicerContext,
+        unused_context: grpc.ServicerContext,
     ) -> servo_manufacturing_pb2.ProgramEthernetResponse:  # pylint: disable=no-member
         """Program the Ethernet MAC address."""
         # pylint: disable=no-member
-        del context  # Unused
         logging.info(
             "Programming Ethernet with MAC %s for serial %s...",
             request.mac_address,
@@ -201,10 +224,9 @@ class ServoV41ManufacturingServicer(
     def program_atmega(
         self,
         request: servo_manufacturing_pb2.ProgramAtmegaRequest,  # pylint: disable=no-member
-        context: grpc.ServicerContext,
+        unused_context: grpc.ServicerContext,
     ) -> servo_manufacturing_pb2.ProgramAtmegaResponse:  # pylint: disable=no-member
         """Program the Atmega Keyboard Emulator."""
-        del context  # Unused
         logging.info(
             "Programming Atmega for serial %s...",
             request.serial_number,
@@ -224,6 +246,16 @@ class ServoV41ManufacturingServicer(
                     console=console, i2caddr=0x21, i2coffset=2
                 )
                 if kb_programmer.program():
+                    logging.info("Forcing re-enumeration of Servo V4.1 Host Hub...")
+                    if not util.reset_servo_v4p1_hub():
+                        logging.warning("Failed to reset Host Hub.")
+
+                    time.sleep(5.0)
+
+                    logging.info("Forcing re-enumeration of Servo V4.1 DUT Hub...")
+                    if not util.reset_servo_v4p1_dut_hub():
+                        logging.warning("Failed to reset DUT Hub.")
+
                     return servo_manufacturing_pb2.ProgramAtmegaResponse(  # pylint: disable=no-member
                         success=True, message="Atmega programmed successfully"
                     )
@@ -243,12 +275,11 @@ class ServoV41ManufacturingServicer(
     async def run_console_tests(
         self,
         request: servo_manufacturing_pb2.RunTestsRequest,  # pylint: disable=no-member
-        context: grpc.ServicerContext,
+        unused_context: grpc.ServicerContext,
     ) -> (
         servo_manufacturing_pb2.RunTestsResponse  # pylint: disable=no-member
     ):  # pylint: disable=invalid-overridden-method
         """Phase 1: Direct serial console tests (No servod)."""
-        del context  # Unused
         logging.info(
             "Running direct console tests for serial %s...",
             request.serial_number,
@@ -281,12 +312,11 @@ class ServoV41ManufacturingServicer(
     async def run_functional_tests(
         self,
         request: servo_manufacturing_pb2.RunTestsRequest,  # pylint: disable=no-member
-        context: grpc.ServicerContext,
+        unused_context: grpc.ServicerContext,
     ) -> (
         servo_manufacturing_pb2.RunTestsResponse  # pylint: disable=no-member
     ):  # pylint: disable=invalid-overridden-method
         """Phase 2: Tests that require servod in recovery mode."""
-        del context  # Unused
         logging.info(
             "Running functional tests (servod recovery) for serial %s...",
             request.serial_number,
@@ -330,12 +360,11 @@ class ServoV41ManufacturingServicer(
     async def run_integration_tests(
         self,
         request: servo_manufacturing_pb2.RunTestsRequest,  # pylint: disable=no-member
-        context: grpc.ServicerContext,
+        unused_context: grpc.ServicerContext,
     ) -> (
         servo_manufacturing_pb2.RunTestsResponse  # pylint: disable=no-member
     ):  # pylint: disable=invalid-overridden-method
         """Phase 3: Tests that require servod with a connected DUT."""
-        del context  # Unused
         logging.info(
             "Running integration tests (servod with DUT) for serial %s...",
             request.serial_number,
@@ -384,10 +413,9 @@ class ServoV41ManufacturingServicer(
     def validate_servo_serial(
         self,
         request: servo_manufacturing_pb2.ValidateServoSerialRequest,  # pylint: disable=no-member
-        context: grpc.ServicerContext,
+        unused_context: grpc.ServicerContext,
     ) -> servo_manufacturing_pb2.ValidationResponse:  # pylint: disable=no-member
         """Validate the Servo Serial number."""
-        del context  # Unused
         logging.info("Validating Servo Serial: %s...", request.serial_number)
         is_valid = bool(self.SERIALNO_RE.match(request.serial_number))
         error_message = "" if is_valid else "Invalid serial number format"
@@ -398,10 +426,9 @@ class ServoV41ManufacturingServicer(
     def validate_servo_mac_address(
         self,
         request: servo_manufacturing_pb2.ValidateServoMacAddressRequest,  # pylint: disable=no-member
-        context: grpc.ServicerContext,
+        unused_context: grpc.ServicerContext,
     ) -> servo_manufacturing_pb2.ValidationResponse:  # pylint: disable=no-member
         """Validate the Servo MAC address."""
-        del context  # Unused
         logging.info("Validating Servo MAC Address: %s...", request.mac_address)
         is_valid = bool(self.MACADDR_RE.match(request.mac_address))
         error_message = "" if is_valid else "Invalid MAC address format"

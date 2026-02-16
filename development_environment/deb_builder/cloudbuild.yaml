@@ -3,6 +3,16 @@
 # found in the LICENSE file.
 
 steps:
+  # Fetch Realtek files to satisfy Dockerfile COPY instruction
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        mkdir -p dist
+        gsutil cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar(24).bz2" "dist/rtunicpg.tar.bz2"
+        gsutil cp "gs://rtk-tools/r8152-2.21.4.tar.bz2" "dist/r8152.tar.bz2"
+
   # Build the DEB package using Docker
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', 'deb-builder', '-f', 'development_environment/deb_builder/Dockerfile', '.']
@@ -17,7 +27,13 @@ steps:
         docker cp temp-container:/diagnoseme.deb .
         docker rm temp-container
 
-artifacts:
-  objects:
-    location: 'gs://diagnoseme-artifacts/debs/'
-    paths: ['diagnoseme.deb']
+  # Upload the DEB to Artifact Registry
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud artifacts apt upload diagnoseme-deb \
+          --project=chromeos-hw-tools \
+          --location=us \
+          --source=diagnoseme.deb

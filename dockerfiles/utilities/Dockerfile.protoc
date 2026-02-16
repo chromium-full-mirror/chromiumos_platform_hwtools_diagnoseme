@@ -34,7 +34,7 @@ RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
 RUN mkdir -p generated
 RUN mkdir -p server
 COPY src/common/protos/*.proto server/
-RUN python3 -m grpc_tools.protoc -I. -I=$(python3 -c 'import site; print(site.getsitepackages()[0])')/grpc_tools/_proto/ --python_out=./generated --pyi_out=./generated --grpc_python_out=./generated server/*.proto
+RUN python3 -m grpc_tools.protoc -I. -I=$(python3 -c 'import site; print(site.getsitepackages()[0])')/grpc_tools/_proto/ --python_out=./generated --grpc_python_out=./generated server/*.proto
 
 
 #######################################################################

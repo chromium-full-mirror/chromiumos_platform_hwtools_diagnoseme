@@ -13,6 +13,7 @@ import {
 import {GRPC_DOLOS_RPC_SERVICE_CLIENT_SETTINGS} from '../../proto/diagnoseme-dolos.pbconf';
 import {GRPC_SERVOD_RPC_SERVICE_CLIENT_SETTINGS} from '../../proto/diagnoseme-servod.pbconf';
 import {GRPC_SERVO_V41_MANUFACTURING_CLIENT_SETTINGS} from '../../proto/servo-manufacturing.pbconf';
+import {GRPC_DIAGNOSE_ME_SERVICE_CLIENT_SETTINGS} from '../../proto/diagnoseme.pbconf';
 
 @NgModule({
   imports: [GrpcCoreModule.forRoot()],
@@ -45,6 +46,10 @@ export class ServicesModule {
         },
         {
           provide: GRPC_SERVO_V41_MANUFACTURING_CLIENT_SETTINGS,
+          useValue: {host: this.getServiceURL()} as GrpcWebClientSettings,
+        },
+        {
+          provide: GRPC_DIAGNOSE_ME_SERVICE_CLIENT_SETTINGS,
           useValue: {host: this.getServiceURL()} as GrpcWebClientSettings,
         },
         {provide: GRPC_CLIENT_FACTORY, useClass: GrpcWebClientFactory},

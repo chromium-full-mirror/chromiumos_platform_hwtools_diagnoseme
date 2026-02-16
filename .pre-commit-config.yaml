@@ -15,30 +15,33 @@ repos:
     -   id: check-toml
     -   id: check-merge-conflict
 
-  - repo: https://github.com/pycqa/isort
-    rev: 6.0.1
-    hooks:
-      - id: isort
-        name: isort (python)
-        types: [python]
-
-  - repo: https://github.com/psf/black
-    rev: 25.1.0
-    hooks:
-      - id: black
-        language_version: python3.13
-        types: [python]
-
   - repo: local
+    hooks:
+    - id: isort
+      name: isort (Docker)
+      entry: xcgd/isort isort
+      language: docker_image
+      types: [python]
+
+    - id: black
+      name: Black (Docker)
+      entry: pyfound/black:25.1.0 black
+      language: docker_image
+      types: [python]
+
+  - repo: https://github.com/pylint-dev/pylint
+    rev: v3.3.4
     hooks:
     - id: pylint
       name: pylint
-      entry: pylint
-      language: system
       exclude: ^hooks/
       types: [python]
+      additional_dependencies:
+        - pylint-protobuf==0.22.0
+        - protobuf==6.33.4
       args:
         [
+          "--load-plugins=pylint_protobuf",
           "-rn", # Only display messages
           "-sn", # Don't display the score
         ]

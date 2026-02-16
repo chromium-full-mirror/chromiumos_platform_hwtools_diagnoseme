@@ -27,9 +27,17 @@ service ServoV41Manufacturing {
   rpc validate_servo_serial(ValidateServoSerialRequest) returns (ValidationResponse) {}
   // Validate Servo MAC Address RPC call
   rpc validate_servo_mac_address(ValidateServoMacAddressRequest) returns (ValidationResponse) {}
+  // Check connected devices
+  rpc get_device_presence(google.protobuf.Empty) returns (DevicePresenceResponse) {}
 }
+
 message StatusResponse {
   string status = 1;
+}
+message DevicePresenceResponse {
+  bool mcu_dfu_detected = 1;
+  bool servo_v4p1_detected = 2;
+  bool realtek_eth_detected = 3;
 }
 message ProgramGenesysHubRequest {
   // Add request fields here
