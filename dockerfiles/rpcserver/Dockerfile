@@ -40,7 +40,7 @@ RUN apt-get update --no-install-recommends \
 
 WORKDIR /
 RUN git clone https://chromium.googlesource.com/chromiumos/platform/dolos
-RUN pip3 install -r /dolos/tools/requirements.txt --require-hashes --break-system-packages
+RUN python3 -m pip install -r /dolos/tools/requirements.txt --require-hashes --break-system-packages
 
 WORKDIR /dolos/tools/doloscmd
 RUN python3 setup.py bdist_wheel
@@ -142,7 +142,7 @@ RUN apt-get update && apt-get install -yq \
     usbutils
 
 COPY dockerfiles/rpcserver/requirements.txt .
-RUN pip3 install -r requirements.txt --require-hashes  --break-system-packages
+RUN python3 -m pip install -r requirements.txt --require-hashes --break-system-packages
 
 RUN mkdir /var/log/rpcserver
 RUN mkdir /usr/local/tmp
@@ -160,11 +160,11 @@ COPY --from=dolostools /dolos/tools/doloscmd/dist .
 COPY --from=dolostools /dolos/tools/dolosbattery/dist .
 COPY --from=dolostools /dolos/tools/requirements.txt .
 COPY --from=hdctools-builder /hdctools/servo/firmware/usbkm/KeyboardSerial/Keyboard.hex /usr/local/server/binfiles_shadow/
-RUN pip3 install *.whl --no-deps --no-index --break-system-packages
-RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
+RUN python3 -m pip install *.whl --no-deps --no-index --break-system-packages
+RUN python3 -m pip install -r requirements.txt --require-hashes --break-system-packages
 
 COPY --from=serverbuild /build/dist .
-RUN pip3 install *.whl --no-deps --no-index --break-system-packages
+RUN python3 -m pip install *.whl --no-deps --no-index --break-system-packages
 
 COPY --link --from=fwupd-builder /fwupd_*_amd64.deb .
 RUN apt install ./fwupd_*_amd64.deb

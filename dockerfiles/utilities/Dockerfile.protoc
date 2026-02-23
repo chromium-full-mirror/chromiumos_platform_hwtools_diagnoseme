@@ -25,11 +25,9 @@ RUN npx protoc --plugin=protoc-gen-ng=$(which protoc-gen-ng) --ng_out=./generate
 
 FROM python:3-trixie AS protogen_python
 
-RUN pip3 install pip-tools
 WORKDIR /workspace
 COPY dockerfiles/utilities/requirements.txt .
-RUN pip3 install --upgrade pip
-RUN pip3 install -r requirements.txt --require-hashes --break-system-packages
+RUN python3 -m pip install -r requirements.txt --require-hashes --break-system-packages
 
 RUN mkdir -p generated
 RUN mkdir -p server

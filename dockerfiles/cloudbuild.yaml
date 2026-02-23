@@ -82,7 +82,7 @@ steps:
   args:
   - '-c'
   - |
-    pip install -r dockerfiles/rpcserver/requirements.txt --require-hashes --break-system-packages
+    python3 -m pip install -r dockerfiles/rpcserver/requirements.txt --require-hashes --break-system-packages
     cp src/generated/*.py src/server/
     pylint --load-plugins=pylint_protobuf --rcfile=/workspace/pylintrc /workspace/src/server
   waitFor: ['src-prep', 'proto-gen']
