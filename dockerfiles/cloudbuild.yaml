@@ -50,6 +50,19 @@ steps:
   - -f=/workspace/dockerfiles/rpcserver/Dockerfile
   waitFor: ['src-prep', 'proto-gen']
 
+- name: 'node:25'
+  id: 'ui-lint'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    mkdir -p src/ui/src/proto
+    cp src/generated/*.ts src/ui/src/proto/
+    cd src/ui
+    npm install --legacy-peer-deps
+    npm run lint
+  waitFor: ['src-prep', 'proto-gen']
+
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'ui'
   args:
@@ -57,7 +70,7 @@ steps:
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/ui/Dockerfile
-  waitFor: ['src-prep', 'proto-gen']
+  waitFor: ['ui-lint']
 
 - name: 'pyfound/black:25.1.0'
   id: 'test-black-formatting'
@@ -85,19 +98,6 @@ steps:
     python3 -m pip install -r dockerfiles/rpcserver/requirements.txt --require-hashes --break-system-packages
     cp src/generated/*.py src/server/
     pylint --load-plugins=pylint_protobuf --rcfile=/workspace/pylintrc /workspace/src/server
-  waitFor: ['src-prep', 'proto-gen']
-
-- name: 'node:25'
-  id: 'ui-lint'
-  entrypoint: 'bash'
-  args:
-  - '-c'
-  - |
-    mkdir -p src/ui/src/proto
-    cp src/generated/*.ts src/ui/src/proto/
-    cd src/ui
-    npm install --legacy-peer-deps
-    npm run lint
   waitFor: ['src-prep', 'proto-gen']
 
 options:

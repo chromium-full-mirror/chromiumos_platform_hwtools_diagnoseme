@@ -22,9 +22,9 @@ FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:alpine AS rtk-fetcher
 WORKDIR /fetch
 # Copy files from dist if they exist. Kaniko and Docker will not fail if the
 # files are missing because of the wildcard.
-COPY "dist/rtunicpg-2.0.25.3.tar(24).bz2*" dist/r8152-2.21.4.tar.bz2* ./
-RUN if [ ! -f "rtunicpg-2.0.25.3.tar(24).bz2" ]; then \
-        gsutil cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar(24).bz2" .; \
+COPY dist/rtunicpg.tar.bz2* dist/r8152-2.21.4.tar.bz2* ./
+RUN if [ ! -f rtunicpg.tar.bz2 ]; then \
+        gsutil cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar(24).bz2" rtunicpg.tar.bz2; \
     fi && \
     if [ ! -f r8152-2.21.4.tar.bz2 ]; then \
         gsutil cp gs://rtk-tools/r8152-2.21.4.tar.bz2 .; \
@@ -124,7 +124,7 @@ FROM debian:trixie AS rtk-tools-builder
 
 RUN apt-get update && apt-get install -y bzip2
 WORKDIR /build
-COPY --from=rtk-fetcher "/fetch/rtunicpg-2.0.25.3.tar(24).bz2" rtunicpg.tar.bz2
+COPY --from=rtk-fetcher /fetch/rtunicpg.tar.bz2 .
 RUN tar -xvf rtunicpg.tar.bz2
 
 #####################################################################

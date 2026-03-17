@@ -23,6 +23,8 @@ from server import servo_programmer
 class TestServoV41ManufacturingServicer(unittest.TestCase):
     """Tests for ServoV41ManufacturingServicer."""
 
+    # pylint: disable=too-many-public-methods
+
     def setUp(self):
         self.servicer = servo_manufacturing.ServoV41ManufacturingServicer()
         self.context = mock.MagicMock()
@@ -104,18 +106,28 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
         self.assertFalse(response.is_valid)
         self.assertEqual(response.error, "Invalid MAC address format")
 
+    @mock.patch("time.sleep")
+    @mock.patch("server.util.wait_for_usb_devices")
     @mock.patch("server.genesys_hub_programmer.GenesysHubProgrammer.program")
-    def test_program_genesys_hub_success(self, mock_program):
+    def test_program_genesys_hub_success(
+        self, mock_program, mock_wait_usb, unused_mock_sleep
+    ):
         """Test case for program_genesys_hub success."""
+        mock_wait_usb.return_value = True
         mock_program.return_value = True
         request = servo_manufacturing_pb2.ProgramGenesysHubRequest()
         response = self.servicer.program_genesys_hub(request, self.context)
         self.assertTrue(response.success)
         self.assertEqual(response.message, "Genesys Hub programmed successfully")
 
+    @mock.patch("time.sleep")
+    @mock.patch("server.util.wait_for_usb_devices")
     @mock.patch("server.genesys_hub_programmer.GenesysHubProgrammer.program")
-    def test_program_genesys_hub_failure(self, mock_program):
+    def test_program_genesys_hub_failure(
+        self, mock_program, mock_wait_usb, unused_mock_sleep
+    ):
         """Test case for program_genesys_hub failure."""
+        mock_wait_usb.return_value = True
         mock_program.side_effect = genesys_hub_programmer.GenesysHubProgrammerError(
             "Hardware error", stdout="out", stderr="err"
         )
@@ -126,9 +138,21 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
         self.assertIn("STDOUT:\nout", response.logs)
         self.assertIn("STDERR:\nerr", response.logs)
 
+    @mock.patch("server.util.wait_for_usb_devices")
+    def test_program_genesys_hub_timeout(self, mock_wait_usb):
+        """Test case for program_genesys_hub timeout."""
+        mock_wait_usb.return_value = False
+        request = servo_manufacturing_pb2.ProgramGenesysHubRequest()
+        response = self.servicer.program_genesys_hub(request, self.context)
+        self.assertFalse(response.success)
+        self.assertEqual(response.message, "Timeout waiting for Genesys Hub device")
+
+    @mock.patch("time.sleep")
+    @mock.patch("server.util.wait_for_usb_devices")
     @mock.patch("server.servo_programmer.ServoProgrammer.program")
-    def test_program_mcu_success(self, mock_program):
+    def test_program_mcu_success(self, mock_program, mock_wait_usb, unused_mock_sleep):
         """Test case for program_mcu success."""
+        mock_wait_usb.return_value = True
         mock_program.return_value = True
         request = servo_manufacturing_pb2.ProgramMcuRequest(
             firmware_path="/path/to/firmware.bin"
@@ -137,9 +161,12 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
         self.assertTrue(response.success)
         self.assertIn("MCU programmed successfully", response.message)
 
+    @mock.patch("time.sleep")
+    @mock.patch("server.util.wait_for_usb_devices")
     @mock.patch("server.servo_programmer.ServoProgrammer.program")
-    def test_program_mcu_failure(self, mock_program):
+    def test_program_mcu_failure(self, mock_program, mock_wait_usb, unused_mock_sleep):
         """Test case for program_mcu failure."""
+        mock_wait_usb.return_value = True
         mock_program.side_effect = servo_programmer.ServoProgrammerError(
             "Flash error", stdout="out", stderr="err"
         )
@@ -152,9 +179,33 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
         self.assertIn("STDOUT:\nout", response.logs)
         self.assertIn("STDERR:\nerr", response.logs)
 
+    @mock.patch("server.util.wait_for_usb_devices")
+    def test_program_mcu_timeout(self, mock_wait_usb):
+        """Test case for program_mcu timeout."""
+        mock_wait_usb.return_value = False
+        request = servo_manufacturing_pb2.ProgramMcuRequest(
+            firmware_path="/path/to/firmware.bin"
+        )
+        response = self.servicer.program_mcu(request, self.context)
+        self.assertFalse(response.success)
+        self.assertEqual(response.message, "Timeout waiting for MCU in DFU mode")
+
+    @mock.patch("server.util.wait_for_usb_devices")
+    def test_program_serial_timeout(self, mock_wait_usb):
+        """Test case for program_serial timeout."""
+        mock_wait_usb.return_value = False
+        request = servo_manufacturing_pb2.ProgramSerialRequest(
+            serial_number="SERVOV4P1-C-2210050007"
+        )
+        response = self.servicer.program_serial(request, self.context)
+        self.assertFalse(response.success)
+        self.assertEqual(response.message, "Timeout waiting for Servo device")
+
+    @mock.patch("server.util.discover_servo_v4p1_serial_path")
     @mock.patch("server.serial_programmer.SerialProgrammer.program")
-    def test_program_serial_success(self, mock_program):
+    def test_program_serial_success(self, mock_program, mock_discover_path):
         """Test case for program_serial success."""
+        mock_discover_path.return_value = "/dev/mock_ttyUSB0"
         mock_program.return_value = True
         request = servo_manufacturing_pb2.ProgramSerialRequest(
             serial_number="SERVOV4P1-C-2210050007"
@@ -163,9 +214,11 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
         self.assertTrue(response.success)
         self.assertEqual(response.message, "Serial number programmed successfully")
 
+    @mock.patch("server.util.discover_servo_v4p1_serial_path")
     @mock.patch("server.serial_programmer.SerialProgrammer.program")
-    def test_program_serial_failure(self, mock_program):
+    def test_program_serial_failure(self, mock_program, mock_discover_path):
         """Test case for program_serial failure."""
+        mock_discover_path.return_value = "/dev/mock_ttyUSB0"
         mock_program.side_effect = serial_programmer.SerialProgrammerError(
             "Serial error", stdout="out", stderr="err"
         )

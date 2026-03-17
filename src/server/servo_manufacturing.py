@@ -9,6 +9,10 @@ import logging
 import os
 import re
 import time
+from typing import Any
+from typing import List
+from typing import Optional
+from typing import Tuple
 
 from google.protobuf import empty_pb2
 import grpc
@@ -39,6 +43,10 @@ class ServoV41ManufacturingServicer(
     # The VID/PID of the stm chip before programming/in DFU mode
     STM_DFU_VID = 0x0483
     STM_DFU_PID = 0xDF11
+
+    # The VID/PID of the Genesys Hub
+    GENESYS_HUB_VID = 0x05E3
+    GENESYS_HUB_PIDS = [0x0610, 0x0626]
 
     RE = (
         r"^(SERVOV4P1-)?"  # device type
@@ -79,6 +87,22 @@ class ServoV41ManufacturingServicer(
             realtek_eth_detected=util.is_usb_device_present(0x0BDA, [0x8153]),
         )
 
+    def _wait_for_usb_device(
+        self,
+        device_name: str,
+        usb_id: Tuple[int, List[int]],
+        response_type: Any,
+        grace_period: float = 2.0,
+    ) -> Optional[Any]:
+        """Waits for a USB device to enumerate and returns a response on timeout."""
+        logging.info("Waiting for %s to enumerate...", device_name)
+        if not util.wait_for_usb_devices([usb_id], timeout=30.0):
+            return response_type(
+                success=False, message=f"Timeout waiting for {device_name}"
+            )
+        time.sleep(grace_period)
+        return None
+
     def program_genesys_hub(
         self,
         unused_request: servo_manufacturing_pb2.ProgramGenesysHubRequest,  # pylint: disable=no-member
@@ -87,6 +111,15 @@ class ServoV41ManufacturingServicer(
         """Program the Genesys Hub."""
         # pylint: disable=no-member
         logging.info("Programming Genesys Hub...")
+
+        timeout_resp = self._wait_for_usb_device(
+            "Genesys Hub device",
+            (self.GENESYS_HUB_VID, self.GENESYS_HUB_PIDS),
+            servo_manufacturing_pb2.ProgramGenesysHubResponse,
+        )
+        if timeout_resp:
+            return timeout_resp
+
         try:
             programmer = genesys_hub_programmer.GenesysHubProgrammer(force=False)
             programmer.program()
@@ -108,6 +141,15 @@ class ServoV41ManufacturingServicer(
         """Program the MCU."""
         # pylint: disable=no-member
         logging.info("Programming MCU with %s...", request.firmware_path)
+
+        timeout_resp = self._wait_for_usb_device(
+            "MCU in DFU mode",
+            (self.STM_DFU_VID, [self.STM_DFU_PID]),
+            servo_manufacturing_pb2.ProgramMcuResponse,
+        )
+        if timeout_resp:
+            return timeout_resp
+
         try:
             dfu_programmer = servo_programmer.ServoProgrammer(
                 self.BOARD, dfu_vid=self.STM_DFU_VID, dfu_pid=self.STM_DFU_PID
@@ -134,13 +176,13 @@ class ServoV41ManufacturingServicer(
         # pylint: disable=no-member
         logging.info("Programming serial number: %s...", request.serial_number)
 
-        logging.info("Waiting for Servo V4.1 to enumerate...")
-        if not util.wait_for_usb_devices([(0x18D1, [0x520D])], timeout=30.0):
-            return servo_manufacturing_pb2.ProgramSerialResponse(
-                success=False, message="Timeout waiting for Servo device"
-            )
-        # Give a small grace period for tty to enumerate
-        time.sleep(2.0)
+        timeout_resp = self._wait_for_usb_device(
+            "Servo device",
+            (0x18D1, [0x520D]),
+            servo_manufacturing_pb2.ProgramSerialResponse,
+        )
+        if timeout_resp:
+            return timeout_resp
 
         try:
             programmer = serial_programmer.SerialProgrammer(request.serial_number)
