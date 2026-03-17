@@ -51,30 +51,31 @@ class TestV4P1Tester(unittest.TestCase):
 
     @mock.patch("server.util.run_command")
     @mock.patch("server.v4p1_tester.ServoConsole")
-    def test_run_initial_tests(self, mock_console_class, mock_run_command):
-        """Test run_initial_tests executes all expected checks."""
+    def test_run_console_tests(self, mock_console_class, mock_run_command):
+        """Test run_console_tests executes all expected checks."""
         mock_run_command.return_value.stdout = "18d1:520d"
         mock_console = mock_console_class.return_value.__enter__.return_value
         # Mock responses for serialno, macaddr get, pd role, and i2cxfer
         mock_console.issue_cmd.side_effect = [
             "SERVOV4P1-C-2210050007",  # serialno
             "00 11 22 33 44 55",  # macaddr get
-            "snk",  # pd role
-            "0x55",  # i2cxfer 0x20
-            "0xaa",  # i2cxfer 0x21
+            "Role: SNK",  # pd 0 state
+            "20: -- 0x21 -- -- -- -- -- -- -- -- -- -- -- -- --\n"
+            "40: 0x40 0x41 0x42 -- -- -- -- -- 0x48 0x49 -- -- -- -- --\n"
+            "50: 0x50 -- -- -- -- -- -- -- -- -- -- -- -- -- --",  # i2cscan 1
         ]
 
         # We need to mock test_usb_mux as it involves sysfs access
         with mock.patch.object(self.tester, "test_usb_mux", return_value=True):
-            results = self.tester.run_initial_tests("/dev/ttyUSB0")
+            results = self.tester.run_console_tests("/dev/ttyUSB0")
 
         self.assertTrue(all(passed for _, passed in results))
         self.assertIn(("lsusb Servo Presence", True), results)
 
     @mock.patch("grpc.aio.insecure_channel")
     @mock.patch("server.v4p1_tester.ServodRpcServiceStub")
-    def test_run_servod_tests(self, mock_stub_class, unused_mock_channel):
-        """Test run_servod_tests via async gRPC."""
+    def test_run_integration_tests(self, mock_stub_class, unused_mock_channel):
+        """Test run_integration_tests via async gRPC."""
         mock_stub = mock_stub_class.return_value
 
         # Mock responses for console connectivity and INA
@@ -91,7 +92,7 @@ class TestV4P1Tester(unittest.TestCase):
 
         # Need to mock os.path.exists for PTY check
         with mock.patch("os.path.exists", return_value=True):
-            results = self.loop.run_until_complete(self.tester.run_servod_tests())
+            results = self.loop.run_until_complete(self.tester.run_integration_tests())
 
         self.assertTrue(all(passed for _, passed in results))
         self.assertIn(("EC Console Connectivity", True), results)
