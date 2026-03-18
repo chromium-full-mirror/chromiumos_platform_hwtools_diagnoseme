@@ -23,7 +23,9 @@ class TestRpcServer(unittest.TestCase):
         mock_logger = mock_get_logger.return_value
         rpcserver.setup_logging(logging.DEBUG)
 
-        mock_file_handler.assert_called_with("/var/log/rpcserver/rpcserver.log")
+        mock_file_handler.assert_called_with(
+            "/var/log/rpcserver/rpcserver.log", mode="w"
+        )
         # Check that addHandler was called on the logger returned by getLogger()
         mock_logger.addHandler.assert_called()
         mock_logger.setLevel.assert_called_with(logging.DEBUG)
