@@ -7,7 +7,6 @@ import {
   ChangeDetectorRef,
   Component,
   ElementRef,
-  OnDestroy,
   OnInit,
   ViewChild,
   inject,
@@ -15,13 +14,12 @@ import {
 import {CommonModule} from '@angular/common';
 import {FormsModule} from '@angular/forms';
 import {MatButtonModule} from '@angular/material/button';
-import {MatCheckboxModule} from '@angular/material/checkbox';
 import {MatDialog} from '@angular/material/dialog';
 import {MatFormFieldModule} from '@angular/material/form-field';
 import {MatIconModule} from '@angular/material/icon';
 import {MatInputModule} from '@angular/material/input';
 import {MatToolbarModule} from '@angular/material/toolbar';
-import {Subject, Subscription, interval} from 'rxjs';
+import {Subject} from 'rxjs';
 import {debounceTime, switchMap} from 'rxjs/operators';
 import {DiagnosemeReworkCard} from '../diagnoseme-rework-card/diagnoseme-rework-card';
 import {DiagnosemeReworkCardColumn} from '../diagnoseme-rework-card-column/diagnoseme-rework-card-column';
@@ -41,7 +39,6 @@ import {TestPassFailButton} from '../test-pass-fail-button/test-pass-fail-button
     DiagnosemeReworkCardColumn,
     FormsModule,
     MatButtonModule,
-    MatCheckboxModule,
     MatFormFieldModule,
     MatIconModule,
     MatInputModule,
@@ -50,9 +47,7 @@ import {TestPassFailButton} from '../test-pass-fail-button/test-pass-fail-button
     TestPassFailButton,
   ],
 })
-export class ServoV4p1ManufacturingComponent
-  implements AfterViewInit, OnInit, OnDestroy
-{
+export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
   private readonly servoManufacturingService = inject(
     ServoManufacturingService,
   );
@@ -126,11 +121,9 @@ export class ServoV4p1ManufacturingComponent
   functionalTestingSuccessful = false;
   integrationTestingInProgress = false;
   integrationTestingSuccessful = false;
-  autoAdvance = true;
 
   private serialNumberSubject = new Subject<string>();
   private macAddressSubject = new Subject<string>();
-  private devicePollingSubscription?: Subscription;
 
   ngOnInit() {
     this.serialNumberSubject
@@ -175,46 +168,6 @@ export class ServoV4p1ManufacturingComponent
         }
         this.cdr.detectChanges();
       });
-
-    this.startDevicePolling();
-  }
-
-  ngOnDestroy() {
-    this.devicePollingSubscription?.unsubscribe();
-  }
-
-  startDevicePolling() {
-    this.devicePollingSubscription = interval(2000).subscribe(() => {
-      if (!this.autoAdvance) return;
-      this.checkAutoAdvance();
-    });
-  }
-
-  checkAutoAdvance() {
-    this.servoManufacturingService.getDevicePresence().subscribe({
-      next: presence => {
-        if (
-          this.hostSideProgrammingSuccessful &&
-          !this.serialNumberProgrammingInProgress &&
-          !this.serialNumberProgrammingSuccessful &&
-          presence.servoV4p1Detected
-        ) {
-          this.startSerialNumberProgramming();
-        }
-
-        if (
-          this.serialNumberProgrammingSuccessful &&
-          !this.dutSideProgrammingInProgress &&
-          !this.dutSideProgrammingSuccessful &&
-          presence.realtekEthDetected
-        ) {
-          this.startDutSideProgramming();
-        }
-      },
-      error: () => {
-        // Ignore errors during polling
-      },
-    });
   }
 
   ngAfterViewInit() {
