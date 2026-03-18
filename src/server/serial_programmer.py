@@ -7,6 +7,7 @@ import logging
 import re
 from typing import Optional
 
+from server import util
 from server.servo_console import ServoConsole
 from server.servo_console import ServoConsoleError
 
@@ -28,8 +29,6 @@ class SerialProgrammerError(Exception):
 class SerialProgrammer:
     """Class to program the serial number on the device via serial console."""
 
-    SERIAL_PORT = "/dev/serial/by-id/usb-Google_LLC_Servo_V4p1_Uninitialized-if00-port0"
-
     # Expected response from 'serialno' command is "Serial number: <serial>"
     SERIALNO_REGEX = re.compile(r"Serial number:\s+(\S+)")
 
@@ -40,7 +39,10 @@ class SerialProgrammer:
           serial_number: the desired serial number to program.
         """
         self._serial_number = serial_number
-        self._console = ServoConsole(self.SERIAL_PORT)
+        port = util.discover_servo_v4p1_serial_path()
+        if not port:
+            raise SerialProgrammerError("Could not discover Servo V4.1 serial port")
+        self._console = ServoConsole(port)
 
     def _verify(self, console: ServoConsole) -> bool:
         """Verify serial number on an open console connection.
