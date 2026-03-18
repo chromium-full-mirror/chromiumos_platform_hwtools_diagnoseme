@@ -102,8 +102,8 @@ class AtmegaKBEmulatorProgrammer:
         Returns:
           True if found, False otherwise.
         """
-        start = time.time()
-        while time.time() - start < timeout:
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
             lsusb = util.run_command(["lsusb"]).stdout
             # Check for DFU mode
             if f"{self.ATM_DFU_VID:04x}:{self.ATM_DFU_PID:04x}" in lsusb:

@@ -291,8 +291,8 @@ def wait_for_usb_devices(
     Returns:
         True if all devices are found within the timeout, False otherwise.
     """
-    start_time = time.time()
-    while time.time() - start_time < timeout:
+    start_time = time.monotonic()
+    while time.monotonic() - start_time < timeout:
         lsusb = run_command(["lsusb"]).stdout.lower()
         all_found = True
         for vid, pids in device_list:

@@ -75,8 +75,8 @@ class ServoConsole:
           The accumulated response string.
         """
         response = ""
-        start_time = time.time()
-        while time.time() - start_time < self.TIMEOUT:
+        start_time = time.monotonic()
+        while time.monotonic() - start_time < self.TIMEOUT:
             if ser.in_waiting:
                 response += ser.read(ser.in_waiting).decode(errors="ignore")
                 if condition(response):

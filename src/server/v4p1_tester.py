@@ -190,14 +190,14 @@ class V4P1Tester:
         self, host_path: str, timeout: float = 10.0
     ) -> Optional[str]:
         """Retry reading the serial number for a short period."""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
+        start_time = time.monotonic()
+        while time.monotonic() - start_time < timeout:
             serial_file = os.path.join(host_path, "serial")
             if not os.path.exists(serial_file):
                 self._logger.debug(
                     "Serial file not yet present at %s (elapsed: %.2fs)",
                     host_path,
-                    time.time() - start_time,
+                    time.monotonic() - start_time,
                 )
             else:
                 serial = self._get_serial_at_path(host_path)
@@ -209,7 +209,7 @@ class V4P1Tester:
                 self._logger.debug(
                     "Serial file exists but is empty at %s (elapsed: %.2fs)",
                     host_path,
-                    time.time() - start_time,
+                    time.monotonic() - start_time,
                 )
             time.sleep(0.5)
         self._logger.error(
@@ -238,8 +238,8 @@ class V4P1Tester:
         self, path: str, should_exist: bool, timeout: float = 5.0
     ) -> bool:
         """Wait for a USB sysfs path to appear or disappear."""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
+        start_time = time.monotonic()
+        while time.monotonic() - start_time < timeout:
             if os.path.exists(path) == should_exist:
                 return True
             await asyncio.sleep(0.2)
@@ -249,8 +249,8 @@ class V4P1Tester:
         self, serial: str, timeout: float = 20.0
     ) -> Optional[str]:
         """Poll for a device with a specific serial to appear on the system."""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
+        start_time = time.monotonic()
+        while time.monotonic() - start_time < timeout:
             path = self._find_device_by_serial(serial)
             if path:
                 return path
@@ -330,8 +330,8 @@ class V4P1Tester:
         # Step 2: Verify presence and capture serial
         # Wait up to 15 seconds for device to be enumerated on Host side
         host_path = None
-        start_time = time.time()
-        while time.time() - start_time < 15.0:
+        start_time = time.monotonic()
+        while time.monotonic() - start_time < 15.0:
             host_path = self._find_usb_device_path(
                 self.HH_VID, self.HH_PID, port_number
             )
