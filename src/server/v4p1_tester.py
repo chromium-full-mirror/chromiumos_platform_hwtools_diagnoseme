@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 """Tester for Servo V4.1 manufacturing."""
 
+import asyncio
 import logging
 import os
 import re
@@ -241,7 +242,7 @@ class V4P1Tester:
         while time.time() - start_time < timeout:
             if os.path.exists(path) == should_exist:
                 return True
-            time.sleep(0.2)
+            await asyncio.sleep(0.2)
         return False
 
     async def _wait_for_serial_on_system(
@@ -253,7 +254,7 @@ class V4P1Tester:
             path = self._find_device_by_serial(serial)
             if path:
                 return path
-            time.sleep(0.5)
+            await asyncio.sleep(0.5)
         return None
 
     async def _verify_dut_side_path(
@@ -324,18 +325,13 @@ class V4P1Tester:
             dut_sees_val = "fastboot"
 
         await self._run_dut_control(f"{mux_control}:{host_sees_val}")
-        time.sleep(1.0)
+        await asyncio.sleep(1.0)
 
         # Step 2: Verify presence and capture serial
-        host_path = self._find_usb_device_path(self.HH_VID, self.HH_PID, port_number)
-        if not host_path:
-            host_path = self._find_usb_device_path(
-                self.HH_VID, self.HH_PID3, port_number
-            )
-
-        # Wait for device to be enumerated on Host side
-        if not host_path or not await self._wait_for_usb_state(host_path, True):
-            # Try finding it one more time if wait failed or path was None
+        # Wait up to 15 seconds for device to be enumerated on Host side
+        host_path = None
+        start_time = time.time()
+        while time.time() - start_time < 15.0:
             host_path = self._find_usb_device_path(
                 self.HH_VID, self.HH_PID, port_number
             )
@@ -343,6 +339,10 @@ class V4P1Tester:
                 host_path = self._find_usb_device_path(
                     self.HH_VID, self.HH_PID3, port_number
                 )
+            if host_path and await self._wait_for_usb_state(host_path, True):
+                break
+            host_path = None
+            await asyncio.sleep(0.5)
 
         if not host_path:
             self._logger.error(
@@ -368,7 +368,7 @@ class V4P1Tester:
         # Step 3: Switch to DUT Hub
         self._logger.info("Mux Step 3: Switching to DUT Hub")
         await self._run_dut_control(f"{mux_control}:{dut_sees_val}")
-        time.sleep(1.0)
+        await asyncio.sleep(1.0)
 
         # Verify it left the host path
         if not await self._wait_for_usb_state(host_path, False):
@@ -408,7 +408,7 @@ class V4P1Tester:
         # Step 5: Restore connection to Host Hub
         self._logger.info("Mux Step 5: Restoring connection to Host Hub")
         await self._run_dut_control(f"{mux_control}:{host_sees_val}")
-        time.sleep(1.0)
+        await asyncio.sleep(1.0)
 
         if not await self._wait_for_usb_state(host_path, True):
             self._logger.error(
@@ -486,7 +486,7 @@ class V4P1Tester:
             await self._run_dut_control(f"usb_keyboard:{test_str}")
 
             # Give it time to arrive
-            time.sleep(1.0)
+            await asyncio.sleep(1.0)
 
             # Read data
             try:

@@ -3,6 +3,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """Servo Manufacturing service."""
+
+import asyncio
 import logging
 import os
 import re
@@ -280,12 +282,15 @@ class ServoV41ManufacturingServicer(
         servo_manufacturing_pb2.RunTestsResponse  # pylint: disable=no-member
     ):  # pylint: disable=invalid-overridden-method
         """Phase 1: Direct serial console tests (No servod)."""
+
         logging.info(
             "Running direct console tests for serial %s...",
             request.serial_number,
         )
 
-        serial_path = util.discover_servo_v4p1_serial_path(request.serial_number)
+        serial_path = await asyncio.to_thread(
+            util.discover_servo_v4p1_serial_path, request.serial_number
+        )
 
         if not serial_path:
             return (
@@ -329,7 +334,9 @@ class ServoV41ManufacturingServicer(
                     board=self.BOARD, serial=request.serial_number, recovery=True
                 )
             )
-            start_resp = self._servod_service.start_servod(start_request, None)
+            start_resp = await asyncio.to_thread(
+                self._servod_service.start_servod, start_request, None
+            )
             if not start_resp.started:
                 return servo_manufacturing_pb2.RunTestsResponse(  # pylint: disable=no-member
                     all_passed=False,
@@ -346,7 +353,7 @@ class ServoV41ManufacturingServicer(
             test_results = await tester.run_functional_tests()
         finally:
             if self._servod_service:
-                self._servod_service.stop_servod(None, None)
+                await asyncio.to_thread(self._servod_service.stop_servod, None, None)
 
         all_passed = all(result for _, result in test_results)
         summary_lines = [
@@ -372,6 +379,7 @@ class ServoV41ManufacturingServicer(
 
         board = os.environ.get("TEST_DUT", self.BOARD)
         model = os.environ.get("TEST_MODEL")
+
         if self._servod_service:
             # Start servod normally (needs DUT)
             start_request = (
@@ -382,7 +390,9 @@ class ServoV41ManufacturingServicer(
                     recovery=False,
                 )
             )
-            start_resp = self._servod_service.start_servod(start_request, None)
+            start_resp = await asyncio.to_thread(
+                self._servod_service.start_servod, start_request, None
+            )
             if not start_resp.started:
                 return servo_manufacturing_pb2.RunTestsResponse(  # pylint: disable=no-member
                     all_passed=False,
@@ -399,7 +409,7 @@ class ServoV41ManufacturingServicer(
             test_results = await tester.run_integration_tests()
         finally:
             if self._servod_service:
-                self._servod_service.stop_servod(None, None)
+                await asyncio.to_thread(self._servod_service.stop_servod, None, None)
 
         all_passed = all(result for _, result in test_results)
         summary_lines = [
