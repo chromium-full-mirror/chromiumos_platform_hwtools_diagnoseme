@@ -47,6 +47,8 @@ RUN rm -f /var/log/nginx/*
 RUN chmod uog+rw /var/log/nginx
 
 COPY src/ui/src/assets/* /etc/nginx/html/assets/img/
+COPY src/ui/src/assets/build_info.json /etc/nginx/html/assets/
+
 
 
 EXPOSE 6010

@@ -41,6 +41,16 @@ steps:
     - /workspace
   waitFor: ['src-prep']
 
+- name: 'ubuntu'
+  id: 'generate-build-info'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    mkdir -p /workspace/src/ui/src/assets
+    echo "{\"buildDate\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\", \"commitSha\": \"$COMMIT_SHA\"}" > /workspace/src/ui/src/assets/build_info.json
+  waitFor: ['src-prep']
+
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'server'
   args:
@@ -70,7 +80,7 @@ steps:
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/ui/Dockerfile
-  waitFor: ['ui-lint']
+  waitFor: ['ui-lint', 'generate-build-info']
 
 - name: 'pyfound/black:25.1.0'
   id: 'test-black-formatting'

@@ -30,6 +30,10 @@ docker build -t server:latest -f dockerfiles/rpcserver/Dockerfile .
 rm -rf ./src/ui/src/proto
 mkdir -p ./src/ui/src/proto
 cp ./src/generated/* ./src/ui/src/proto
+
+mkdir -p ./src/ui/src/assets
+echo "{\"buildDate\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\", \"commitSha\": \"$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')\"}" > ./src/ui/src/assets/build_info.json
+
 docker build -t ui:latest -f dockerfiles/ui/Dockerfile .
 rm -rf ./src/generated
 

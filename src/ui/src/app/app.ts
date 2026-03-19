@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {Component} from '@angular/core';
+import {Component, OnInit} from '@angular/core';
+import {HttpClient, HttpClientModule} from '@angular/common/http';
 import {MatMenuModule} from '@angular/material/menu';
 import {MatToolbarModule} from '@angular/material/toolbar';
 import {MatIconModule} from '@angular/material/icon';
@@ -14,11 +15,17 @@ import {DiagnoseMeService} from './services/diagnoseme.service';
 import JSZip from 'jszip';
 import {saveAs} from 'file-saver';
 
+interface BuildInfo {
+  buildDate: string;
+  commitSha: string;
+}
+
 @Component({
   selector: 'app-root',
   templateUrl: './app.html',
   styleUrl: './app.scss',
   imports: [
+    HttpClientModule,
     MatMenuModule,
     MatToolbarModule,
     MatIconModule,
@@ -28,15 +35,37 @@ import {saveAs} from 'file-saver';
     RouterModule,
   ],
 })
-export class AppComponent {
+export class AppComponent implements OnInit {
   title = 'HW Tools Diagnose Me™';
-  constructor(private diagnoseMeService: DiagnoseMeService) {}
+  buildInfo: BuildInfo | null = null;
+
+  constructor(
+    private diagnoseMeService: DiagnoseMeService,
+    private http: HttpClient,
+  ) {}
+
+  ngOnInit() {
+    this.http.get<BuildInfo>('/assets/build_info.json').subscribe({
+      next: data => {
+        this.buildInfo = data;
+      },
+      error: err => {
+        console.error('Failed to load build_info.json:', err);
+      },
+    });
+  }
 
   downloadLogs() {
     this.diagnoseMeService.getLogs(500).subscribe({
       next: response => {
         const zip = new JSZip();
         zip.file('rpcserver.log', response.logContent);
+
+        if (this.buildInfo) {
+          const infoString = `Build Date: ${this.buildInfo.buildDate}\nCommit: ${this.buildInfo.commitSha}\n`;
+          zip.file('build_info.txt', infoString);
+        }
+
         zip
           .generateAsync({type: 'blob'})
           .then((content: Blob) => {

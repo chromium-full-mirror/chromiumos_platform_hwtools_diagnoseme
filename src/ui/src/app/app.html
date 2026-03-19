@@ -13,6 +13,11 @@
   </mat-menu>
   <span>HW Tools Diagnose Me</span>
   <span class="spacer"></span>
+  @if (buildInfo) {
+    <span class="build-info">
+      Build: {{buildInfo.buildDate}} ({{buildInfo.commitSha}})
+    </span>
+  }
   <button mat-icon-button (click)="downloadLogs()" matTooltip="Download last 500 lines of rpcserver.log as ZIP">
     <mat-icon>file_download</mat-icon>
   </button>
