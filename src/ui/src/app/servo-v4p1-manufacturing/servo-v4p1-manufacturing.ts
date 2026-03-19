@@ -471,4 +471,8 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
         },
       });
   }
+
+  onReload() {
+    location.reload();
+  }
 }
