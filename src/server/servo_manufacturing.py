@@ -5,6 +5,7 @@
 """Servo Manufacturing service."""
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -13,6 +14,8 @@ from typing import Any
 from typing import List
 from typing import Optional
 from typing import Tuple
+import urllib.error
+import urllib.request
 
 from google.protobuf import empty_pb2
 import grpc
@@ -86,6 +89,73 @@ class ServoV41ManufacturingServicer(
             servo_v4p1_detected=util.is_usb_device_present(0x18D1, [0x520D]),
             realtek_eth_detected=util.is_usb_device_present(0x0BDA, [0x8153]),
         )
+
+    def submit_provisioning_results(
+        self,
+        request: servo_manufacturing_pb2.SubmitProvisioningResultsRequest,  # pylint: disable=no-member
+        unused_context: grpc.ServicerContext,
+    ) -> (
+        servo_manufacturing_pb2.SubmitProvisioningResultsResponse
+    ):  # pylint: disable=no-member
+        """Submit the results to a configured webhook."""
+        # pylint: disable=no-member
+        results_server = os.environ.get("RESULTS_SERVER")
+        if not results_server:
+            logging.info("RESULTS_SERVER is not configured, skipping submission.")
+            return servo_manufacturing_pb2.SubmitProvisioningResultsResponse(
+                success=True, message="Results server not configured."
+            )
+
+        payload = {
+            "serial_number": request.serial_number,
+            "mac_address": request.mac_address,
+            "host_programming": {
+                "success": request.host_programming.success,
+                "retry_count": request.host_programming.retry_count,
+                "failure_logs": list(request.host_programming.failure_logs),
+            },
+            "serial_programming": {
+                "success": request.serial_programming.success,
+                "retry_count": request.serial_programming.retry_count,
+                "failure_logs": list(request.serial_programming.failure_logs),
+            },
+            "dut_programming": {
+                "success": request.dut_programming.success,
+                "retry_count": request.dut_programming.retry_count,
+                "failure_logs": list(request.dut_programming.failure_logs),
+            },
+            "functional_testing": {
+                "success": request.functional_testing.success,
+                "retry_count": request.functional_testing.retry_count,
+                "failure_logs": list(request.functional_testing.failure_logs),
+            },
+            "integration_testing": {
+                "success": request.integration_testing.success,
+                "retry_count": request.integration_testing.retry_count,
+                "failure_logs": list(request.integration_testing.failure_logs),
+            },
+        }
+
+        try:
+            req = urllib.request.Request(
+                results_server,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=10.0) as response:
+                if response.status in (200, 201, 202, 204):
+                    return servo_manufacturing_pb2.SubmitProvisioningResultsResponse(
+                        success=True, message="Results submitted successfully."
+                    )
+                return servo_manufacturing_pb2.SubmitProvisioningResultsResponse(
+                    success=False,
+                    message=f"Results server returned status {response.status}",
+                )
+        except urllib.error.URLError as e:
+            logging.exception("Failed to submit provisioning results.")
+            return servo_manufacturing_pb2.SubmitProvisioningResultsResponse(
+                success=False, message=f"Failed to submit results: {str(e)}"
+            )
 
     def _wait_for_usb_device(
         self,

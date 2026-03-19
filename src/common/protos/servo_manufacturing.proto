@@ -29,6 +29,8 @@ service ServoV41Manufacturing {
   rpc validate_servo_mac_address(ValidateServoMacAddressRequest) returns (ValidationResponse) {}
   // Check connected devices
   rpc get_device_presence(google.protobuf.Empty) returns (DevicePresenceResponse) {}
+  // Submit provisioning results to the results server
+  rpc submit_provisioning_results(SubmitProvisioningResultsRequest) returns (SubmitProvisioningResultsResponse) {}
 }
 
 message StatusResponse {
@@ -105,4 +107,22 @@ message ValidateServoMacAddressRequest {
 message ValidationResponse {
   bool is_valid = 1;
   string error = 2;
+}
+message StepResult {
+  bool success = 1;
+  int32 retry_count = 2;
+  repeated string failure_logs = 3;
+}
+message SubmitProvisioningResultsRequest {
+  string serial_number = 1;
+  string mac_address = 2;
+  StepResult host_programming = 3;
+  StepResult serial_programming = 4;
+  StepResult dut_programming = 5;
+  StepResult functional_testing = 6;
+  StepResult integration_testing = 7;
+}
+message SubmitProvisioningResultsResponse {
+  bool success = 1;
+  string message = 2;
 }

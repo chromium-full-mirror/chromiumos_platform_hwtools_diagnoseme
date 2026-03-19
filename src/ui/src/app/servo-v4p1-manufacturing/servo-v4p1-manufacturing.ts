@@ -27,6 +27,10 @@ import {DialogOops} from '../dolos-provision/dolos-provision';
 import {HelpDialogButton} from '../help-dialog-button/help-dialog-button';
 import {ServoManufacturingService} from '../services/servo-manufacturing.service';
 import {TestPassFailButton} from '../test-pass-fail-button/test-pass-fail-button';
+import {
+  SubmitProvisioningResultsRequest,
+  StepResult,
+} from '../../proto/servo-manufacturing.pb';
 
 @Component({
   selector: 'app-servo-v4p1-manufacturing',
@@ -53,6 +57,12 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
   );
   private readonly cdr = inject(ChangeDetectorRef);
   private readonly dialog = inject(MatDialog);
+
+  hostProgrammingResult = new StepResult();
+  serialProgrammingResult = new StepResult();
+  dutProgrammingResult = new StepResult();
+  functionalTestingResult = new StepResult();
+  integrationTestingResult = new StepResult();
 
   @ViewChild('servoSerialNumberInput')
   servoSerialNumberInput!: ElementRef<HTMLInputElement>;
@@ -208,6 +218,7 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
 
   startHostSideProgramming() {
     this.hostSideProgrammingInProgress = true;
+    this.hostProgrammingResult.retryCount++;
     this.hostSideProgrammingSuccessful = false;
     this.serialNumberProgrammingSuccessful = false;
     this.genesysHubStatus.hide();
@@ -222,10 +233,14 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
               if (mcuResponse.success) {
                 this.mcuStatus.showPassed();
                 this.hostSideProgrammingSuccessful = true;
+                this.hostProgrammingResult.success = true;
                 setTimeout(() => {
                   this.serialStartButton.nativeElement.focus();
                 }, 0);
               } else {
+                this.hostProgrammingResult.failureLogs.push(
+                  mcuResponse.message,
+                );
                 this.mcuStatus.showFailed();
                 this.dialog.open(DialogOops, {
                   data:
@@ -237,6 +252,9 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
               this.cdr.detectChanges();
             },
             error: err => {
+              this.hostProgrammingResult.failureLogs.push(
+                err.message || 'Unknown error during MCU programming',
+              );
               this.mcuStatus.showFailed();
               this.hostSideProgrammingInProgress = false;
               this.dialog.open(DialogOops, {
@@ -246,6 +264,7 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
             },
           });
         } else {
+          this.hostProgrammingResult.failureLogs.push(response.message);
           this.genesysHubStatus.showFailed();
           this.hostSideProgrammingInProgress = false;
           this.dialog.open(DialogOops, {
@@ -256,6 +275,9 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
         }
       },
       error: err => {
+        this.hostProgrammingResult.failureLogs.push(
+          err.message || 'Unknown error during Genesys Hub programming',
+        );
         this.genesysHubStatus.showFailed();
         this.hostSideProgrammingInProgress = false;
         this.dialog.open(DialogOops, {
@@ -268,6 +290,7 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
 
   startSerialNumberProgramming() {
     this.serialNumberProgrammingInProgress = true;
+    this.serialProgrammingResult.retryCount++;
     this.serialNumberProgrammingSuccessful = false;
     this.dutSideProgrammingSuccessful = false;
     this.serialStatus.hide();
@@ -279,6 +302,7 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
           if (serialResponse.success) {
             this.serialStatus.showPassed();
             this.serialNumberProgrammingSuccessful = true;
+            this.serialProgrammingResult.success = true;
             setTimeout(() => {
               this.dutStartButton.nativeElement.focus();
             }, 0);
@@ -306,6 +330,7 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
 
   startDutSideProgramming() {
     this.dutSideProgrammingInProgress = true;
+    this.dutProgrammingResult.retryCount++;
     this.dutSideProgrammingSuccessful = false;
     this.ethStatus.hide();
     this.atmegaStatus.hide();
@@ -323,8 +348,12 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
                   if (atmegaResponse.success) {
                     this.atmegaStatus.showPassed();
                     this.dutSideProgrammingSuccessful = true;
+                    this.dutProgrammingResult.success = true;
                     this.runFunctionalTestingMerged();
                   } else {
+                    this.dutProgrammingResult.failureLogs.push(
+                      atmegaResponse.message,
+                    );
                     this.atmegaStatus.showFailed();
                     this.dialog.open(DialogOops, {
                       data:
@@ -359,6 +388,9 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
           }
         },
         error: err => {
+          this.dutProgrammingResult.failureLogs.push(
+            err.message || 'Unknown error during Ethernet programming',
+          );
           this.ethStatus.showFailed();
           this.dutSideProgrammingInProgress = false;
           this.dialog.open(DialogOops, {
@@ -371,6 +403,7 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
 
   runFunctionalTestingMerged() {
     this.consoleTestingInProgress = true;
+    this.functionalTestingResult.retryCount++;
     this.consoleTestingSuccessful = false;
     this.functionalTestingSuccessful = false;
     this.consoleTestingStatus.hide();
@@ -394,10 +427,14 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
                   if (functionalResponse.allPassed) {
                     this.functionalTestingStatus.showPassed();
                     this.functionalTestingSuccessful = true;
+                    this.functionalTestingResult.success = true;
                     setTimeout(() => {
                       this.integrationTestStartButton.nativeElement.focus();
                     }, 0);
                   } else {
+                    this.functionalTestingResult.failureLogs.push(
+                      functionalResponse.summary,
+                    );
                     this.functionalTestingStatus.showFailed();
                     this.dialog.open(DialogOops, {
                       data: functionalResponse.summary,
@@ -418,6 +455,7 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
                 },
               });
           } else {
+            this.functionalTestingResult.failureLogs.push(response.summary);
             this.consoleTestingStatus.showFailed();
             this.consoleTestingInProgress = false;
             this.dialog.open(DialogOops, {
@@ -441,6 +479,7 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
 
   runIntegrationTests() {
     this.integrationTestingInProgress = true;
+    this.integrationTestingResult.retryCount++;
     this.integrationTestingSuccessful = false;
     this.integrationTestingStatus.hide();
 
@@ -451,7 +490,9 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
           if (response.allPassed) {
             this.integrationTestingStatus.showPassed();
             this.integrationTestingSuccessful = true;
+            this.integrationTestingResult.success = true;
           } else {
+            this.integrationTestingResult.failureLogs.push(response.summary);
             this.integrationTestingStatus.showFailed();
             this.dialog.open(DialogOops, {
               data: response.summary,
@@ -461,6 +502,9 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
           this.cdr.detectChanges();
         },
         error: err => {
+          this.integrationTestingResult.failureLogs.push(
+            err.message || 'Unknown error during integration verification',
+          );
           this.integrationTestingStatus.showFailed();
           this.integrationTestingInProgress = false;
           this.dialog.open(DialogOops, {
@@ -473,6 +517,27 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
   }
 
   onReload() {
-    location.reload();
+    const request = new SubmitProvisioningResultsRequest({
+      serialNumber: this.servoSerialNumber,
+      macAddress: this.servoMacAddress,
+      hostProgramming: this.hostProgrammingResult,
+      serialProgramming: this.serialProgrammingResult,
+      dutProgramming: this.dutProgrammingResult,
+      functionalTesting: this.functionalTestingResult,
+      integrationTesting: this.integrationTestingResult,
+    });
+
+    this.servoManufacturingService
+      .submitProvisioningResults(request)
+      .subscribe({
+        next: () => {
+          location.reload();
+        },
+        error: err => {
+          console.error('Failed to submit results:', err);
+          // Reload anyway to unblock the user
+          location.reload();
+        },
+      });
   }
 }

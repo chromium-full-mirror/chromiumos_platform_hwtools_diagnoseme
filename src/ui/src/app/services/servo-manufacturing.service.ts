@@ -23,6 +23,8 @@ import {
   ValidationResponse,
   ValidateServoMacAddressRequest,
   DevicePresenceResponse,
+  SubmitProvisioningResultsRequest,
+  SubmitProvisioningResultsResponse,
 } from '../../proto/servo-manufacturing.pb';
 import {Observable} from 'rxjs';
 
@@ -114,5 +116,11 @@ export class ServoManufacturingService {
     const request = new ValidateServoMacAddressRequest();
     request.macAddress = macAddress;
     return this.client.validateServoMacAddress(request);
+  }
+
+  submitProvisioningResults(
+    request: SubmitProvisioningResultsRequest,
+  ): Observable<SubmitProvisioningResultsResponse> {
+    return this.client.submitProvisioningResults(request);
   }
 }

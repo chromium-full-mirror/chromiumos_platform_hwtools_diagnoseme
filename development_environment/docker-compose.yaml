@@ -30,6 +30,7 @@ services:
     environment:
       - TEST_DUT=brya
       - TEST_MODEL=banshee
+      - RESULTS_SERVER=${RESULTS_SERVER:-}
 
     volumes:
       - logs:/var/log/rpcserver
