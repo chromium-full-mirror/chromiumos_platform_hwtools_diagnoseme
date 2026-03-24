@@ -98,6 +98,9 @@ class SerialProgrammer:
                         f"number to {self._serial_number}"
                     )
 
+                logging.info("Rebooting servo to apply serial number...")
+                console.send_cmd("reboot")
+
         except ServoConsoleError as e:
             raise SerialProgrammerError(
                 f"Failed to communicate with serial port: {e}",

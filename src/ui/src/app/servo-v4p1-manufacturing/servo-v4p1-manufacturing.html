@@ -10,10 +10,10 @@
 <diagnoseme-rework-card title="1. Data Collection">
 
 
-  <diagnoseme-rework-card-column column="1">Please scan the desired serial number:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="1">Scan the top barcode on the servo white sticker:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2">
     <mat-form-field subscriptSizing="dynamic">
-      <input #servoSerialNumberInput matInput placeholder="Servo Serial Number" [(ngModel)]="servoSerialNumber" (input)="onServoSerialNumberChange($event)" class="data-input">
+      <input #servoSerialNumberInput matInput placeholder="SERVOV4P1_x_xxxxxxxxxx" [(ngModel)]="servoSerialNumber" (input)="onServoSerialNumberChange($event)" class="data-input">
     </mat-form-field>
     <test-pass-fail-button #serialNumberStatus></test-pass-fail-button>
   </diagnoseme-rework-card-column>
@@ -21,10 +21,10 @@
     <help-dialog-button image="serial-label.jpg"></help-dialog-button>
   </diagnoseme-rework-card-column>
 
-  <diagnoseme-rework-card-column column="1">Please scan the desired mac address:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="1">Scan the second barcode on the servo white sticker:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2">
     <mat-form-field subscriptSizing="dynamic">
-      <input #servoMacAddressInput matInput placeholder="Servo MAC Address" [(ngModel)]="servoMacAddress" (input)="onServoMacAddressChange($event)" class="data-input">
+      <input #servoMacAddressInput matInput placeholder="88:54:1F:xx:xx:xx" [(ngModel)]="servoMacAddress" (input)="onServoMacAddressChange($event)" class="data-input">
     </mat-form-field>
     <test-pass-fail-button #macAddressStatus></test-pass-fail-button>
   </diagnoseme-rework-card-column>
@@ -32,17 +32,21 @@
     <help-dialog-button image="mac-label.jpg"></help-dialog-button>
   </diagnoseme-rework-card-column>
 
+  <diagnoseme-rework-card-column column="1">Insert the three USB keys one into each of the type A ports on the servo:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
 </diagnoseme-rework-card>
 
 <diagnoseme-rework-card title="2. Host Side Programming" [progress]="hostSideProgrammingInProgress" [disabled]="!canStartHostSideProgramming()">
 
-  <diagnoseme-rework-card-column column="1">Move the DFU switch to the right ( towards the ethernet port ):</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="1">Slide the switch on the side of the servo towards the ethernet port:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
     <help-dialog-button image="dfu-switch-on.jpg"></help-dialog-button>
   </diagnoseme-rework-card-column>
 
-  <diagnoseme-rework-card-column column="1">Insert the host cable to the servo - a blue LED should illuminate:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="1">Insert the host side programming cable to the port marked host on the servo - a blue LED should illuminate:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
     <help-dialog-button image="host-cable-insert.jpg"></help-dialog-button>
@@ -62,19 +66,19 @@
 
 <diagnoseme-rework-card title="3. Serial Number Programming" [progress]="serialNumberProgrammingInProgress" [disabled]="!hostSideProgrammingSuccessful">
 
-  <diagnoseme-rework-card-column column="1">Unplug the host cable from the servo:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="1">Unplug the host side programming cable from the servo:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
     <help-dialog-button image="remove-host.jpg"></help-dialog-button>
   </diagnoseme-rework-card-column>
 
-  <diagnoseme-rework-card-column column="1">Move the DFU switch to the left ( away from the ethernet port ):</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="1">Slide the switch on the side of the servo away from the ethernet port:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
     <help-dialog-button image="dfu-left.jpg"></help-dialog-button>
   </diagnoseme-rework-card-column>
 
-  <diagnoseme-rework-card-column column="1">Insert the host cable to the servo - a blue LED should NOT be illuminated:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="1">Insert the host side programming cable to the port marked host on the servo - a blue LED should NOT be illuminated:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
     <help-dialog-button image="host-cable-insert.jpg"></help-dialog-button>
@@ -93,19 +97,7 @@
 
 <diagnoseme-rework-card title="4. DUT Side Programming" [progress]="dutSideProgrammingInProgress" [disabled]="!serialNumberProgrammingSuccessful">
 
-  <diagnoseme-rework-card-column column="1">Unplug the host cable from the servo:</diagnoseme-rework-card-column>
-  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
-  <diagnoseme-rework-card-column column="3">
-    <help-dialog-button image="remove-host.jpg"></help-dialog-button>
-  </diagnoseme-rework-card-column>
-
-  <diagnoseme-rework-card-column column="1">Insert the host cable to the servo:</diagnoseme-rework-card-column>
-  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
-  <diagnoseme-rework-card-column column="3">
-    <help-dialog-button image="host-cable-insert.jpg"></help-dialog-button>
-  </diagnoseme-rework-card-column>
-
-  <diagnoseme-rework-card-column column="1">Insert the servo cable into the DUT:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="1">Plug the white captive cable into the server port marked DUT side programming:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="3">
     <help-dialog-button image="servo-to-dut-insert.jpg"></help-dialog-button>
@@ -161,10 +153,20 @@
 
 <diagnoseme-rework-card title="7. Complete Provisioning">
 
-  <diagnoseme-rework-card-column column="1">
-    <button (click)="onReload()" mat-raised-button color="primary">
+  <diagnoseme-rework-card-column column="1">Remove all the USB devices from the servo and unplug from the fixture and server:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">If all checkmarks are green place the servo in the pass bin, otherwise place it into the fail bin:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">When you are complete press:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <button #completeProvisioningButton (click)="onReload()" mat-raised-button color="primary" [class.highlight-button]="integrationTestingSuccessful">
       Complete Provisioning
     </button>
   </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
 
 </diagnoseme-rework-card>

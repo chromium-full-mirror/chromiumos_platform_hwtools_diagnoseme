@@ -85,6 +85,9 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
   @ViewChild('integrationTestStartButton', {read: ElementRef})
   integrationTestStartButton!: ElementRef<HTMLButtonElement>;
 
+  @ViewChild('completeProvisioningButton', {read: ElementRef})
+  completeProvisioningButton!: ElementRef<HTMLButtonElement>;
+
   @ViewChild('serialNumberStatus')
   serialNumberStatus!: TestPassFailButton;
 
@@ -491,6 +494,9 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
             this.integrationTestingStatus.showPassed();
             this.integrationTestingSuccessful = true;
             this.integrationTestingResult.success = true;
+            setTimeout(() => {
+              this.completeProvisioningButton.nativeElement.focus();
+            }, 0);
           } else {
             this.integrationTestingResult.failureLogs.push(response.summary);
             this.integrationTestingStatus.showFailed();

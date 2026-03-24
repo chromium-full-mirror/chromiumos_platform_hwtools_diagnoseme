@@ -65,8 +65,16 @@ class TestSerialProgrammer(unittest.TestCase):
         self.mock_console.issue_cmd.assert_called_once_with(
             f"serialno set {self.serial_number}"
         )
-        # send_cmd called twice (once for each verify)
-        self.assertEqual(self.mock_console.send_cmd.call_count, 2)
+        # send_cmd called three times (twice for serialno during verify,
+        # once for reboot)
+        self.assertEqual(self.mock_console.send_cmd.call_count, 3)
+        self.mock_console.send_cmd.assert_has_calls(
+            [
+                mock.call("serialno"),
+                mock.call("serialno"),
+                mock.call("reboot"),
+            ]
+        )
 
     def test_program_already_correct(self):
         """Test program does nothing if serial is already correct."""
