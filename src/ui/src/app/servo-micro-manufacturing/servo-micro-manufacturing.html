@@ -1,0 +1,79 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<mat-toolbar color="primary">
+  <span>Servo Micro Manufacturing</span>
+</mat-toolbar>
+
+<diagnoseme-rework-card title="1. Data Collection">
+  <diagnoseme-rework-card-column column="1">Scan the barcode on the servo micro:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <mat-form-field subscriptSizing="dynamic">
+      <input #servoSerialNumberInput matInput placeholder="MICRO-x-xxxxxxxxxx" [(ngModel)]="servoSerialNumber" (input)="onServoSerialNumberChange($event)" class="data-input">
+    </mat-form-field>
+    <test-pass-fail-button #serialNumberStatus></test-pass-fail-button>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="serial-label.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+</diagnoseme-rework-card>
+
+<diagnoseme-rework-card title="2. MCU Programming" [progress]="mcuProgrammingInProgress" [disabled]="!isSerialNumberValid">
+  <diagnoseme-rework-card-column column="1">Plug servo micro in with the OTG cable, coming up in DFU mode:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Start MCU programming:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button #mcuStartButton mat-raised-button color="primary" (click)="startMcuProgramming()" [disabled]="!isSerialNumberValid || mcuProgrammingInProgress">Start</button>
+      <test-pass-fail-button #mcuStatus></test-pass-fail-button>
+    </div>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+</diagnoseme-rework-card>
+
+<diagnoseme-rework-card title="3. Serial Number Programming" [progress]="serialNumberProgrammingInProgress" [disabled]="!mcuProgrammingSuccessful">
+  <diagnoseme-rework-card-column column="1">Unplug the host side micro USB OTG cable:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Plug servo micro in with normal mode cable (regular micro usb cable):</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">Start serial number programming:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button #serialStartButton mat-raised-button color="primary" (click)="startSerialNumberProgramming()" [disabled]="!mcuProgrammingSuccessful || serialNumberProgrammingInProgress">Start</button>
+      <test-pass-fail-button #serialStatus></test-pass-fail-button>
+    </div>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+</diagnoseme-rework-card>
+
+<diagnoseme-rework-card title="4. Testing" [progress]="testingInProgress" [disabled]="false">
+  <diagnoseme-rework-card-column column="1">Start functional verification:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button #testStartButton mat-raised-button color="primary" (click)="runTesting()" [disabled]="testingInProgress">Start</button>
+      <test-pass-fail-button #testingStatus></test-pass-fail-button>
+    </div>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+</diagnoseme-rework-card>
+
+<diagnoseme-rework-card title="5. Complete Provisioning">
+  <diagnoseme-rework-card-column column="1">When you are complete press:</diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <button #completeProvisioningButton (click)="onReload()" mat-raised-button color="primary" [class.highlight-button]="testingSuccessful">
+      Complete Provisioning
+    </button>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+</diagnoseme-rework-card>

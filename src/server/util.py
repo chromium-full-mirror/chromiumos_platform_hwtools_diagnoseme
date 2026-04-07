@@ -196,18 +196,24 @@ def get_logs_from_exception(e: Exception) -> str:
     return f"STDOUT:\n{stdout}\nSTDERR:\n{stderr}"
 
 
-def discover_servo_v4p1_serial_path(
-    serial_number: str = "", attempts: int = 15, interval: float = 1.0
+def discover_servo_serial_path(  # pylint: disable=too-many-branches
+    serial_number: str = "",
+    attempts: int = 15,
+    interval: float = 1.0,
+    board: str = "v4p1",
+    target_if: str = "if00",
 ) -> Optional[str]:
-    """Find the serial port for a Servo V4.1 device.
+    """Find the serial port for a Servo device.
 
     Args:
         serial_number: The serial number of the device to find.
         attempts: Number of search attempts.
         interval: Time in seconds between attempts.
+        board: The board type (e.g. 'v4p1', 'micro').
+        target_if: The target interface (e.g. 'if00', 'if03').
 
     Returns:
-        The path to the serial port (if00) or None if not found.
+        The path to the serial port (target_if) or None if not found.
     """
     serial_number = serial_number.strip()
     serial_path = None
@@ -216,15 +222,23 @@ def discover_servo_v4p1_serial_path(
         if os.path.exists("/dev/serial/by-id"):
             entries = os.listdir("/dev/serial/by-id")
 
-            # Define search priorities: specific serial, uninitialized, or any v4p1
+            # Priorities: specific serial, uninitialized, or any v4p1/micro
             priorities = []
             if serial_number:
                 priorities.append(serial_number)
-            priorities.extend(["Uninitialized", "Servo_V4p1"])
+
+            priorities.append("Uninitialized")
+
+            if board in ("micro", "servo_micro"):
+                priorities.append("Servo_Micro")
+            elif board in ("v4p1", "servo_v4p1"):
+                priorities.append("Servo_V4p1")
+            elif board:
+                priorities.append(f"Servo_{board.capitalize()}")
 
             for priority in priorities:
                 for entry in entries:
-                    if priority in entry and "if00" in entry:
+                    if priority in entry and target_if in entry:
                         serial_path = os.path.join("/dev/serial/by-id", entry)
                         break
                 if serial_path:
@@ -232,9 +246,9 @@ def discover_servo_v4p1_serial_path(
         else:
             logging.warning("/dev/serial/by-id not found, falling back to /dev/ttyUSB*")
             tty_devs = sorted(glob.glob("/dev/ttyUSB*"))
-            # Servo V4.1 usually attaches to 3 ttyUSB devices.
+            # Servo usually attaches to 3 ttyUSB devices.
             # If there are exactly 3, we can reasonably guess the first one
-            # is the console (if00).
+            # is the console (target_if).
             if len(tty_devs) == 3:
                 serial_path = tty_devs[0]
                 logging.info(
@@ -253,13 +267,47 @@ def discover_servo_v4p1_serial_path(
 
         if attempt < attempts - 1:
             logging.info(
-                "Waiting for Servo V4.1 serial port to appear (attempt %d/%d)...",
+                "Waiting for Servo serial port to appear (attempt %d/%d)...",
                 attempt + 1,
                 attempts,
             )
             time.sleep(interval)
 
     return None
+
+
+def discover_servo_v4p1_serial_path(
+    serial_number: str = "", attempts: int = 15, interval: float = 1.0
+) -> Optional[str]:
+    """Find the serial port for a Servo V4.1 device.
+
+    Args:
+        serial_number: The serial number of the device to find.
+        attempts: Number of search attempts.
+        interval: Time in seconds between attempts.
+
+    Returns:
+        The path to the serial port (if00) or None if not found.
+    """
+    return discover_servo_serial_path(serial_number, attempts, interval, "v4p1", "if00")
+
+
+def discover_servo_micro_serial_path(
+    serial_number: str = "", attempts: int = 15, interval: float = 1.0
+) -> Optional[str]:
+    """Find the serial port for a Servo Micro device.
+
+    Args:
+        serial_number: The serial number of the device to find.
+        attempts: Number of search attempts.
+        interval: Time in seconds between attempts.
+
+    Returns:
+        The path to the serial port (if03) or None if not found.
+    """
+    return discover_servo_serial_path(
+        serial_number, attempts, interval, "servo_micro", "if03"
+    )
 
 
 def is_usb_device_present(vid: int, pids: List[int]) -> bool:

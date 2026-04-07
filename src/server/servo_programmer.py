@@ -62,6 +62,7 @@ class ServoProgrammer:
         self._size: Optional[int] = None
 
     def program(self) -> bool:
+        # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Helper to perform actual programming."""
         search_path = f"/usr/local/{self._board}/*.bin"
         bins = glob.glob(search_path)
@@ -86,56 +87,74 @@ class ServoProgrammer:
 
         time.sleep(2)
         try:
-            logging.debug("Running erase command: %s", " ".join(erase_cmd))
-            erase_result = util.run_command(
-                erase_cmd,
-                timeout=self.PROCESS_TIMEOUT_S,
-            )
-            logging.debug("ERASE result: %s", erase_result.stdout)
+            logging.debug("Running unprotect/erase command: %s", " ".join(erase_cmd))
+            util.run_command(erase_cmd, timeout=self.PROCESS_TIMEOUT_S)
         except subprocess.CalledProcessError as e:
-            if e.returncode == 1:
-                logging.info(
-                    "Erase failed with return code 1. This may be due to the device "
-                    "already being at the target version."
-                )
-                return False
-            logging.exception("Error during erase: %s", e.stderr)
-            raise ServoProgrammerError(
-                "Issue on erase. Giving up.", stdout=e.stdout, stderr=e.stderr
-            ) from e
-        except subprocess.TimeoutExpired as e:
-            logging.exception("Erase command timed out")
-            raise ServoProgrammerError(
-                "Erase command timed out.",
-                stdout=getattr(e, "stdout", None),
-                stderr=getattr(e, "stderr", None),
-            ) from e
+            # The unprotect command causes a mass erase and device reset, which
+            # invariably results in a LIBUSB_ERROR_PIPE when the connection drops.
+            # We log it and gracefully proceed.
+            logging.info(
+                "Erase command returned non-zero (expected if chip resets): %s\n%s",
+                e.returncode,
+                e.stderr,
+            )
+        except subprocess.TimeoutExpired:
+            logging.warning("Erase command timed out (ignoring)")
 
-        time.sleep(2)
-        try:
-            logging.debug("Running write command: %s", " ".join(write_cmd))
-            write_result = util.run_command(
-                write_cmd,
-                timeout=self.PROCESS_TIMEOUT_S,
-            )
-            logging.debug("WRITE result: %s", write_result.stdout)
-        except subprocess.CalledProcessError as e:
-            if e.returncode == 1:
-                logging.info(
-                    "Write failed with return code 1. This may be due to the device "
-                    "already being at the target version."
+        # Wait for device to finish mass-erase and re-enumerate
+        time.sleep(5)
+        util.wait_for_usb_devices([(self._vid, [self._pid])], timeout=15.0)
+
+        write_success = False
+        last_error = None
+        for attempt in range(3):
+            try:
+                logging.debug(
+                    "Running write command (attempt %d): %s",
+                    attempt + 1,
+                    " ".join(write_cmd),
                 )
-                return False
-            logging.exception("Error during write: %s", e.stderr)
+                write_result = util.run_command(
+                    write_cmd, timeout=self.PROCESS_TIMEOUT_S
+                )
+                logging.debug("WRITE result: %s", write_result.stdout)
+                write_success = True
+                break
+            except subprocess.CalledProcessError as e:
+                # The :leave modifier causes a device reset, which often
+                # results in a libusb control transfer error when the connection drops.
+                stderr_upper = e.stderr.upper()
+                stdout_upper = e.stdout.upper()
+                if (
+                    "LIBUSB" in stderr_upper
+                    or "ERROR DURING DOWNLOAD" in stderr_upper
+                    or "LEAVE" in stderr_upper
+                    or "DISCONNECTS" in stdout_upper
+                    or "RESETS" in stdout_upper
+                ):
+                    logging.info(
+                        "Write command caused device reset (expected from :leave)."
+                    )
+                    write_success = True
+                    break
+
+                logging.warning(
+                    "Error during write attempt %d: %s", attempt + 1, e.stderr
+                )
+                last_error = e
+                time.sleep(3)
+                util.wait_for_usb_devices([(self._vid, [self._pid])], timeout=15.0)
+            except subprocess.TimeoutExpired as e:
+                logging.warning("Write command timed out on attempt %d", attempt + 1)
+                last_error = e
+                time.sleep(3)
+                util.wait_for_usb_devices([(self._vid, [self._pid])], timeout=15.0)
+
+        if not write_success:
             raise ServoProgrammerError(
-                "Issue on write. Giving up.", stdout=e.stdout, stderr=e.stderr
-            ) from e
-        except subprocess.TimeoutExpired as e:
-            logging.exception("Write command timed out")
-            raise ServoProgrammerError(
-                "Write command timed out.",
-                stdout=getattr(e, "stdout", None),
-                stderr=getattr(e, "stderr", None),
-            ) from e
+                "Issue on write. Giving up.",
+                stdout=getattr(last_error, "stdout", None),
+                stderr=getattr(last_error, "stderr", None),
+            )
 
         return True

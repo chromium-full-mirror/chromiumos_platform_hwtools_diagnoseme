@@ -180,6 +180,13 @@ RUN wget https://storage.googleapis.com/chromeos-localmirror/distfiles/servo_v4p
 RUN tar xvf *
 RUN rm *.tar.xz
 
+RUN mkdir /usr/local/servo_micro/
+WORKDIR /usr/local/servo_micro/
+RUN wget https://storage.googleapis.com/chromeos-localmirror/distfiles/servo_micro_v2.4.82-dbed085877.tar.xz \
+    -O /usr/local/servo_micro/servo_micro_v2.4.82-dbed085877.tar.xz
+RUN tar xvf *
+RUN rm *.tar.xz
+
 #RUN python3 -m unittest discover -s server
 
 RUN chmod og+w /var/log

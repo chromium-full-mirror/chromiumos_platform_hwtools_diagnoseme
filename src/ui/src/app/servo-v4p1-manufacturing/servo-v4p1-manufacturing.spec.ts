@@ -50,7 +50,7 @@ describe('ServoV4p1ManufacturingComponent', () => {
 
   it('should focus the serial number input on init', () => {
     const inputElement = fixture.nativeElement.querySelector(
-      'input[placeholder="Servo Serial Number"]',
+      'input[placeholder="SERVOV4P1_x_xxxxxxxxxx"]',
     );
     expect(document.activeElement).toBe(inputElement);
   });

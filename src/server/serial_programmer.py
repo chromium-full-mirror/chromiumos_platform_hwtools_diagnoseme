@@ -32,16 +32,28 @@ class SerialProgrammer:
     # Expected response from 'serialno' command is "Serial number: <serial>"
     SERIALNO_REGEX = re.compile(r"Serial number:\s+(\S+)")
 
-    def __init__(self, serial_number: str):
+    def __init__(
+        self,
+        serial_number: str,
+        port: Optional[str] = None,
+        board: str = "v4p1",
+        target_if: str = "if00",
+    ):
         """Initialize the programmer.
 
         Args:
           serial_number: the desired serial number to program.
+          port: Optional explicit port. Discovered automatically if not provided.
+          board: The board type for discovery (e.g. 'v4p1', 'micro').
+          target_if: The target interface (e.g. 'if00', 'if03').
         """
         self._serial_number = serial_number
-        port = util.discover_servo_v4p1_serial_path()
         if not port:
-            raise SerialProgrammerError("Could not discover Servo V4.1 serial port")
+            port = util.discover_servo_serial_path(
+                serial_number, board=board, target_if=target_if
+            )
+        if not port:
+            raise SerialProgrammerError(f"Could not discover Servo {board} serial port")
         self._console = ServoConsole(port)
 
     def _verify(self, console: ServoConsole) -> bool:

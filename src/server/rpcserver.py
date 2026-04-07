@@ -27,6 +27,7 @@ from server import diagnoseme_servod_pb2
 from server import dolos
 from server import servo_manufacturing
 from server import servo_manufacturing_pb2
+from server import servo_micro_manufacturing
 from server import servod
 from server.diagnoseme_dolos_pb2_grpc import (
     add_DolosRpcServiceServicer_to_server,
@@ -34,6 +35,9 @@ from server.diagnoseme_dolos_pb2_grpc import (
 from server.diagnoseme_pb2_grpc import add_DiagnoseMeServiceServicer_to_server
 from server.diagnoseme_servod_pb2_grpc import (
     add_ServodRpcServiceServicer_to_server,
+)
+from server.servo_manufacturing_pb2_grpc import (
+    add_ServoMicroManufacturingServicer_to_server,
 )
 from server.servo_manufacturing_pb2_grpc import (
     add_ServoV41ManufacturingServicer_to_server,
@@ -123,6 +127,20 @@ async def serve():
             service_name = (
                 servo_manufacturing_pb2.DESCRIPTOR.services_by_name[  # pylint: disable=no-member
                     "ServoV41Manufacturing"
+                ].full_name,
+                reflection.SERVICE_NAME,
+            )
+            reflection.enable_server_reflection(service_name, server)
+
+            add_ServoMicroManufacturingServicer_to_server(
+                servo_micro_manufacturing.ServoMicroManufacturingServicer(
+                    servod_service=servod_service
+                ),
+                server,
+            )
+            service_name = (
+                servo_manufacturing_pb2.DESCRIPTOR.services_by_name[  # pylint: disable=no-member
+                    "ServoMicroManufacturing"
                 ].full_name,
                 reflection.SERVICE_NAME,
             )

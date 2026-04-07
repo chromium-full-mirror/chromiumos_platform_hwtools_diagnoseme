@@ -4,12 +4,22 @@
 
 import {TestBed} from '@angular/core/testing';
 import {RouterTestingModule} from '@angular/router/testing';
+import {HttpClientTestingModule} from '@angular/common/http/testing';
 import {AppComponent} from './app';
+import {DiagnoseMeService} from './services/diagnoseme.service';
 
 describe('AppComponent', () => {
+  let mockDiagnoseMeService: jasmine.SpyObj<DiagnoseMeService>;
+
   beforeEach(async () => {
+    mockDiagnoseMeService = jasmine.createSpyObj('DiagnoseMeService', [
+      'getLogs',
+    ]);
     await TestBed.configureTestingModule({
-      imports: [RouterTestingModule, AppComponent],
+      imports: [RouterTestingModule, HttpClientTestingModule, AppComponent],
+      providers: [
+        {provide: DiagnoseMeService, useValue: mockDiagnoseMeService},
+      ],
     }).compileComponents();
   });
 
@@ -30,7 +40,7 @@ describe('AppComponent', () => {
     fixture.detectChanges();
     const compiled = fixture.nativeElement as HTMLElement;
     expect(
-      compiled.querySelector('.diagnoseme-toolbar span')?.textContent,
+      compiled.querySelector('.diagnoseme-toolbar')?.textContent,
     ).toContain('HW Tools Diagnose Me');
   });
 });

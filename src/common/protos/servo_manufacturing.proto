@@ -4,6 +4,7 @@
 syntax = "proto3";
 package diagnoseme;
 import "google/protobuf/empty.proto";
+
 service ServoV41Manufacturing {
   // Example RPC call
   rpc get_status(google.protobuf.Empty) returns (StatusResponse) {}
@@ -33,6 +34,16 @@ service ServoV41Manufacturing {
   rpc submit_provisioning_results(SubmitProvisioningResultsRequest) returns (SubmitProvisioningResultsResponse) {}
 }
 
+service ServoMicroManufacturing {
+  rpc get_status(google.protobuf.Empty) returns (StatusResponse) {}
+  rpc program_mcu(ProgramMcuRequest) returns (ProgramMcuResponse) {}
+  rpc program_serial(ProgramSerialRequest) returns (ProgramSerialResponse) {}
+  rpc run_tests(RunTestsRequest) returns (RunTestsResponse) {}
+  rpc validate_servo_serial(ValidateServoSerialRequest) returns (ValidationResponse) {}
+  rpc get_device_presence(google.protobuf.Empty) returns (MicroDevicePresenceResponse) {}
+  rpc submit_provisioning_results(SubmitMicroProvisioningResultsRequest) returns (SubmitProvisioningResultsResponse) {}
+}
+
 message StatusResponse {
   string status = 1;
 }
@@ -40,6 +51,10 @@ message DevicePresenceResponse {
   bool mcu_dfu_detected = 1;
   bool servo_v4p1_detected = 2;
   bool realtek_eth_detected = 3;
+}
+message MicroDevicePresenceResponse {
+  bool mcu_dfu_detected = 1;
+  bool servo_micro_detected = 2;
 }
 message ProgramGenesysHubRequest {
   // Add request fields here
@@ -121,6 +136,12 @@ message SubmitProvisioningResultsRequest {
   StepResult dut_programming = 5;
   StepResult functional_testing = 6;
   StepResult integration_testing = 7;
+}
+message SubmitMicroProvisioningResultsRequest {
+  string serial_number = 1;
+  StepResult mcu_programming = 2;
+  StepResult serial_programming = 3;
+  StepResult testing = 4;
 }
 message SubmitProvisioningResultsResponse {
   bool success = 1;

@@ -14,7 +14,7 @@ class TestSerialProgrammer(unittest.TestCase):
     """Tests for SerialProgrammer."""
 
     # pylint: disable=arguments-differ
-    @mock.patch("server.util.discover_servo_v4p1_serial_path")
+    @mock.patch("server.util.discover_servo_serial_path")
     @mock.patch("server.serial_programmer.ServoConsole")
     def setUp(self, mock_console_class, mock_discover_path):
         mock_discover_path.return_value = "/dev/mock_ttyUSB0"
