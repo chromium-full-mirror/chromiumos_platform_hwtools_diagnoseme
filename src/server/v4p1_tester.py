@@ -518,33 +518,39 @@ class V4P1Tester:
             self._logger.error("Error accessing HID device: %s", e)
             return False
 
-    async def test_mac_address_prefix(self, prefix: str) -> bool:
+    async def test_mac_address_prefix(self, prefix: str, timeout: float = 10.0) -> bool:
         """Verify that a network interface with the given MAC address prefix exists."""
         prefix = prefix.strip().lower().replace("-", ":")
         self._logger.info(
             "Verifying network interface with MAC prefix %s exists...", prefix
         )
 
-        try:
-            for interface in os.listdir("/sys/class/net"):
-                address_file = os.path.join("/sys/class/net", interface, "address")
-                if os.path.exists(address_file):
-                    try:
-                        with open(address_file, "r", encoding="utf-8") as f:
-                            mac = f.read().strip().lower()
-                            if mac.startswith(prefix):
-                                self._logger.info(
-                                    "Found matching MAC %s on interface %s",
-                                    mac,
-                                    interface,
-                                )
-                                return True
-                    except OSError as e:
-                        self._logger.debug(
-                            "Could not read MAC address from %s: %s", address_file, e
-                        )
-        except OSError as e:
-            self._logger.error("Could not list network interfaces: %s", e)
+        start_time = time.monotonic()
+        while time.monotonic() - start_time < timeout:
+            try:
+                for interface in os.listdir("/sys/class/net"):
+                    address_file = os.path.join("/sys/class/net", interface, "address")
+                    if os.path.exists(address_file):
+                        try:
+                            with open(address_file, "r", encoding="utf-8") as f:
+                                mac = f.read().strip().lower()
+                                if mac.startswith(prefix):
+                                    self._logger.info(
+                                        "Found matching MAC %s on interface %s",
+                                        mac,
+                                        interface,
+                                    )
+                                    return True
+                        except OSError as e:
+                            self._logger.debug(
+                                "Could not read MAC address from %s: %s",
+                                address_file,
+                                e,
+                            )
+            except OSError as e:
+                self._logger.error("Could not list network interfaces: %s", e)
+
+            await asyncio.sleep(0.5)
 
         self._logger.error("No network interface found with MAC prefix %s", prefix)
         return False
