@@ -3,7 +3,8 @@
 # found in the LICENSE file.
 FROM python:3.11-slim
 
-RUN pip install flask
+COPY requirements.txt .
+RUN pip install --require-hashes -r requirements.txt
 
 WORKDIR /app
 COPY mock_sink_server.py .
