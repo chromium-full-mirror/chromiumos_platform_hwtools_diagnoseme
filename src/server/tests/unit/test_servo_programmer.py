@@ -14,6 +14,9 @@ class TestServoProgrammer(unittest.TestCase):
     """Tests for ServoProgrammer."""
 
     def setUp(self):
+        patcher = mock.patch("server.util.wait_for_usb_devices", return_value=True)
+        self.addCleanup(patcher.stop)
+        patcher.start()
         self.programmer = servo_programmer.ServoProgrammer(
             board="test_board", dfu_vid=0x1234, dfu_pid=0x5678
         )
@@ -69,11 +72,11 @@ class TestServoProgrammer(unittest.TestCase):
         mock_glob.return_value = ["/usr/local/test_board/fw.bin"]
         mock_stat.return_value = mock.Mock(st_size=1024)
         mock_run.side_effect = subprocess.CalledProcessError(
-            1, "dfu-util", stderr="already programmed"
+            1, "dfu-util", output="", stderr="already programmed"
         )
 
-        self.assertFalse(self.programmer.program())
-        mock_run.assert_called_once()
+        with self.assertRaises(servo_programmer.ServoProgrammerError):
+            self.programmer.program()
 
     @mock.patch("glob.glob")
     @mock.patch("pathlib.Path.stat")
@@ -88,11 +91,19 @@ class TestServoProgrammer(unittest.TestCase):
         # Success for erase, fail for write
         mock_run.side_effect = [
             mock.Mock(stdout="Erase Success", returncode=0),
-            subprocess.CalledProcessError(1, "dfu-util", stderr="write fail"),
+            subprocess.CalledProcessError(
+                1, "dfu-util", output="", stderr="write fail"
+            ),
+            subprocess.CalledProcessError(
+                1, "dfu-util", output="", stderr="write fail"
+            ),
+            subprocess.CalledProcessError(
+                1, "dfu-util", output="", stderr="write fail"
+            ),
         ]
 
-        self.assertFalse(self.programmer.program())
-        self.assertEqual(mock_run.call_count, 2)
+        with self.assertRaises(servo_programmer.ServoProgrammerError):
+            self.programmer.program()
 
     @mock.patch("glob.glob")
     @mock.patch("pathlib.Path.stat")
@@ -120,7 +131,7 @@ class TestServoProgrammer(unittest.TestCase):
         mock_glob.return_value = ["/usr/local/test_board/fw.bin"]
         mock_stat.return_value = mock.Mock(st_size=1024)
         mock_run.side_effect = subprocess.CalledProcessError(
-            2, "dfu-util", stderr="fatal error"
+            2, "dfu-util", output="", stderr="fatal error"
         )
 
         with self.assertRaises(servo_programmer.ServoProgrammerError):

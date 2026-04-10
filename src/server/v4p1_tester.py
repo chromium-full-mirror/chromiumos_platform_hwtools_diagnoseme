@@ -309,7 +309,7 @@ class V4P1Tester:
         port_number: int,
         mux_control: str,
         strict_dut_check: bool = True,
-    ) -> bool:
+    ) -> Tuple[bool, str]:
         """Test a USB port muxing using dut-control."""
         # pylint: disable=too-many-return-statements,too-many-branches,too-many-statements
         self._logger.info("Verifying USB Mux '%s' (Mux Port %d)", name, port_number)
@@ -348,7 +348,9 @@ class V4P1Tester:
             self._logger.error(
                 "FAILED: Could not find USB stick on Host Hub port %d", port_number
             )
-            return False
+            return False, (
+                f"FAILED: Could not find USB stick on Host Hub port {port_number}"
+            )
 
         self._mux_results[name]["host"] = host_path
         usb_serial = self._get_serial_with_retry(host_path)
@@ -356,7 +358,9 @@ class V4P1Tester:
             self._logger.error(
                 "FAILED: Could not read serial number from USB stick at %s", host_path
             )
-            return False
+            return False, (
+                f"FAILED: Could not read serial number from USB stick at {host_path}"
+            )
 
         self._mux_results[name]["serial"] = usb_serial
         self._logger.info(
@@ -373,7 +377,7 @@ class V4P1Tester:
         # Verify it left the host path
         if not await self._wait_for_usb_state(host_path, False):
             self._logger.error("FAILED: Device still on Host Hub path after switch")
-            return False
+            return False, "FAILED: Device still on Host Hub path after switch"
 
         # Step 4: Verify appearance on DUT side (different path, same serial)
         self._logger.info("Mux Step 4: Verifying device appeared on a DIFFERENT path")
@@ -392,14 +396,16 @@ class V4P1Tester:
                 pass
 
             if strict_dut_check:
-                return False
+                return False, msg
             self._logger.warning("Ignoring failure (strict_dut_check=False).")
 
         elif dut_path == host_path:
             self._logger.error(
                 "FAILED: Device found at SAME path %s. Mux didn't switch.", dut_path
             )
-            return False
+            return False, (
+                f"FAILED: Device found at SAME path {dut_path}. Mux didn't switch."
+            )
         else:
             self._logger.info("Verified: Device moved to DUT path %s", dut_path)
             self._mux_results[name]["dut"] = dut_path
@@ -414,10 +420,12 @@ class V4P1Tester:
             self._logger.error(
                 "FAILED: Device failed to return to Host Hub path %s", host_path
             )
-            return False
+            return False, (
+                f"FAILED: Device failed to return to Host Hub path {host_path}"
+            )
 
         self._logger.info("Verified: Device returned to Host Hub.")
-        return True
+        return True, ""
 
     def log_mux_report(self) -> None:
         """Log a summary report of all mux tests."""
@@ -661,33 +669,24 @@ class V4P1Tester:
         await self._run_dut_control("usb3_mux_en:on")
 
         # Top Port (Port 2)
-        all_results.append(
-            (
-                "USB-A Mux (port 2/top)",
-                await self.test_usb_mux("Top USB-A", 2, "top_usbkey_mux"),
-            )
-        )
+        res, msg = await self.test_usb_mux("Top USB-A", 2, "top_usbkey_mux")
+        msg_str = f" - {msg}" if msg else ""
+        all_results.append((f"USB-A Mux (port 2/top){msg_str}", res))
 
         # Bottom Port (Port 1)
-        all_results.append(
-            (
-                "USB-A Mux (port 1/bottom)",
-                await self.test_usb_mux("Bottom USB-A", 1, "bottom_usbkey_mux"),
-            )
-        )
+        res, msg = await self.test_usb_mux("Bottom USB-A", 1, "bottom_usbkey_mux")
+        msg_str = f" - {msg}" if msg else ""
+        all_results.append((f"USB-A Mux (port 1/bottom){msg_str}", res))
 
         # uServo USB-A Port (Internal)
-        all_results.append(
-            (
-                "uServo USB-A Port",
-                await self.test_usb_mux(
-                    "uServo USB-A Port",
-                    4,
-                    "uservo_fastboot_mux_sel",
-                    strict_dut_check=False,
-                ),
-            )
+        res, msg = await self.test_usb_mux(
+            "uServo USB-A Port",
+            4,
+            "uservo_fastboot_mux_sel",
+            strict_dut_check=False,
         )
+        msg_str = f" - {msg}" if msg else ""
+        all_results.append((f"uServo USB-A Port{msg_str}", res))
 
         # USB Keyboard Test
         # Skipped for now as enumeration is flaky after programming.

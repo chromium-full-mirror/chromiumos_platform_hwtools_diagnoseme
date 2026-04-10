@@ -201,9 +201,12 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
         self.assertFalse(response.success)
         self.assertEqual(response.message, "Timeout waiting for Servo device")
 
+    @mock.patch("server.serial_programmer.SerialProgrammer.__init__", return_value=None)
     @mock.patch("server.util.discover_servo_v4p1_serial_path")
     @mock.patch("server.serial_programmer.SerialProgrammer.program")
-    def test_program_serial_success(self, mock_program, mock_discover_path):
+    def test_program_serial_success(
+        self, mock_program, mock_discover_path, unused_mock_sp_init
+    ):
         """Test case for program_serial success."""
         mock_discover_path.return_value = "/dev/mock_ttyUSB0"
         mock_program.return_value = True
@@ -214,9 +217,14 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
         self.assertTrue(response.success)
         self.assertEqual(response.message, "Serial number programmed successfully")
 
+    @mock.patch(
+        "server.util.discover_servo_serial_path", return_value="/dev/mock_ttyUSB0"
+    )
     @mock.patch("server.util.discover_servo_v4p1_serial_path")
     @mock.patch("server.serial_programmer.SerialProgrammer.program")
-    def test_program_serial_failure(self, mock_program, mock_discover_path):
+    def test_program_serial_failure(
+        self, mock_program, mock_discover_path, unused_mock_discover_serial
+    ):
         """Test case for program_serial failure."""
         mock_discover_path.return_value = "/dev/mock_ttyUSB0"
         mock_program.side_effect = serial_programmer.SerialProgrammerError(

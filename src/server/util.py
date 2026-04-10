@@ -238,7 +238,10 @@ def discover_servo_serial_path(  # pylint: disable=too-many-branches
 
             for priority in priorities:
                 for entry in entries:
-                    if priority in entry and target_if in entry:
+                    if (
+                        priority.lower() in entry.lower()
+                        and target_if.lower() in entry.lower()
+                    ):
                         serial_path = os.path.join("/dev/serial/by-id", entry)
                         break
                 if serial_path:
