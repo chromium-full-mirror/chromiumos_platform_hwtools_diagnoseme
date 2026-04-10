@@ -374,42 +374,51 @@ class V4P1Tester:
         await self._run_dut_control(f"{mux_control}:{dut_sees_val}")
         await asyncio.sleep(1.0)
 
+        test_passed = True
+        test_error_msg = ""
+
         # Verify it left the host path
         if not await self._wait_for_usb_state(host_path, False):
             self._logger.error("FAILED: Device still on Host Hub path after switch")
-            return False, "FAILED: Device still on Host Hub path after switch"
-
-        # Step 4: Verify appearance on DUT side (different path, same serial)
-        self._logger.info("Mux Step 4: Verifying device appeared on a DIFFERENT path")
-        dut_path = await self._wait_for_serial_on_system(usb_serial)
-
-        if not dut_path:
-            msg = (
-                f"FAILED: Device serial '{usb_serial}' not found on DUT side. "
-                "Is the DUT port connected to this machine?"
-            )
-            self._logger.error(msg)
-            try:
-                lsusb_out = util.run_command(["lsusb"]).stdout
-                self._logger.error("Current lsusb:\n%s", lsusb_out)
-            except (OSError, util.subprocess.SubprocessError):
-                pass
-
-            if strict_dut_check:
-                return False, msg
-            self._logger.warning("Ignoring failure (strict_dut_check=False).")
-
-        elif dut_path == host_path:
-            self._logger.error(
-                "FAILED: Device found at SAME path %s. Mux didn't switch.", dut_path
-            )
-            return False, (
-                f"FAILED: Device found at SAME path {dut_path}. Mux didn't switch."
-            )
+            test_passed = False
+            test_error_msg = "FAILED: Device still on Host Hub path after switch"
         else:
-            self._logger.info("Verified: Device moved to DUT path %s", dut_path)
-            self._mux_results[name]["dut"] = dut_path
-            self._verify_parent_hub(dut_path)
+            # Step 4: Verify appearance on DUT side (different path, same serial)
+            self._logger.info(
+                "Mux Step 4: Verifying device appeared on a DIFFERENT path"
+            )
+            dut_path = await self._wait_for_serial_on_system(usb_serial)
+
+            if not dut_path:
+                msg = (
+                    f"FAILED: Device serial '{usb_serial}' not found on DUT side. "
+                    "Is the DUT port connected to this machine?"
+                )
+                self._logger.error(msg)
+                try:
+                    lsusb_out = util.run_command(["lsusb"]).stdout
+                    self._logger.error("Current lsusb:\n%s", lsusb_out)
+                except (OSError, util.subprocess.SubprocessError):
+                    pass
+
+                if strict_dut_check:
+                    test_passed = False
+                    test_error_msg = msg
+                else:
+                    self._logger.warning("Ignoring failure (strict_dut_check=False).")
+
+            elif dut_path == host_path:
+                self._logger.error(
+                    "FAILED: Device found at SAME path %s. Mux didn't switch.", dut_path
+                )
+                test_passed = False
+                test_error_msg = (
+                    f"FAILED: Device found at SAME path {dut_path}. Mux didn't switch."
+                )
+            else:
+                self._logger.info("Verified: Device moved to DUT path %s", dut_path)
+                self._mux_results[name]["dut"] = dut_path
+                self._verify_parent_hub(dut_path)
 
         # Step 5: Restore connection to Host Hub
         self._logger.info("Mux Step 5: Restoring connection to Host Hub")
@@ -420,11 +429,16 @@ class V4P1Tester:
             self._logger.error(
                 "FAILED: Device failed to return to Host Hub path %s", host_path
             )
-            return False, (
-                f"FAILED: Device failed to return to Host Hub path {host_path}"
+            return (
+                False,
+                f"FAILED: Device failed to return to Host Hub path {host_path}",
             )
 
         self._logger.info("Verified: Device returned to Host Hub.")
+
+        if not test_passed:
+            return False, test_error_msg
+
         return True, ""
 
     def log_mux_report(self) -> None:
