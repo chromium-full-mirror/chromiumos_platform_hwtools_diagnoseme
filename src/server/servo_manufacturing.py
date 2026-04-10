@@ -400,6 +400,12 @@ class ServoV41ManufacturingServicer(
             request.serial_number,
         )
 
+        logging.info(
+            "Forcing re-enumeration of Servo V4.1 Hub to clear previous states..."
+        )
+        if not await asyncio.to_thread(util.reset_servo_v4p1_hub):
+            logging.warning("Failed to reset Host Hub. Serial detection may fail.")
+
         serial_path = await asyncio.to_thread(
             util.discover_servo_v4p1_serial_path, request.serial_number
         )
