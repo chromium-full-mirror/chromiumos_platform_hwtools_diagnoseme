@@ -18,8 +18,8 @@ sys.modules["doloscmd.error"] = mock_doloscmd.error
 # pylint: disable=no-name-in-module
 # pylint: disable=import-error
 # pylint: disable=wrong-import-position
-from server import diagnoseme_dolos_pb2
 from server import dolos
+from server.generated import diagnoseme_dolos_pb2
 
 
 class TestDolosRpcService(unittest.TestCase):

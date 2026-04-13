@@ -35,11 +35,22 @@ steps:
   args:
     - buildx
     - build
-    - --output=./src/generated
+    - --output=./src/generated_tmp
     - --target=copytohost
     - -f=dockerfiles/utilities/Dockerfile.protoc
     - /workspace
   waitFor: ['src-prep']
+
+- name: 'ubuntu'
+  id: 'copy-python-protos'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    rm -rf src/server/generated
+    mkdir -p src/server/generated
+    cp -r src/generated_tmp/python/server/generated/* src/server/generated/
+  waitFor: ['proto-gen']
 
 - name: 'ubuntu'
   id: 'generate-build-info'
@@ -58,7 +69,7 @@ steps:
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/rpcserver/Dockerfile
-  waitFor: ['src-prep', 'proto-gen']
+  waitFor: ['copy-python-protos']
 
 - name: 'node:25'
   id: 'ui-lint'
@@ -67,7 +78,7 @@ steps:
   - '-c'
   - |
     mkdir -p src/ui/src/proto
-    cp src/generated/*.ts src/ui/src/proto/
+    cp -r src/generated_tmp/typescript/server/* src/ui/src/proto/
     cd src/ui
     npm install --legacy-peer-deps
     npm run lint
@@ -106,9 +117,8 @@ steps:
   - '-c'
   - |
     python3 -m pip install -r dockerfiles/rpcserver/requirements.txt --require-hashes --break-system-packages
-    cp src/generated/*.py src/server/
     pylint --load-plugins=pylint_protobuf --rcfile=/workspace/pylintrc /workspace/src/server
-  waitFor: ['src-prep', 'proto-gen']
+  waitFor: ['copy-python-protos']
 
 options:
   machineType: 'N1_HIGHCPU_32'

@@ -58,8 +58,7 @@ RUN apt-get update --no-install-recommends \
 WORKDIR /build/server
 
 COPY src/server/*.py .
-COPY src/generated/*.py .
-COPY src/generated/*.pyi .
+COPY src/server/generated/ ./generated/
 
 WORKDIR /build
 COPY src/server/pyproject.toml .

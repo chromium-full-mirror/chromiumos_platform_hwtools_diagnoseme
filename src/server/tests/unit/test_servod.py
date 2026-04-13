@@ -9,8 +9,8 @@ from unittest import mock
 # pylint: disable=no-member
 # pylint: disable=no-name-in-module
 # pylint: disable=import-error
-from server import diagnoseme_servod_pb2
-from server import servod
+from server import servod  # noqa: E402
+from server.generated import diagnoseme_servod_pb2  # noqa: E402
 
 
 class TestServodRpcService(unittest.TestCase):

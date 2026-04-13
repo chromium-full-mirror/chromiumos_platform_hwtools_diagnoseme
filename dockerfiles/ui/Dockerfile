@@ -22,9 +22,6 @@ RUN npm install --ignore-scripts --legacy-peer-deps
 # add app
 
 COPY src/ui/ /app/
-RUN rm -rf /app/src/proto
-WORKDIR /app/src/proto
-COPY src/generated/*.ts /app/src/proto/
 
 WORKDIR /app
 RUN ng build --output-path=dist --output-hashing=all --configuration=production

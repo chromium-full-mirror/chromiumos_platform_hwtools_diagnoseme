@@ -9,8 +9,8 @@ import os
 
 import grpc
 
-from server import diagnoseme_pb2
-from server import diagnoseme_pb2_grpc
+from server.generated import diagnoseme_pb2
+from server.generated import diagnoseme_pb2_grpc
 
 
 class DiagnoseMeServicer(diagnoseme_pb2_grpc.DiagnoseMeServiceServicer):

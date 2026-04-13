@@ -23,18 +23,27 @@ for FILE in "${RTK_FILES[@]}"; do
     fi
 done
 
+rm -rf ./src/generated_tmp
 rm -rf ./src/generated
 docker build -t envoy:latest -f dockerfiles/envoy/Dockerfile .
-docker build --output "./src/generated" --target copytohost -f dockerfiles/utilities/Dockerfile.protoc .
-docker build -t server:latest -f dockerfiles/rpcserver/Dockerfile .
+docker build --output "./src/generated_tmp" --target copytohost -f dockerfiles/utilities/Dockerfile.protoc .
+
+# Handle Python generated files
+rm -rf ./src/server/generated
+mkdir -p ./src/server/generated
+cp -r ./src/generated_tmp/python/server/generated/* ./src/server/generated/
+
+# Handle TypeScript generated files
 rm -rf ./src/ui/src/proto
 mkdir -p ./src/ui/src/proto
-cp ./src/generated/* ./src/ui/src/proto
+cp -r ./src/generated_tmp/typescript/server/* ./src/ui/src/proto/
+
+docker build -t server:latest -f dockerfiles/rpcserver/Dockerfile .
 
 mkdir -p ./src/ui/src/assets
 echo "{\"buildDate\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\", \"commitSha\": \"$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')\"}" > ./src/ui/src/assets/build_info.json
 
 docker build -t ui:latest -f dockerfiles/ui/Dockerfile .
-rm -rf ./src/generated
+rm -rf ./src/generated_tmp
 
 popd

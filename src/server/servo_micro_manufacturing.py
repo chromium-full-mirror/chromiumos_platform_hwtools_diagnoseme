@@ -20,14 +20,15 @@ import urllib.request
 from google.protobuf import empty_pb2
 import grpc
 
-# pylint: enable=no-name-in-module,import-error
-# pylint: disable=no-name-in-module,import-error,duplicate-code
-from server import diagnoseme_servod_pb2
 from server import serial_programmer
-from server import servo_manufacturing_pb2
-from server import servo_manufacturing_pb2_grpc
 from server import servo_programmer
 from server import util
+
+# pylint: enable=no-name-in-module,import-error
+# pylint: disable=no-name-in-module,import-error,duplicate-code
+from server.generated import diagnoseme_servod_pb2
+from server.generated import servo_manufacturing_pb2
+from server.generated import servo_manufacturing_pb2_grpc
 
 
 class ServoMicroManufacturingServicer(

@@ -6,8 +6,8 @@
 import unittest
 from unittest import mock
 
-from server import diagnoseme_pb2
 from server import diagnoseme_service
+from server.generated import diagnoseme_pb2
 
 
 class TestDiagnoseMeServicer(unittest.TestCase):

@@ -16,10 +16,11 @@ RUN npm install
 
 ENV PATH="$PATH:/workspace/node_modules/.bin"
 
-RUN mkdir -p generated
+RUN mkdir -p generated/python
+RUN mkdir -p generated/typescript
 RUN mkdir -p server
 COPY src/common/protos/*.proto server/
-RUN npx protoc --plugin=protoc-gen-ng=$(which protoc-gen-ng) --ng_out=./generated server/*.proto
+RUN npx protoc --plugin=protoc-gen-ng=$(which protoc-gen-ng) --ng_out=./generated/typescript server/*.proto
 
 ##############################################################################
 
@@ -29,14 +30,16 @@ WORKDIR /workspace
 COPY dockerfiles/utilities/requirements.txt .
 RUN python3 -m pip install -r requirements.txt --require-hashes --break-system-packages
 
-RUN mkdir -p generated
-RUN mkdir -p server
-COPY src/common/protos/*.proto server/
-RUN python3 -m grpc_tools.protoc -I. -I=$(python3 -c 'import site; print(site.getsitepackages()[0])')/grpc_tools/_proto/ --python_out=./generated --grpc_python_out=./generated server/*.proto
+RUN mkdir -p generated/python
+RUN mkdir -p generated/typescript
+RUN mkdir -p server/generated
+COPY src/common/protos/*.proto server/generated/
+RUN python3 -m grpc_tools.protoc -I. -I=$(python3 -c 'import site; print(site.getsitepackages()[0])')/grpc_tools/_proto/ --python_out=./generated/python --grpc_python_out=./generated/python server/generated/*.proto
+RUN touch ./generated/python/server/generated/__init__.py
 
 
 #######################################################################
 FROM scratch AS copytohost
 
-COPY --link --from=protogen_node /workspace/generated/server /
-COPY --link --from=protogen_python /workspace/generated/server /
+COPY --link --from=protogen_node /workspace/generated/typescript /typescript
+COPY --link --from=protogen_python /workspace/generated/python /python

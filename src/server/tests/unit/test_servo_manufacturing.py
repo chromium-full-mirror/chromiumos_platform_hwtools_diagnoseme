@@ -16,8 +16,8 @@ from server import genesys_hub_programmer
 from server import rtk_eth_programmer
 from server import serial_programmer
 from server import servo_manufacturing
-from server import servo_manufacturing_pb2
 from server import servo_programmer
+from server.generated import servo_manufacturing_pb2
 
 
 class TestServoV41ManufacturingServicer(unittest.TestCase):

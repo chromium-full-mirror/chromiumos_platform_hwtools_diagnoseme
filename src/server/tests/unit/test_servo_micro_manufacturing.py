@@ -14,9 +14,9 @@ from google.protobuf import empty_pb2
 # pylint: disable=import-error
 # pylint: disable=duplicate-code
 from server import serial_programmer
-from server import servo_manufacturing_pb2
 from server import servo_micro_manufacturing
 from server import servo_programmer
+from server.generated import servo_manufacturing_pb2
 
 
 class TestServoMicroManufacturingServicer(unittest.TestCase):

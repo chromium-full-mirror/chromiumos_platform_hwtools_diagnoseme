@@ -19,8 +19,8 @@ import docker
 from google.protobuf import empty_pb2
 
 # pylint: disable=no-name-in-module,import-error
-from server import diagnoseme_servod_pb2
-from server import diagnoseme_servod_pb2_grpc
+from server.generated import diagnoseme_servod_pb2
+from server.generated import diagnoseme_servod_pb2_grpc
 
 
 # pylint: enable=no-name-in-module,import-error

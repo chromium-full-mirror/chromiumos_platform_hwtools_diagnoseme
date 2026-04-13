@@ -23,15 +23,15 @@ import grpc
 # pylint: enable=no-name-in-module,import-error
 # pylint: disable=no-name-in-module,import-error
 from server import atmega_kb_programmer
-from server import diagnoseme_servod_pb2
 from server import genesys_hub_programmer
 from server import rtk_eth_programmer
 from server import serial_programmer
-from server import servo_manufacturing_pb2
-from server import servo_manufacturing_pb2_grpc
 from server import servo_programmer
 from server import util
 from server import v4p1_tester
+from server.generated import diagnoseme_servod_pb2
+from server.generated import servo_manufacturing_pb2
+from server.generated import servo_manufacturing_pb2_grpc
 from server.servo_console import ServoConsole
 from server.servo_console import ServoConsoleError
 

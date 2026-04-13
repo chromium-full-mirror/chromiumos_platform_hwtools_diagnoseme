@@ -17,8 +17,8 @@ from doloscmd.error import DolosConsoleError
 from google.cloud import storage
 
 # pylint: disable=no-name-in-module,import-error
-from server import diagnoseme_dolos_pb2
-from server import diagnoseme_dolos_pb2_grpc
+from server.generated import diagnoseme_dolos_pb2
+from server.generated import diagnoseme_dolos_pb2_grpc
 
 
 # pylint: enable=no-name-in-module,import-error
