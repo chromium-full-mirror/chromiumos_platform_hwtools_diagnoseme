@@ -22,6 +22,11 @@ class Config:
     GENESYS_HUB_PID = os.environ.get("GENESYS_HUB_PID", "0610")
     GENESYS_HUB_PID3 = os.environ.get("GENESYS_HUB_PID3", "0626")
 
+    CYPRESS_HUB_VID = os.environ.get("CYPRESS_HUB_VID", "04b4")
+    CYPRESS_HUB_PID = os.environ.get("CYPRESS_HUB_PID", "6502")
+    CYPRESS_HUB_PID2 = os.environ.get("CYPRESS_HUB_PID2", "6500")
+    CYPRESS_HUB_PID3 = os.environ.get("CYPRESS_HUB_PID3", "6504")
+
     # Paths
     BINFILES_DIR = os.environ.get("BINFILES_DIR", "/usr/local/server/binfiles")
     BINFILES_SHADOW_DIR = os.environ.get(

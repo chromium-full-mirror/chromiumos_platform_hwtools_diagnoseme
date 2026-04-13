@@ -41,9 +41,9 @@ class V4P1Tester:
     HH_PID3 = int(config.GENESYS_HUB_PID3, 16)
 
     # DH (DUT Hub): Cypress
-    DH_VID = 0x04B4
-    DH_PID = 0x6502
-    DH_PID3 = 0x6500
+    DH_VID = int(config.CYPRESS_HUB_VID, 16)
+    DH_PID = int(config.CYPRESS_HUB_PID, 16)
+    DH_PID3 = int(config.CYPRESS_HUB_PID2, 16)
 
     def __init__(
         self,

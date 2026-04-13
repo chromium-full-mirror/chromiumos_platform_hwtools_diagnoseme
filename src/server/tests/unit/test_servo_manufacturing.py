@@ -42,11 +42,11 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
             returncode=0,
         )
         # Mock reset_servo_v4p1_hub
-        self.mock_reset_hub = mock.patch("server.util.reset_servo_v4p1_hub").start()
+        self.mock_reset_hub = mock.patch("server.hal.hal.reset_servo_v4p1_hub").start()
         self.mock_reset_hub.return_value = True
         # Mock reset_servo_v4p1_dut_hub
         self.mock_reset_dut_hub = mock.patch(
-            "server.util.reset_servo_v4p1_dut_hub"
+            "server.hal.hal.reset_servo_v4p1_dut_hub"
         ).start()
         self.mock_reset_dut_hub.return_value = True
 

@@ -32,6 +32,7 @@ from server import v4p1_tester
 from server.generated import diagnoseme_servod_pb2
 from server.generated import servo_manufacturing_pb2
 from server.generated import servo_manufacturing_pb2_grpc
+from server.hal import hal
 from server.servo_console import ServoConsole
 from server.servo_console import ServoConsoleError
 
@@ -259,7 +260,7 @@ class ServoV41ManufacturingServicer(
             programmer.program()
 
             logging.info("Forcing re-enumeration of Servo V4.1 Hub...")
-            if not util.reset_servo_v4p1_hub():
+            if not hal.reset_servo_v4p1_hub():
                 logging.warning("Failed to force hub re-enumeration.")
 
             return servo_manufacturing_pb2.ProgramSerialResponse(
@@ -361,13 +362,13 @@ class ServoV41ManufacturingServicer(
                 )
                 if kb_programmer.program():
                     logging.info("Forcing re-enumeration of Servo V4.1 Host Hub...")
-                    if not util.reset_servo_v4p1_hub():
+                    if not hal.reset_servo_v4p1_hub():
                         logging.warning("Failed to reset Host Hub.")
 
                     time.sleep(5.0)
 
                     logging.info("Forcing re-enumeration of Servo V4.1 DUT Hub...")
-                    if not util.reset_servo_v4p1_dut_hub():
+                    if not hal.reset_servo_v4p1_dut_hub():
                         logging.warning("Failed to reset DUT Hub.")
 
                     return servo_manufacturing_pb2.ProgramAtmegaResponse(  # pylint: disable=no-member
@@ -403,7 +404,7 @@ class ServoV41ManufacturingServicer(
         logging.info(
             "Forcing re-enumeration of Servo V4.1 Hub to clear previous states..."
         )
-        if not await asyncio.to_thread(util.reset_servo_v4p1_hub):
+        if not await asyncio.to_thread(hal.reset_servo_v4p1_hub):
             logging.warning("Failed to reset Host Hub. Serial detection may fail.")
 
         serial_path = await asyncio.to_thread(
