@@ -25,6 +25,7 @@ from server import dolos
 from server import servo_manufacturing
 from server import servo_micro_manufacturing
 from server import servod
+from server.config import config
 
 # pylint: disable=no-name-in-module,import-error
 from server.generated import diagnoseme_dolos_pb2
@@ -51,7 +52,7 @@ from server.generated.servo_manufacturing_pb2_grpc import (
 # pylint: enable=no-name-in-module,import-error
 
 
-BACKEND_GRPC_SERVICE_PORT = 6002
+BACKEND_GRPC_SERVICE_PORT = config.BACKEND_GRPC_SERVICE_PORT
 
 
 def setup_logging(level):

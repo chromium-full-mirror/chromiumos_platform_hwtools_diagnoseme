@@ -16,6 +16,7 @@ from typing import Tuple
 import grpc
 
 from server import util
+from server.config import config
 
 # pylint: disable=no-name-in-module,import-error
 from server.generated import diagnoseme_servod_pb2
@@ -35,9 +36,9 @@ class V4P1Tester:
     """Class to handle manufacturing tests for Servo V4.1."""
 
     # HH (Host Hub): Genesys GL3590
-    HH_VID = 0x05E3
-    HH_PID = 0x0610
-    HH_PID3 = 0x0626
+    HH_VID = int(config.GENESYS_HUB_VID, 16)
+    HH_PID = int(config.GENESYS_HUB_PID, 16)
+    HH_PID3 = int(config.GENESYS_HUB_PID3, 16)
 
     # DH (DUT Hub): Cypress
     DH_VID = 0x04B4
@@ -533,8 +534,17 @@ class V4P1Tester:
             self._logger.error("Error accessing HID device: %s", e)
             return False
 
-    async def test_mac_address_prefix(self, prefix: str, timeout: float = 10.0) -> bool:
+    async def test_mac_address_prefix(
+        self,
+        prefix: str,
+        timeout: Optional[float] = None,
+    ) -> bool:
         """Verify that a network interface with the given MAC address prefix exists."""
+        if timeout is None:
+            timeout = (
+                config.DEFAULT_MAC_RETRY_ATTEMPTS * config.DEFAULT_MAC_RETRY_INTERVAL
+            )
+
         prefix = prefix.strip().lower().replace("-", ":")
         self._logger.info(
             "Verifying network interface with MAC prefix %s exists...", prefix
@@ -636,7 +646,9 @@ class V4P1Tester:
 
         # 1. lsusb check for Servo device
         lsusb = util.run_command(["lsusb"]).stdout
-        servo_present = "18d1:520d" in lsusb.lower()
+        servo_present = (
+            f"{config.SERVO_V4P1_VID}:{config.SERVO_V4P1_PID}".lower() in lsusb.lower()
+        )
         all_results.append(("lsusb Servo Presence", servo_present))
 
         # 2. Console tests

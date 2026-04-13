@@ -5,12 +5,14 @@
 
 import glob
 import logging
+import os
 from pathlib import Path
 import subprocess
 import time
 from typing import Optional
 
 from server import util
+from server.config import config
 
 
 class ServoProgrammerError(Exception):
@@ -64,12 +66,18 @@ class ServoProgrammer:
     def program(self) -> bool:
         # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         """Helper to perform actual programming."""
-        search_path = f"/usr/local/{self._board}/*.bin"
+        if self._board == "servo_v4p1":
+            fw_dir = config.SERVO_V4P1_FW_DIR
+        elif self._board == "servo_micro":
+            fw_dir = config.SERVO_MICRO_FW_DIR
+        else:
+            fw_dir = f"/usr/local/{self._board}"
+
+        search_path = os.path.join(fw_dir, "*.bin")
         bins = glob.glob(search_path)
         if not bins:
             raise ServoProgrammerError(
-                f"No firmware binaries found for board {self._board} in "
-                f"/usr/local/{self._board}/"
+                f"No firmware binaries found for board {self._board} in {fw_dir}"
             )
 
         self._bin = Path(bins[0])

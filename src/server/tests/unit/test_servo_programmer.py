@@ -25,6 +25,46 @@ class TestServoProgrammer(unittest.TestCase):
     @mock.patch("pathlib.Path.stat")
     @mock.patch("server.util.run_command")
     @mock.patch("time.sleep")
+    def test_program_success_servo_v4p1(
+        self, unused_mock_sleep, mock_run, mock_stat, mock_glob
+    ):
+        """Test successful programming flow for servo_v4p1 using config path."""
+        prog = servo_programmer.ServoProgrammer(
+            board="servo_v4p1", dfu_vid=0x1234, dfu_pid=0x5678
+        )
+        mock_glob.return_value = ["/path/to/v4p1/fw.bin"]
+        mock_stat.return_value = mock.Mock(st_size=1024)
+        mock_run.return_value = mock.Mock(stdout="Success", returncode=0)
+
+        with mock.patch("server.config.config.SERVO_V4P1_FW_DIR", "/path/to/v4p1"):
+            self.assertTrue(prog.program())
+
+        mock_glob.assert_called_with("/path/to/v4p1/*.bin")
+
+    @mock.patch("glob.glob")
+    @mock.patch("pathlib.Path.stat")
+    @mock.patch("server.util.run_command")
+    @mock.patch("time.sleep")
+    def test_program_success_servo_micro(
+        self, unused_mock_sleep, mock_run, mock_stat, mock_glob
+    ):
+        """Test successful programming flow for servo_micro using config path."""
+        prog = servo_programmer.ServoProgrammer(
+            board="servo_micro", dfu_vid=0x1234, dfu_pid=0x5678
+        )
+        mock_glob.return_value = ["/path/to/micro/fw.bin"]
+        mock_stat.return_value = mock.Mock(st_size=1024)
+        mock_run.return_value = mock.Mock(stdout="Success", returncode=0)
+
+        with mock.patch("server.config.config.SERVO_MICRO_FW_DIR", "/path/to/micro"):
+            self.assertTrue(prog.program())
+
+        mock_glob.assert_called_with("/path/to/micro/*.bin")
+
+    @mock.patch("glob.glob")
+    @mock.patch("pathlib.Path.stat")
+    @mock.patch("server.util.run_command")
+    @mock.patch("time.sleep")
     def test_program_success(self, mock_sleep, mock_run, mock_stat, mock_glob):
         """Test successful programming flow."""
         mock_glob.return_value = ["/usr/local/test_board/fw.bin"]

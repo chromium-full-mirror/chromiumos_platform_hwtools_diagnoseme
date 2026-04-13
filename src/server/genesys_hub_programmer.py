@@ -10,6 +10,7 @@ import shutil
 import subprocess
 
 from server import util
+from server.config import config
 
 
 class GenesysHubProgrammerError(Exception):
@@ -34,7 +35,9 @@ class GenesysHubProgrammer:
     FW_VERSION = "64.18"
 
     # This is the file to program.
-    FW_BIN = f"/usr/local/genesys/GenesysLogic_GL3590_{FW_VERSION}.cab"
+    FW_BIN = os.path.join(
+        config.GENESYS_FW_DIR, f"GenesysLogic_GL3590_{FW_VERSION}.cab"
+    )
 
     READ_CMD = [PROGRAMMER_BIN, "get-devices", "--plugins", "genesys"]
 

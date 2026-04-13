@@ -15,6 +15,8 @@ from typing import List
 from typing import Optional
 from typing import Tuple
 
+from server.config import config
+
 
 BIN_DIR = "binfiles"
 
@@ -55,7 +57,10 @@ def reset_servo_v4p1_hub() -> bool:
                 with open(pid_path, "r", encoding="utf-8") as f:
                     pid = f.read().strip()
 
-                if vid == "18d1" and pid == "520d":
+                if (
+                    vid == config.SERVO_V4P1_VID.lower()
+                    and pid == config.SERVO_V4P1_PID.lower()
+                ):
                     # Found Servo V4.1. Get Parent.
                     full_path = os.path.realpath(os.path.join(base, dev))
                     parent_dir = os.path.dirname(full_path)
@@ -155,9 +160,9 @@ def find_binfile(binfile: str) -> Optional[Path]:
 
     search_paths = [
         get_bindir(),
-        Path("/usr/local/server/binfiles"),
-        Path("/usr/local/servo_v4p1"),
-        Path("/usr/local/genesys"),
+        Path(config.BINFILES_DIR),
+        Path(config.SERVO_V4P1_FW_DIR),
+        Path(config.GENESYS_FW_DIR),
     ]
     for search_path in search_paths:
         path = search_path / binfile

@@ -18,6 +18,8 @@ import docker
 # pylint: enable=import-error
 from google.protobuf import empty_pb2
 
+from server.config import config
+
 # pylint: disable=no-name-in-module,import-error
 from server.generated import diagnoseme_servod_pb2
 from server.generated import diagnoseme_servod_pb2_grpc
@@ -129,7 +131,7 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
 
         volumes = ["/dev:/dev"]
         logs_volume = f"{name}_log"
-        volumes += [f"{logs_volume}:/var/log/servod_9999/"]
+        volumes += [f"{logs_volume}:/var/log/servod_{config.SERVOD_GRPC_PORT}/"]
 
         nofile_limit = docker.types.Ulimit(name="nofile", soft=65535, hard=65535)
         command = ["bash", "/start_servod_dev.sh", servod_params]
@@ -143,14 +145,14 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
             cap_add=["NET_ADMIN"],
             detach=True,
             volumes=volumes,
-            ports={"9999": "9999"},
+            ports={str(config.SERVOD_GRPC_PORT): str(config.SERVOD_GRPC_PORT)},
             command=["bash", "/start_servod_dev.sh", servod_params],
             ulimits=[nofile_limit],
         )
 
     def _construct_servod_params(self, request: Any) -> str:
         """Construct the servod command parameters from the request."""
-        params = "--port 9999 "
+        params = f"--port {config.SERVOD_GRPC_PORT} "
         if request.board:
             params += f"--board {request.board} "
         if request.model:
@@ -167,7 +169,8 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
         while True:
             try:
                 (error_code, _) = self.cont.exec_run(
-                    "servodtool instance wait-for-active --timeout 1 -p 9999"
+                    "servodtool instance wait-for-active --timeout 1 "
+                    f"-p {config.SERVOD_GRPC_PORT}"
                 )
             except docker.errors.APIError as e:
                 response.console_output += str(e)
