@@ -1,0 +1,175 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+####################################################################
+FROM debian:trixie AS hdctools-builder
+
+RUN apt-get update --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates
+
+WORKDIR /
+RUN git clone --filter=blob:none --no-checkout --depth 1 --sparse https://chromium.googlesource.com/chromiumos/third_party/hdctools
+WORKDIR /hdctools
+RUN git sparse-checkout init --cone
+RUN git sparse-checkout set servo/firmware/usbkm/KeyboardSerial/
+RUN git checkout
+
+######################################################################
+FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:alpine AS rtk-fetcher
+WORKDIR /fetch
+# Copy files from dist if they exist. Kaniko and Docker will not fail if the
+# files are missing because of the wildcard.
+COPY dist/rtunicpg.tar.bz2* dist/r8152-2.21.4.tar.bz2* ./
+RUN if [ ! -f rtunicpg.tar.bz2 ]; then \
+        gsutil cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar(24).bz2" rtunicpg.tar.bz2; \
+    fi && \
+    if [ ! -f r8152-2.21.4.tar.bz2 ]; then \
+        gsutil cp gs://rtk-tools/r8152-2.21.4.tar.bz2 .; \
+    fi
+
+####################################################################
+FROM python:3-trixie AS dolostools
+
+RUN apt-get update --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
+    git \
+    apt-transport-https
+
+WORKDIR /
+RUN git clone https://chromium.googlesource.com/chromiumos/platform/dolos
+RUN python3 -m pip install -r /dolos/tools/requirements.txt --require-hashes --break-system-packages
+
+WORKDIR /dolos/tools/doloscmd
+RUN python3 setup.py bdist_wheel
+
+WORKDIR /dolos/tools/dolosbattery
+RUN python3 setup.py bdist_wheel
+
+######################################################################
+FROM debian:trixie AS fwupd-builder
+
+RUN apt update
+RUN apt install -y xz-utils wget build-essential dh-make devscripts
+RUN wget https://github.com/fwupd/fwupd/releases/download/2.0.19/fwupd-2.0.19.tar.xz
+RUN tar xvf fwupd-2.0.19.tar.xz
+
+WORKDIR fwupd-2.0.19
+
+RUN python3 ./contrib/ci/fwupd_setup_helpers.py install-dependencies -y --os debian -y
+ENV DEBEMAIL="your-email@example.com"
+ENV DEBFULLNAME="Your Name"
+ENV DEB_BUILD_OPTIONS=nostrip=no
+
+RUN dh_make -s -n -f "../fwupd-2.0.19.tar.xz" -y
+
+RUN printf "\n\noverride_dh_auto_configure:\n\tdh_auto_configure -- \
+    -Dauto_features=enabled \
+    -Dbluez=disabled \
+    -Dcbor=disabled \
+    -Ddocs=disabled \
+    -Dintrospection=disabled \
+    -Dlibarchive=disabled \
+    -Dlibdrm=disabled \
+    -Dlibmnl=disabled \
+    -Dpassim=disabled \
+    -Dplugin_flashrom=disabled \
+    -Dplugin_modem_manager=disabled \
+    -Dpolkit=disabled \
+    -Dprotobuf=disabled \
+    -Dsystemd=disabled \
+    -Dtests=false \
+    -Dumockdev_tests=disabled \
+    -Dvalgrind=disabled \
+    -Dvalgrind=disabled \
+    -Dbash_completion=false \
+    -Dblkid=disabled \
+    -Dbuild=standalone \
+    -Dfirmware-packager=false \
+    -Dfish_completion=false \
+    -Dgnutls=disabled \
+    -Dhsi=disabled \
+    -Dlvfs=disabled \
+    -Dman=false \
+    -Dqubes=false \
+    -Dreadline=disabled \
+    -Dplugin_uefi_capsule_splash=false" >> debian/rules
+
+RUN printf "\noverride_dh_shlibdeps:\n\t-dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info\n" >> debian/rules
+
+RUN debuild -b -j$(nproc) -us -uc
+
+######################################################################
+FROM debian:trixie AS rtk-tools-builder
+
+RUN apt-get update && apt-get install -y bzip2
+WORKDIR /build
+COPY --from=rtk-fetcher /fetch/rtunicpg.tar.bz2 .
+RUN tar -xvf rtunicpg.tar.bz2
+
+#####################################################################
+FROM python:3-trixie
+
+RUN apt-get update && apt-get install -yq \
+    python3-docker \
+    dfu-util \
+    dfu-programmer \
+    usb.ids \
+    libcurl3t64-gnutls \
+    libxmlb2 \
+    libjcat1 \
+    ethtool \
+    usbutils
+
+COPY dockerfiles/rpcserver/requirements.txt .
+RUN python3 -m pip install -r requirements.txt --require-hashes --break-system-packages
+
+RUN mkdir /var/log/rpcserver
+RUN mkdir /usr/local/tmp
+RUN mkdir -p /usr/local/server/binfiles
+RUN mkdir -p /usr/local/server/binfiles_shadow
+
+COPY --from=rtk-tools-builder /build/*/rtunicpg-x86_64 /usr/local/bin/rtunicpg
+COPY --from=rtk-tools-builder /build/*/EF8153B* /usr/local/server/binfiles_shadow/
+COPY --from=rtk-tools-builder /build/*/EE8153B* /usr/local/server/binfiles_shadow/
+
+WORKDIR /usr/local/server
+
+WORKDIR /install_tmp
+COPY --from=dolostools /dolos/tools/doloscmd/dist .
+COPY --from=dolostools /dolos/tools/dolosbattery/dist .
+COPY --from=dolostools /dolos/tools/requirements.txt .
+COPY --from=hdctools-builder /hdctools/servo/firmware/usbkm/KeyboardSerial/Keyboard.hex /usr/local/server/binfiles_shadow/
+RUN python3 -m pip install *.whl --no-deps --no-index --break-system-packages
+RUN python3 -m pip install -r requirements.txt --require-hashes --break-system-packages
+
+COPY --link --from=fwupd-builder /fwupd_*_amd64.deb .
+RUN apt install ./fwupd_*_amd64.deb
+
+RUN rm -rf /install_tmp
+
+RUN mkdir /usr/local/genesys/
+RUN wget https://storage.googleapis.com/fwupd-cache/GenesysLogic_Google_Servo_GL3590_64.18.cab \
+    -O /usr/local/genesys/GenesysLogic_GL3590_64.18.cab
+WORKDIR /usr/local/servo_v4p1/
+RUN wget https://storage.googleapis.com/chromeos-localmirror/distfiles/servo_v4p1_v2.0.29298-4d4a4e980.tar.xz \
+    -O /usr/local/servo_v4p1/servo_v4p1_v2.0.29298-4d4a4e980.tar.xz
+RUN tar xvf *
+RUN rm *.tar.xz
+
+RUN mkdir /usr/local/servo_micro/
+WORKDIR /usr/local/servo_micro/
+RUN wget https://storage.googleapis.com/chromeos-localmirror/distfiles/servo_micro_v2.4.82-dbed085877.tar.xz \
+    -O /usr/local/servo_micro/servo_micro_v2.4.82-dbed085877.tar.xz
+RUN tar xvf *
+RUN rm *.tar.xz
+
+#RUN python3 -m unittest discover -s server
+
+RUN chmod og+w /var/log
+
+ENV PYTHONPATH=/usr/lib/python3/dist-packages/
+
+EXPOSE 6002

@@ -38,6 +38,7 @@ rm -rf ./src/ui/src/proto
 mkdir -p ./src/ui/src/proto
 cp -r ./src/generated_tmp/typescript/server/* ./src/ui/src/proto/
 
+docker build -t server-base:latest -f dockerfiles/rpcserver/Dockerfile.base .
 docker build -t server:latest -f dockerfiles/rpcserver/Dockerfile .
 
 mkdir -p ./src/ui/src/assets

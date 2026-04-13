@@ -63,13 +63,23 @@ steps:
   waitFor: ['src-prep']
 
 - name: 'gcr.io/kaniko-project/executor:latest'
+  id: 'server-base'
+  args:
+  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server-base:$COMMIT_SHA
+  - --cache=true
+  - --cache-ttl=96h
+  - -f=/workspace/dockerfiles/rpcserver/Dockerfile.base
+  waitFor: ['src-prep']
+
+- name: 'gcr.io/kaniko-project/executor:latest'
   id: 'server'
   args:
   - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server:$COMMIT_SHA
+  - --build-arg=BASE_IMAGE=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server-base:$COMMIT_SHA
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/rpcserver/Dockerfile
-  waitFor: ['copy-python-protos']
+  waitFor: ['copy-python-protos', 'server-base']
 
 - name: 'node:25'
   id: 'ui-lint'
