@@ -47,7 +47,7 @@ RUN printf "PACKAGE_NAME=\"r8152\"\nPACKAGE_VERSION=\"2.21.4\"\nBUILT_MODULE_NAM
 
 # Control file
 RUN printf "Package: diagnoseme\n\
-Version: 1.0.9\n\
+Version: 1.0.11\n\
 Architecture: amd64\n\
 Maintainer: DiagnoseMe Team\n\
 Depends: docker.io, docker-compose, dkms, build-essential, linux-headers-amd64, libcurl4, libxmlb2, libjcat1, ethtool, usbutils\n\

@@ -1,4 +1,4 @@
-# Copyright 2024 The ChromiumOS Authors
+# Copyright 2026 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -129,6 +129,33 @@ steps:
     python3 -m pip install -r dockerfiles/rpcserver/requirements.txt --require-hashes --break-system-packages
     pylint --load-plugins=pylint_protobuf --rcfile=/workspace/pylintrc /workspace/src/server
   waitFor: ['copy-python-protos']
+
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  id: 'fetch-dist-blobs'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    mkdir -p dist
+    gsutil cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar.bz2" "dist/rtunicpg.tar.bz2" || true
+    gsutil cp "gs://rtk-tools/r8152-2.21.4.tar.bz2" "dist/r8152.tar.bz2" || true
+  waitFor: ['src-prep']
+
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'build-deb'
+  args: ['build', '-t', 'deb-builder', '-f', 'development_environment/deb_builder/Dockerfile', '.']
+  waitFor: ['fetch-dist-blobs']
+
+- name: 'gcr.io/cloud-builders/docker'
+  id: 'extract-deb'
+  entrypoint: 'bash'
+  args:
+    - '-c'
+    - |
+      docker create --name temp-container deb-builder
+      docker cp temp-container:/diagnoseme.deb .
+      docker rm temp-container
+  waitFor: ['build-deb']
 
 options:
   machineType: 'N1_HIGHCPU_32'
