@@ -15,16 +15,16 @@ steps:
     mkdir /workspace
     cd /workspace
     git clone $_REPO_URL .
-    git fetch $_REPO_URL $COMMIT_SHA
+    git fetch $_REPO_URL $_COMMIT_SHA
     git checkout -b buildbranch FETCH_HEAD
-    git branch --set-upstream-to=origin/$BRANCH_NAME buildbranch
+    git branch --set-upstream-to=origin/$_BRANCH_NAME buildbranch
     git config --global user.email "someone@example.com"
     git rebase
 
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'envoy'
   args:
-  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/envoy:$COMMIT_SHA
+  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/envoy:$_COMMIT_SHA
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/envoy/Dockerfile
@@ -59,13 +59,13 @@ steps:
   - '-c'
   - |
     mkdir -p /workspace/src/ui/src/assets
-    echo "{\"buildDate\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\", \"commitSha\": \"$COMMIT_SHA\"}" > /workspace/src/ui/src/assets/build_info.json
+    echo "{\"buildDate\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\", \"commitSha\": \"$_COMMIT_SHA\"}" > /workspace/src/ui/src/assets/build_info.json
   waitFor: ['src-prep']
 
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'server-base'
   args:
-  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server-base:$COMMIT_SHA
+  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server-base:$_COMMIT_SHA
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/rpcserver/Dockerfile.base
@@ -74,8 +74,8 @@ steps:
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'server'
   args:
-  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server:$COMMIT_SHA
-  - --build-arg=BASE_IMAGE=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server-base:$COMMIT_SHA
+  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server:$_COMMIT_SHA
+  - --build-arg=BASE_IMAGE=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server-base:$_COMMIT_SHA
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/rpcserver/Dockerfile
@@ -97,7 +97,7 @@ steps:
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'ui'
   args:
-  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/ui:$COMMIT_SHA
+  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/ui:$_COMMIT_SHA
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/ui/Dockerfile
@@ -186,7 +186,7 @@ steps:
   args:
     - '-c'
     - |
-      gsutil cp test_server/custom-debian-preseed.iso gs://diagnoseme_iso/custom-debian-preseed-${COMMIT_SHA}.iso
+      gsutil cp test_server/custom-debian-preseed.iso gs://diagnoseme_iso/custom-debian-preseed-${_COMMIT_SHA}.iso
       gsutil cp test_server/custom-debian-preseed.iso gs://diagnoseme_iso/custom-debian-preseed-latest.iso
   waitFor: ['build-iso']
 
@@ -194,3 +194,7 @@ options:
   machineType: 'N1_HIGHCPU_32'
 
 timeout: 3600s
+
+substitutions:
+  _REPO_URL: "https://chromium.googlesource.com/chromiumos/platform/hwtools/diagnoseme"
+  _BRANCH_NAME: "main"
