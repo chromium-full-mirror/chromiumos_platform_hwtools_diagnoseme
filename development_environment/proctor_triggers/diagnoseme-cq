@@ -1,0 +1,27 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+trigger {
+  cloud_project_number: 488603086791
+  name: "diagnoseme-cq"
+  gerrit_trigger {
+    host: "chromium"
+    project: "chromiumos/platform/hwtools/diagnoseme"
+    branch: "main"
+  }
+  build_configs {
+    file_source {
+      path: "dockerfiles/cloudbuild_cq.yaml"
+    }
+  }
+  result_config {
+    code_review_config {
+      notify_condition {
+        condition: ALWAYS
+      }
+      update_status: true
+      status_name: "Code-Review"
+    }
+  }
+}
