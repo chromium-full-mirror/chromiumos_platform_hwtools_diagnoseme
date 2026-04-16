@@ -177,7 +177,3 @@ options:
   machineType: 'E2_HIGHCPU_32'
 
 timeout: 3600s
-
-substitutions:
-  _REPO_URL: "https://chromium.googlesource.com/chromiumos/platform/hwtools/diagnoseme"
-  _BRANCH_NAME: "main"
