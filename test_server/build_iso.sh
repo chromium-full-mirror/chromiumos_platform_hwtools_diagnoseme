@@ -6,15 +6,15 @@ set -e
 
 # Configuration
 ISO_NAME="debian-13-amd64-netinst.iso"
-# Pointing to the stable release current directory for Debian 13 (Trixie)
-ISO_URL="https://cdimage.debian.org/cdimage/release/13.3.0/amd64/iso-cd/debian-13.3.0-amd64-netinst.iso"
+# Pointing to a pinned, verified Debian 13 (Trixie) ISO hosted in our GCS bucket
+ISO_GCS_PATH="gs://chromeos-hw-tools-assets/debian-13-trixie-verified.iso"
 BUILD_DIR="iso_build"
 NEW_ISO="custom-debian-preseed.iso"
 
 # 1. Download ISO
-echo "Downloading Debian testing netinst ISO..."
+echo "Downloading pinned Debian testing netinst ISO from GCS..."
 if [ ! -f "$ISO_NAME" ]; then
-    wget -O "$ISO_NAME" "$ISO_URL"
+    gsutil cp "$ISO_GCS_PATH" "$ISO_NAME"
 fi
 
 # 2. Extract ISO
