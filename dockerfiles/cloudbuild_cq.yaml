@@ -4,23 +4,6 @@
 
 steps:
 
-- name: 'gcr.io/cloud-builders/git'
-  id: 'src-prep'
-  entrypoint: 'bash'
-  args:
-  - '-c'
-  - |
-    set -x
-    rm -rf /workspace
-    mkdir /workspace
-    cd /workspace
-    git clone $_REPO_URL .
-    git fetch $_REPO_URL $COMMIT_SHA
-    git checkout -b buildbranch FETCH_HEAD
-    git branch --set-upstream-to=origin/$BRANCH_NAME buildbranch
-    git config --global user.email "someone@example.com"
-    git rebase
-
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'envoy'
   args:
@@ -28,7 +11,7 @@ steps:
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/envoy/Dockerfile
-  waitFor: ['src-prep']
+  waitFor: ['-']
 
 - name: 'gcr.io/cloud-builders/docker'
   id: 'proto-gen'
@@ -39,7 +22,7 @@ steps:
     - --target=copytohost
     - -f=dockerfiles/utilities/Dockerfile.protoc
     - /workspace
-  waitFor: ['src-prep']
+  waitFor: ['-']
 
 - name: 'ubuntu'
   id: 'copy-python-protos'
@@ -60,7 +43,7 @@ steps:
   - |
     mkdir -p /workspace/src/ui/src/assets
     echo "{\"buildDate\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\", \"commitSha\": \"$COMMIT_SHA\"}" > /workspace/src/ui/src/assets/build_info.json
-  waitFor: ['src-prep']
+  waitFor: ['-']
 
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'server-base'
@@ -69,7 +52,7 @@ steps:
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/rpcserver/Dockerfile.base
-  waitFor: ['src-prep']
+  waitFor: ['-']
 
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'server'
@@ -92,7 +75,7 @@ steps:
     cd src/ui
     npm install --legacy-peer-deps
     npm run lint
-  waitFor: ['src-prep', 'proto-gen']
+  waitFor: ['proto-gen']
 
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'ui'
@@ -110,7 +93,7 @@ steps:
     - --check
     - --config=/workspace/pyproject.toml
     - /workspace
-  waitFor: ['src-prep']
+  waitFor: ['-']
 
 - name: 'xcgd/isort'
   id: 'test-isort-formatting'
@@ -118,7 +101,7 @@ steps:
   args:
     - --check
     - /workspace
-  waitFor: ['src-prep']
+  waitFor: ['-']
 
 - name: 'python:3.13'
   id: 'test-pylint'
@@ -139,7 +122,7 @@ steps:
     mkdir -p dist
     gsutil cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar.bz2" "dist/rtunicpg.tar.bz2" || true
     gsutil cp "gs://rtk-tools/r8152-2.21.4.tar.bz2" "dist/r8152.tar.bz2" || true
-  waitFor: ['src-prep']
+  waitFor: ['-']
 
 - name: 'gcr.io/cloud-builders/docker'
   id: 'build-deb'
@@ -158,6 +141,6 @@ steps:
   waitFor: ['build-deb']
 
 options:
-  machineType: 'N1_HIGHCPU_32'
+  machineType: 'E2_HIGHCPU_32'
 
 timeout: 3600s
