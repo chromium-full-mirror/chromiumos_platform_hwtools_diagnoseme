@@ -45,9 +45,10 @@ RUN mkdir -p usr/src/r8152-2.21.4
 RUN cp /tmp/r8152-2.21.4/Makefile /tmp/r8152-2.21.4/r8152.c /tmp/r8152-2.21.4/compatibility.h usr/src/r8152-2.21.4/
 RUN printf "PACKAGE_NAME=\"r8152\"\nPACKAGE_VERSION=\"2.21.4\"\nBUILT_MODULE_NAME[0]=\"r8152\"\nDEST_MODULE_LOCATION[0]=\"/updates\"\nAUTOINSTALL=\"yes\"" > usr/src/r8152-2.21.4/dkms.conf
 
+ARG DEB_VERSION="1.0.0"
 # Control file
 RUN printf "Package: diagnoseme\n\
-Version: 1.0.12\n\
+Version: ${DEB_VERSION}\n\
 Architecture: amd64\n\
 Maintainer: DiagnoseMe Team\n\
 Depends: docker.io, docker-compose, dkms, build-essential, linux-headers-amd64, libcurl4, libxmlb2, libjcat1, ethtool, usbutils\n\

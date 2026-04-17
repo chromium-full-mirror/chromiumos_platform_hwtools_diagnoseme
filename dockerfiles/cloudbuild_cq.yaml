@@ -126,7 +126,11 @@ steps:
 
 - name: 'gcr.io/cloud-builders/docker'
   id: 'build-deb'
-  args: ['build', '-t', 'deb-builder', '-f', 'development_environment/deb_builder/Dockerfile', '.']
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    docker build --build-arg DEB_VERSION="1.0.$(date +%s)" -t deb-builder -f development_environment/deb_builder/Dockerfile .
   waitFor: ['fetch-dist-blobs']
 
 - name: 'gcr.io/cloud-builders/docker'
