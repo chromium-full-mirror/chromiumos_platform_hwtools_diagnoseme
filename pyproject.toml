@@ -8,5 +8,8 @@ extend-exclude = '''
 # in the root of the project.
 (
   .*/servo/data/.*
+  | .*_pb2.*\.py
+  | .*/generated_tmp/.*
+  | .*/src/server/generated/.*
 )
 '''
