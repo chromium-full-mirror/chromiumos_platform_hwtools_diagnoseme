@@ -152,13 +152,13 @@ steps:
         --source=diagnoseme.deb
   waitFor: ['extract-deb']
 
-- name: 'debian:trixie'
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
   id: 'build-iso'
   entrypoint: 'bash'
   args:
   - '-c'
   - |
-    apt-get update && apt-get install -y wget libarchive-tools xorriso isolinux syslinux-common
+    apt-get update && apt-get install -y libarchive-tools xorriso isolinux syslinux-common
     cd test_server
     ./build_iso.sh
   waitFor: ['-']
