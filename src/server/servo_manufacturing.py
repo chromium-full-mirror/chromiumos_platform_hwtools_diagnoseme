@@ -450,7 +450,7 @@ class ServoV41ManufacturingServicer(
             # Start servod in recovery mode
             start_request = (
                 diagnoseme_servod_pb2.StartServodRequest(  # pylint: disable=no-member
-                    board=self.BOARD, serial=request.serial_number, recovery=True
+                    serial=request.serial_number, recovery=True, noboard=True
                 )
             )
             start_resp = await asyncio.to_thread(

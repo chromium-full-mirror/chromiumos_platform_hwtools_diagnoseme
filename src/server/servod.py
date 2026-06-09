@@ -159,6 +159,8 @@ class ServodRpcService(diagnoseme_servod_pb2_grpc.ServodRpcServiceServicer):
             params += f"--model {request.model} "
         if request.recovery:
             params += "--recovery "
+        if request.noboard:
+            params += "--noboard "
         return params
 
     def _wait_for_servod(self, response: Any) -> bool:

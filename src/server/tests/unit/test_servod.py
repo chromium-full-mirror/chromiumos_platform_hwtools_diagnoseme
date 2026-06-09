@@ -39,6 +39,31 @@ class TestServodRpcService(unittest.TestCase):
         self.assertTrue(response.started)
         mock_client.containers.run.assert_called()
 
+    @mock.patch("docker.from_env")
+    def test_start_servod_recovery_noboard(self, mock_docker_env):
+        """Test start_servod with recovery and noboard parameters."""
+        mock_client = mock_docker_env.return_value
+        mock_container = mock.MagicMock()
+        mock_container.exec_run.return_value = (0, b"log output")
+        mock_container.logs.return_value = b"servod logs"
+        mock_client.containers.run.return_value = mock_container
+
+        # Mock _get_image to avoid network calls
+        with mock.patch.object(
+            self.servicer, "_get_image", return_value="servod:latest"
+        ):
+            request = diagnoseme_servod_pb2.StartServodRequest(
+                serial="12345", recovery=True, noboard=True
+            )
+            response = self.servicer.start_servod(request, self.context)
+
+        self.assertTrue(response.started)
+        mock_client.containers.run.assert_called()
+        command_arg = mock_client.containers.run.call_args.kwargs["command"]
+        self.assertIn("--recovery", command_arg[2])
+        self.assertIn("--noboard", command_arg[2])
+        self.assertNotIn("--board", command_arg[2])
+
     def test_run_dut_control_success(self):
         """Test run_dut_control success."""
         mock_container = mock.MagicMock()

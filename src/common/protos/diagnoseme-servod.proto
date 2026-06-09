@@ -16,6 +16,7 @@ message StartServodRequest {
   optional string model = 2;
   optional string serial = 3;
   bool recovery = 4;
+  bool noboard = 5;
 }
 
 message StartServodResponse {
