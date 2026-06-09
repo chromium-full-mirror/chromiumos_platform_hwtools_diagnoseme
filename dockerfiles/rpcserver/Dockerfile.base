@@ -24,10 +24,10 @@ WORKDIR /fetch
 # files are missing because of the wildcard.
 COPY dist/rtunicpg.tar.bz2* dist/r8152-2.21.4.tar.bz2* ./
 RUN if [ ! -f rtunicpg.tar.bz2 ]; then \
-        gsutil cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar.bz2" rtunicpg.tar.bz2; \
+        gcloud storage cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar.bz2" rtunicpg.tar.bz2; \
     fi && \
     if [ ! -f r8152-2.21.4.tar.bz2 ]; then \
-        gsutil cp gs://rtk-tools/r8152-2.21.4.tar.bz2 .; \
+        gcloud storage cp gs://rtk-tools/r8152-2.21.4.tar.bz2 .; \
     fi
 
 ####################################################################

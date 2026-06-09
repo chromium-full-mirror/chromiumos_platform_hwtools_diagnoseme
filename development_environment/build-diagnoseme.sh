@@ -20,14 +20,14 @@ for FILE in "${RTK_FILES[@]}"; do
     if [ ! -f "${DIST_DIR}/${FILE}" ]; then
         if [ "$FILE" == "rtunicpg.tar.bz2" ]; then
             echo "Fetching rtunicpg-2.0.25.3.tar.bz2 from gs://rtk-tools/..."
-            if ! gsutil cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar.bz2" "${DIST_DIR}/${FILE}"; then
+            if ! gcloud storage cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar.bz2" "${DIST_DIR}/${FILE}"; then
                 echo "WARNING: Failed to fetch rtunicpg-2.0.25.3.tar.bz2 from gs://rtk-tools/."
                 echo "Googler, speak to the owners of this repo on how to get access to the Realtek programming tools."
                 echo "Non Googlers, you need to get the software from Realtek for programming ethernet chips and copy that file to the local directory as rtunicpg.tar.bz2"
             fi
         else
             echo "Fetching ${FILE} from gs://rtk-tools/..."
-            gsutil cp "gs://rtk-tools/${FILE}" "${DIST_DIR}/${FILE}" || true
+            gcloud storage cp "gs://rtk-tools/${FILE}" "${DIST_DIR}/${FILE}" || true
         fi
     fi
 done

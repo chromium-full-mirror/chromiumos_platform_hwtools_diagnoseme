@@ -120,8 +120,8 @@ steps:
   - '-c'
   - |
     mkdir -p dist
-    gsutil cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar.bz2" "dist/rtunicpg.tar.bz2" || true
-    gsutil cp "gs://rtk-tools/r8152-2.21.4.tar.bz2" "dist/r8152.tar.bz2" || true
+    gcloud storage cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar.bz2" "dist/rtunicpg.tar.bz2" || true
+    gcloud storage cp "gs://rtk-tools/r8152-2.21.4.tar.bz2" "dist/r8152.tar.bz2" || true
   waitFor: ['-']
 
 - name: 'gcr.io/cloud-builders/docker'
@@ -173,8 +173,8 @@ steps:
   args:
     - '-c'
     - |
-      gsutil cp test_server/custom-debian-preseed.iso gs://diagnoseme_iso/custom-debian-preseed-${_COMMIT_SHA}.iso
-      gsutil cp test_server/custom-debian-preseed.iso gs://diagnoseme_iso/custom-debian-preseed-latest.iso
+      gcloud storage cp test_server/custom-debian-preseed.iso gs://diagnoseme_iso/custom-debian-preseed-${_COMMIT_SHA}.iso
+      gcloud storage cp test_server/custom-debian-preseed.iso gs://diagnoseme_iso/custom-debian-preseed-latest.iso
   waitFor: ['build-iso']
 
 options:

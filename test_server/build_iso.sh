@@ -14,7 +14,7 @@ NEW_ISO="custom-debian-preseed.iso"
 # 1. Download ISO
 echo "Downloading pinned Debian testing netinst ISO from GCS..."
 if [ ! -f "$ISO_NAME" ]; then
-    gsutil cp "$ISO_GCS_PATH" "$ISO_NAME"
+    gcloud storage cp "$ISO_GCS_PATH" "$ISO_NAME"
 fi
 
 # 2. Extract ISO
