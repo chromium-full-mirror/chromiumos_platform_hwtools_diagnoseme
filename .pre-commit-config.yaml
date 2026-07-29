@@ -50,7 +50,7 @@ repos:
     hooks:
     - id: ui-lint
       name: ui-lint
-      entry: node:25
+      entry: node:24
       language: docker_image
       args: ["bash", "-c", "cd src/ui && npm install --legacy-peer-deps && npm run lint"]
       files: ^src/ui/

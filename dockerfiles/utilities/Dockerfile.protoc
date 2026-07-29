@@ -4,7 +4,7 @@
 # found in the LICENSE file.
 
 ##############################################################################
-FROM node:25 AS protogen_node
+FROM node:24 AS protogen_node
 
 RUN apt-get update && apt-get install --no-install-recommends -yq \
     npm

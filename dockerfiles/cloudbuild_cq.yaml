@@ -64,7 +64,7 @@ steps:
   - -f=/workspace/dockerfiles/rpcserver/Dockerfile
   waitFor: ['copy-python-protos', 'server-base']
 
-- name: 'node:25'
+- name: 'node:24'
   id: 'ui-lint'
   entrypoint: 'bash'
   args:
