@@ -91,6 +91,18 @@ class V4P1Tester:
         try:
             output = console.issue_cmd(command)
             self._logger.info("Console output for '%s' received:\n%s", command, output)
+            if command == "macaddr":
+                if not self._mac_address or not regex:
+                    self._logger.error(
+                        "Console test '%s' failed: MAC address is empty or unsupplied",
+                        name,
+                    )
+                    return False
+                if "uninitialized" in output.lower() or "not set" in output.lower():
+                    self._logger.error(
+                        "Console test '%s' failed: MAC address is uninitialized", name
+                    )
+                    return False
             match = re.search(regex, output, re.IGNORECASE)
             if match:
                 self._logger.info(
@@ -731,10 +743,13 @@ class V4P1Tester:
         # )
 
         # Ethernet MAC Prefix Test
+        expected_prefix = (
+            self._mac_address[:8] if len(self._mac_address) >= 8 else "88:54:1f"
+        )
         all_results.append(
             (
-                "Ethernet MAC Prefix (88:54:1F)",
-                await self.test_mac_address_prefix("88:54:1F"),
+                f"Ethernet MAC Prefix ({expected_prefix.upper()})",
+                await self.test_mac_address_prefix(expected_prefix),
             )
         )
 

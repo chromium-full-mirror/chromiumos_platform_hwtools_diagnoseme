@@ -116,12 +116,12 @@
 
 </diagnoseme-rework-card>
 
-<diagnoseme-rework-card title="5. Functional Testing" [progress]="consoleTestingInProgress || functionalTestingInProgress" [disabled]="false">
+<diagnoseme-rework-card title="5. Functional Testing" [progress]="consoleTestingInProgress || functionalTestingInProgress" [disabled]="!canStartFunctionalTesting()">
 
   <diagnoseme-rework-card-column column="1">Start functional hardware verification:</diagnoseme-rework-card-column>
   <diagnoseme-rework-card-column column="2">
     <div style="display: flex; align-items: center; gap: 8px;">
-      <button #functionalTestStartButton mat-raised-button color="primary" (click)="runFunctionalTestingMerged()" [disabled]="consoleTestingInProgress || functionalTestingInProgress">Start</button>
+      <button #functionalTestStartButton mat-raised-button color="primary" (click)="runFunctionalTestingMerged()" [disabled]="!canStartFunctionalTesting() || consoleTestingInProgress || functionalTestingInProgress">Start</button>
       <test-pass-fail-button #consoleTestingStatus></test-pass-fail-button>
       <test-pass-fail-button #functionalTestingStatus></test-pass-fail-button>
     </div>

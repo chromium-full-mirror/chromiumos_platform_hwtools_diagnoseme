@@ -66,7 +66,9 @@ class ServoV41ManufacturingServicer(
     # Regex to validate mac address input.
     # Note: the mac address regex lives here since it's universal. The regex for
     # serial numbers lives inside each manager, as they change per device.
-    MACADDR_RE = re.compile("^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$")
+    MACADDR_RE = re.compile(
+        r"^88[:-]54[:-]1[Ff][:-]([0-9A-Fa-f]{2}[:-]){2}([0-9A-Fa-f]{2})$"
+    )
 
     def __init__(self, servod_service=None):
         self._servod_service = servod_service

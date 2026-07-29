@@ -19,7 +19,7 @@ class TestV4P1Tester(unittest.TestCase):
     def setUp(self):
         self.tester = v4p1_tester.V4P1Tester(
             serial_number="SERVOV4P1-C-2210050007",
-            mac_address="00:11:22:33:44:55",
+            mac_address="88:54:1F:00:11:22",
             servod_address="localhost:6002",
         )
         self.loop = asyncio.new_event_loop()
@@ -58,7 +58,7 @@ class TestV4P1Tester(unittest.TestCase):
         # Mock responses for serialno, macaddr get, pd role, and i2cxfer
         mock_console.issue_cmd.side_effect = [
             "SERVOV4P1-C-2210050007",  # serialno
-            "00 11 22 33 44 55",  # macaddr get
+            "88 54 1F 00 11 22",  # macaddr get
             "Role: SNK",  # pd 0 state
             "20: -- 0x21 -- -- -- -- -- -- -- -- -- -- -- -- --\n"
             "40: 0x40 0x41 0x42 -- -- -- -- -- 0x48 0x49 -- -- -- -- --\n"

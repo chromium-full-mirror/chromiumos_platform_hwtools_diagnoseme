@@ -91,7 +91,7 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
     def test_validate_servo_mac_address_valid(self):
         """Test case for validate_servo_mac_address with valid input."""
         request = servo_manufacturing_pb2.ValidateServoMacAddressRequest(
-            mac_address="00:11:22:33:44:55"
+            mac_address="88:54:1F:00:11:22"
         )
         response = self.servicer.validate_servo_mac_address(request, self.context)
         self.assertTrue(response.is_valid)
@@ -100,7 +100,7 @@ class TestServoV41ManufacturingServicer(unittest.TestCase):
     def test_validate_servo_mac_address_invalid(self):
         """Test case for validate_servo_mac_address with invalid input."""
         request = servo_manufacturing_pb2.ValidateServoMacAddressRequest(
-            mac_address="invalid mac"
+            mac_address="00:11:22:33:44:55"
         )
         response = self.servicer.validate_servo_mac_address(request, self.context)
         self.assertFalse(response.is_valid)

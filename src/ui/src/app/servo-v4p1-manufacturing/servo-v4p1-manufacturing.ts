@@ -219,6 +219,10 @@ export class ServoV4p1ManufacturingComponent implements AfterViewInit, OnInit {
     return this.isSerialNumberValid && this.isMacAddressValid;
   }
 
+  canStartFunctionalTesting(): boolean {
+    return this.isSerialNumberValid && this.isMacAddressValid;
+  }
+
   startHostSideProgramming() {
     this.hostSideProgrammingInProgress = true;
     this.hostProgrammingResult.retryCount++;
