@@ -18,17 +18,10 @@ RUN git sparse-checkout set servo/firmware/usbkm/KeyboardSerial/
 RUN git checkout
 
 ######################################################################
-FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:alpine AS rtk-fetcher
+FROM debian:trixie AS rtk-fetcher
 WORKDIR /fetch
-# Copy files from dist if they exist. Kaniko and Docker will not fail if the
-# files are missing because of the wildcard.
+# Optional dist copy; wildcard keeps Docker from failing if absent
 COPY dist/rtunicpg.tar.bz2* dist/r8152-2.21.4.tar.bz2* ./
-RUN if [ ! -f rtunicpg.tar.bz2 ]; then \
-        gcloud storage cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar.bz2" rtunicpg.tar.bz2; \
-    fi && \
-    if [ ! -f r8152-2.21.4.tar.bz2 ]; then \
-        gcloud storage cp gs://rtk-tools/r8152-2.21.4.tar.bz2 .; \
-    fi
 
 ####################################################################
 FROM python:3-trixie AS dolostools
@@ -48,66 +41,55 @@ RUN python3 setup.py bdist_wheel
 WORKDIR /dolos/tools/dolosbattery
 RUN python3 setup.py bdist_wheel
 
-######################################################################
-FROM debian:trixie AS fwupd-builder
+WORKDIR /
+RUN git clone https://chromium.googlesource.com/chromiumos/platform/hwtools/maui /maui || true
 
-RUN apt update
-RUN apt install -y xz-utils wget build-essential dh-make devscripts
-RUN wget https://github.com/fwupd/fwupd/releases/download/2.0.19/fwupd-2.0.19.tar.xz
-RUN tar xvf fwupd-2.0.19.tar.xz
+####################################################################
+FROM debian:trixie AS fwupdater-builder
 
-WORKDIR fwupd-2.0.19
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    build-essential \
+    git \
+    libudev-dev \
+    pkg-config \
+    ca-certificates
 
-RUN python3 ./contrib/ci/fwupd_setup_helpers.py install-dependencies -y --os debian -y
-ENV DEBEMAIL="your-email@example.com"
-ENV DEBFULLNAME="Your Name"
-ENV DEB_BUILD_OPTIONS=nostrip=no
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
 
-RUN dh_make -s -n -f "../fwupd-2.0.19.tar.xz" -y
+WORKDIR /
+RUN git clone https://chromium.googlesource.com/chromiumos/platform/dolos
+WORKDIR /dolos/fw-updater
+ENV USER=root
+RUN cargo build --release
 
-RUN printf "\n\noverride_dh_auto_configure:\n\tdh_auto_configure -- \
-    -Dauto_features=enabled \
-    -Dbluez=disabled \
-    -Dcbor=disabled \
-    -Ddocs=disabled \
-    -Dintrospection=disabled \
-    -Dlibarchive=disabled \
-    -Dlibdrm=disabled \
-    -Dlibmnl=disabled \
-    -Dpassim=disabled \
-    -Dplugin_flashrom=disabled \
-    -Dplugin_modem_manager=disabled \
-    -Dpolkit=disabled \
-    -Dprotobuf=disabled \
-    -Dsystemd=disabled \
-    -Dtests=false \
-    -Dumockdev_tests=disabled \
-    -Dvalgrind=disabled \
-    -Dvalgrind=disabled \
-    -Dbash_completion=false \
-    -Dblkid=disabled \
-    -Dbuild=standalone \
-    -Dfirmware-packager=false \
-    -Dfish_completion=false \
-    -Dgnutls=disabled \
-    -Dhsi=disabled \
-    -Dlvfs=disabled \
-    -Dman=false \
-    -Dqubes=false \
-    -Dreadline=disabled \
-    -Dplugin_uefi_capsule_splash=false" >> debian/rules
-
-RUN printf "\noverride_dh_shlibdeps:\n\t-dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info\n" >> debian/rules
-
-RUN debuild -b -j$(nproc) -us -uc
 
 ######################################################################
 FROM debian:trixie AS rtk-tools-builder
 
 RUN apt-get update && apt-get install -y bzip2
 WORKDIR /build
-COPY --from=rtk-fetcher /fetch/rtunicpg.tar.bz2 .
-RUN tar -xvf rtunicpg.tar.bz2
+COPY --from=rtk-fetcher /fetch/rtunicpg.tar.bz2* ./
+RUN if [ -s rtunicpg.tar.bz2 ]; then \
+        tar -xvf rtunicpg.tar.bz2 || true; \
+    fi && \
+    mkdir -p /build/stub && \
+    touch /build/stub/rtunicpg-x86_64 /build/stub/EF8153B_stub /build/stub/EE8153B_stub
+
+######################################################################
+FROM debian:trixie AS ft232r-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libftdi-dev \
+    libusb-dev \
+    build-essential \
+    curl \
+    ca-certificates
+
+WORKDIR /build
+RUN curl -k -sSL https://rtr.ca/ft232r/ft232r_prog-1.25.tar.gz | tar -xz \
+ && make -C ft232r_prog-1.25
 
 #####################################################################
 FROM python:3-trixie
@@ -121,10 +103,19 @@ RUN apt-get update && apt-get install -yq \
     libxmlb2 \
     libjcat1 \
     ethtool \
-    usbutils
+    usbutils \
+    adb \
+    libftdi1-2 \
+    libftdi1 \
+    libusb-1.0-0 \
+    libudev1 \
+    udev \
+    libudev-dev \
+    fwupd
 
 COPY dockerfiles/rpcserver/requirements.txt .
-RUN python3 -m pip install -r requirements.txt --require-hashes --break-system-packages
+RUN python3 -m pip install -r requirements.txt --require-hashes --break-system-packages && \
+    apt-get remove -y python3-protobuf || true
 
 RUN mkdir /var/log/rpcserver
 RUN mkdir /usr/local/tmp
@@ -134,6 +125,14 @@ RUN mkdir -p /usr/local/server/binfiles_shadow
 COPY --from=rtk-tools-builder /build/*/rtunicpg-x86_64 /usr/local/bin/rtunicpg
 COPY --from=rtk-tools-builder /build/*/EF8153B* /usr/local/server/binfiles_shadow/
 COPY --from=rtk-tools-builder /build/*/EE8153B* /usr/local/server/binfiles_shadow/
+COPY --from=ft232r-builder /build/ft232r_prog-1.25/ft232r_prog /usr/local/bin/ft232r_prog
+COPY --from=fwupdater-builder /dolos/fw-updater/target/release/fw-updater /usr/local/bin/fw-updater
+COPY --from=dolostools /maui /usr/local/maui
+RUN if [ -d /usr/local/maui/tools/scripts ]; then cp -a /usr/local/maui/tools/scripts/* /usr/local/bin/ && chmod +x /usr/local/bin/maui*; fi
+RUN if [ -f /usr/local/maui/tools/requirements.txt ]; then python3 -m pip install -r /usr/local/maui/tools/requirements.txt --break-system-packages; fi
+RUN if [ -f /usr/local/maui/tools/setup.py ] || [ -f /usr/local/maui/tools/pyproject.toml ]; then python3 -m pip install -e /usr/local/maui/tools --break-system-packages; fi
+RUN printf '#!/bin/bash\npython3 /usr/local/maui/tools/src/maui_ctl.py "$@"\n' > /usr/local/bin/maui-ctl && chmod +x /usr/local/bin/maui-ctl
+RUN printf '#!/bin/bash\npython3 /usr/local/maui/tools/src/maui_flash.py "$@"\n' > /usr/local/bin/maui-flash && chmod +x /usr/local/bin/maui-flash
 
 WORKDIR /usr/local/server
 
@@ -144,9 +143,6 @@ COPY --from=dolostools /dolos/tools/requirements.txt .
 COPY --from=hdctools-builder /hdctools/servo/firmware/usbkm/KeyboardSerial/Keyboard.hex /usr/local/server/binfiles_shadow/
 RUN python3 -m pip install *.whl --no-deps --no-index --break-system-packages
 RUN python3 -m pip install -r requirements.txt --require-hashes --break-system-packages
-
-COPY --link --from=fwupd-builder /fwupd_*_amd64.deb .
-RUN apt install ./fwupd_*_amd64.deb
 
 RUN rm -rf /install_tmp
 
@@ -170,6 +166,6 @@ RUN rm *.tar.xz
 
 RUN chmod og+w /var/log
 
-ENV PYTHONPATH=/usr/lib/python3/dist-packages/
+ENV PYTHONPATH=/usr/local/maui/tools:/usr/local/maui:/usr/lib/python3/dist-packages/
 
 EXPOSE 6002

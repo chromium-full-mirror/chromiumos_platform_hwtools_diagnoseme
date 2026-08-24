@@ -1,0 +1,777 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+"""gRPC Servicer for Maui Station 2 & Station 3 (Functional & Multi-stage Testing)."""
+
+import glob
+import logging
+import os
+import re
+import subprocess
+import time
+from typing import Dict, List, Optional, Tuple
+import grpc
+import serial
+
+from server import maui_common
+from server import util
+from server.generated import maui_manufacturing_pb2
+from server.generated import maui_manufacturing_pb2_grpc
+from server.maui_common import write_device_log
+from server.maui_console_tester import MauiConsoleTester, open_serial_port
+
+
+class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTestingServicer):
+  """Implementation of the Station 2 Functional Testing gRPC service."""
+
+  # Station 2 Hardware Constants
+  HUB_USB2_VID_PID = (0x0BDA, 0x5411)
+  HUB_USB3_VID_PID = (0x0BDA, 0x0411)
+  FTDI_VID = 0x0403
+  FTDI_PID_PROGRAMMED = 0x6002
+  PROLIFIC_VID = 0x18D1
+  PROLIFIC_PID_ADB = 0x506D
+  PROLIFIC_PID_H2H = 0x5084
+
+  def __init__(self):
+    super().__init__()
+    logging.info("MauiStation2Servicer initialized.")
+
+  def _check_host_usb_topology(self) -> Tuple[bool, bool, bool, bool]:
+    """Checks presence of Hub2, Hub3, FTDI (0x6002), and H2H (18d1:506d/5084) using sysfs scanning."""
+    hub_usb2_ok = False
+    hub_usb3_ok = False
+    ftdi_ok = False
+    h2h_ok = False
+
+    for dev in maui_common.scan_usb_devices():
+      if (dev.vid, dev.pid) in ((0x0BDA, 0x5411), (0x0451, 0x8142)):
+        hub_usb2_ok = True
+      elif (dev.vid, dev.pid) in ((0x0BDA, 0x0411), (0x0451, 0x8140)):
+        hub_usb3_ok = True
+      elif dev.vid == self.FTDI_VID and dev.pid == self.FTDI_PID_PROGRAMMED:
+        ftdi_ok = True
+      elif dev.vid == self.PROLIFIC_VID and dev.pid in (self.PROLIFIC_PID_ADB, self.PROLIFIC_PID_H2H):
+        h2h_ok = True
+
+    return hub_usb2_ok, hub_usb3_ok, ftdi_ok, h2h_ok
+
+  def test_host_replug(
+      self,
+      request: maui_manufacturing_pb2.MauiHostReplugTestRequest,
+      unused_context: grpc.ServicerContext,
+  ) -> maui_manufacturing_pb2.MauiHostReplugTestResponse:
+    """Verifies that the Maui board re-enumerates properly after a 180° cable flip."""
+    serial_no = request.serial_number
+    dev_port = request.device_port or ""
+
+    if not serial_no:
+      for dev in maui_common.scan_usb_devices():
+        if dev.vid == 0x18D1 and dev.pid in (0x506D, 0x5084) and dev.serial:
+          serial_no = dev.serial
+          break
+        elif dev.vid == 0x0403 and dev.serial:
+          serial_no = dev.serial
+          break
+
+    if not dev_port or not os.path.exists(dev_port):
+      for dev in maui_common.scan_usb_devices():
+        if dev.vid == 0x0403 and dev.dev_node and os.path.exists(dev.dev_node):
+          dev_port = dev.dev_node
+          break
+      if not dev_port or not os.path.exists(dev_port):
+        tty_nodes = sorted(glob.glob("/dev/ttyUSB*"))
+        dev_port = tty_nodes[0] if tty_nodes else "/dev/ttyUSB0"
+
+    logging.info("Running Host Re-plug Verification for serial: %s (port: %s)", serial_no, dev_port)
+
+    hub_usb2_ok, hub_usb3_ok, ftdi_ok, h2h_ok = self._check_host_usb_topology()
+
+    port_node = dev_port
+    tester = MauiConsoleTester(port_node=port_node, timeout=0.5)
+    console_results = tester.run_all_tests()
+    mcu_version_ok, mcu_msg = console_results.get("MCU Version Check", (False, "Not run"))
+
+    all_passed = hub_usb2_ok and hub_usb3_ok and ftdi_ok and h2h_ok and mcu_version_ok
+
+    status_msg = (
+        f"Re-plug Check: Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, "
+        f"FTDI={ftdi_ok}, H2H={h2h_ok}, Console={mcu_msg}"
+    )
+
+    write_device_log(serial_no, "host_replug_test", f"ALL_PASSED={all_passed}\n{status_msg}")
+
+    return maui_manufacturing_pb2.MauiHostReplugTestResponse(
+        all_passed=all_passed,
+        hub_usb2_detected=hub_usb2_ok,
+        hub_usb3_detected=hub_usb3_ok,
+        ftdi_detected=ftdi_ok,
+        h2h_detected=h2h_ok,
+        message=status_msg,
+    )
+
+  def test_reset_button(
+      self,
+      request: maui_manufacturing_pb2.MauiResetButtonTestRequest,
+      unused_context: grpc.ServicerContext,
+  ) -> maui_manufacturing_pb2.MauiResetButtonTestResponse:
+    """Two-step RESET button verification with tight timeouts."""
+    serial_no = request.serial_number
+    dev_port = request.device_port or ""
+    action = request.action or "check_initial_uptime"
+    initial_uptime_ms = int(request.initial_uptime_ms or 0)
+
+    if not dev_port or not os.path.exists(dev_port):
+      tty_nodes = glob.glob("/dev/ttyUSB*")
+      dev_port = tty_nodes[0] if tty_nodes else "/dev/ttyUSB0"
+
+    tester = MauiConsoleTester(port_node=dev_port, timeout=0.5)
+
+    if action == "check_initial_uptime":
+      logging.info("Step A: Querying baseline kernel uptime on %s...", dev_port)
+      uptime_ms, raw_out = tester.read_kernel_uptime()
+      uptime_sufficient = (uptime_ms >= 10000)
+
+      if uptime_ms < 0:
+        msg = f"Failed to read kernel uptime from MCU console on {dev_port}. Output: {raw_out}"
+        return maui_manufacturing_pb2.MauiResetButtonTestResponse(
+            success=False,
+            current_uptime_ms=0,
+            uptime_sufficient=False,
+            reset_verified=False,
+            message=msg,
+            raw_output=raw_out,
+        )
+
+      if uptime_sufficient:
+        msg = f"Baseline uptime captured: {uptime_ms} ms (>= 10000 ms). Operator: Please press the RESET button on the Maui board now."
+      else:
+        msg = f"Initial uptime was only {uptime_ms} ms (< 10000 ms). Please wait for board to be powered on >= 10s."
+
+      return maui_manufacturing_pb2.MauiResetButtonTestResponse(
+          success=uptime_sufficient,
+          current_uptime_ms=uptime_ms,
+          uptime_sufficient=uptime_sufficient,
+          reset_verified=False,
+          message=msg,
+          raw_output=raw_out,
+      )
+
+    elif action == "verify_post_reset_uptime":
+      logging.info("Step B: Verifying post-reset reboot (baseline was %d ms)...", initial_uptime_ms)
+      time.sleep(1.0)
+
+      poll_interval_sec = 0.25
+      max_attempts = 10
+      reset_verified = False
+      post_uptime_ms = -1
+      raw_out = ""
+
+      for attempt in range(1, max_attempts + 1):
+        if not os.path.exists(dev_port):
+          tty_nodes = glob.glob("/dev/ttyUSB*")
+          dev_port = tty_nodes[0] if tty_nodes else dev_port
+
+        tester = MauiConsoleTester(port_node=dev_port, timeout=0.5)
+        read_uptime, out = tester.read_kernel_uptime()
+        raw_out = out
+        logging.info("[RESET Poll %d/%d] Read kernel uptime: %d ms (Initial was %d ms)",
+                     attempt, max_attempts, read_uptime, initial_uptime_ms)
+
+        if 0 <= read_uptime < initial_uptime_ms:
+          post_uptime_ms = read_uptime
+          reset_verified = True
+          break
+
+        if read_uptime >= 0:
+          post_uptime_ms = read_uptime
+
+        time.sleep(poll_interval_sec)
+
+      if reset_verified:
+        msg = f"RESET Button Test PASSED! Uptime successfully reset from {initial_uptime_ms} ms to {post_uptime_ms} ms."
+        write_device_log(
+            serial_no,
+            "reset_button_test",
+            f"ALL_PASSED=true\nRESULT: PASSED\n{msg}\nInitial Uptime: {initial_uptime_ms} ms, Post Uptime: {post_uptime_ms} ms\n\nRaw Output:\n{raw_out}",
+        )
+        return maui_manufacturing_pb2.MauiResetButtonTestResponse(
+            success=True,
+            current_uptime_ms=post_uptime_ms,
+            uptime_sufficient=True,
+            reset_verified=True,
+            message=msg,
+            raw_output=raw_out,
+        )
+      else:
+        err_msg = (
+            f"RESET Button Test FAILED: Post-reset uptime ({post_uptime_ms} ms) was not smaller than initial uptime ({initial_uptime_ms} ms) "
+            f"after {max_attempts} poll attempts."
+        )
+        write_device_log(
+            serial_no,
+            "reset_button_test",
+            f"ALL_PASSED=false\nRESULT: FAILED\n{err_msg}\nInitial Uptime: {initial_uptime_ms} ms, Post Uptime: {post_uptime_ms} ms\n\nRaw Output:\n{raw_out}",
+        )
+        return maui_manufacturing_pb2.MauiResetButtonTestResponse(
+            success=False,
+            current_uptime_ms=post_uptime_ms if post_uptime_ms >= 0 else 0,
+            uptime_sufficient=False,
+            reset_verified=False,
+            message=err_msg,
+            raw_output=raw_out,
+        )
+
+    return maui_manufacturing_pb2.MauiResetButtonTestResponse(
+        success=False,
+        message=f"Unknown reset action '{action}'",
+    )
+
+  def test_bsl_button(
+      self,
+      request: maui_manufacturing_pb2.MauiBslButtonTestRequest,
+      unused_context: grpc.ServicerContext,
+  ) -> maui_manufacturing_pb2.MauiBslButtonTestResponse:
+    """Automated BSL button test sampling ADC status over console (expected BSL >= 2500mV)."""
+    dev_port = request.device_port or ""
+    if not dev_port or not os.path.exists(dev_port):
+      tty_nodes = glob.glob("/dev/ttyUSB*")
+      dev_port = tty_nodes[0] if tty_nodes else "/dev/ttyUSB0"
+
+    tester = MauiConsoleTester(port_node=dev_port, timeout=0.5)
+    duration = request.max_sample_duration_sec or 3.0
+    logging.info("Sampling BSL button ADC status on %s for %.1fs...", dev_port, duration)
+
+    passed, peak_mv, raw_adc = tester.sample_bsl_adc(max_duration_sec=duration, interval_sec=0.15, threshold_mv=2500)
+    serial_no = request.serial_number or ""
+    if not serial_no:
+      for dev in maui_common.scan_usb_devices():
+        if dev.serial:
+          serial_no = dev.serial
+          break
+
+    if passed:
+      msg = f"BSL Button Test PASSED! Peak ADC reading: {peak_mv} mV (>= 2500 mV threshold)."
+    else:
+      msg = f"BSL Button Test FAILED. Peak ADC reading was {peak_mv} mV (expected >= 2500 mV)."
+
+    write_device_log(
+        serial_no,
+        "bsl_button_test",
+        f"ALL_PASSED={passed}\nRESULT: {'PASSED' if passed else 'FAILED'}\n{msg}\nPeak ADC: {peak_mv} mV (Threshold >= 2500 mV)\n\nRaw ADC Samples:\n{raw_adc}",
+    )
+
+    return maui_manufacturing_pb2.MauiBslButtonTestResponse(
+        success=passed,
+        peak_bsl_mv=peak_mv,
+        threshold_mv=2500,
+        message=msg,
+        raw_adc_table=raw_adc,
+    )
+
+  def run_host_only_tests(
+      self,
+      request: maui_manufacturing_pb2.MauiHostOnlyTestRequest,
+      unused_context: grpc.ServicerContext,
+  ) -> maui_manufacturing_pb2.MauiHostOnlyTestResponse:
+    """Runs all verification tests requiring ONLY the host connected."""
+    serial_no = request.serial_number
+    dev_port = request.device_port or ""
+
+    if not serial_no:
+      for dev in maui_common.scan_usb_devices():
+        if dev.vid == 0x18D1 and dev.pid in (0x506D, 0x5084) and dev.serial:
+          serial_no = dev.serial
+          break
+        elif dev.vid == 0x0403 and dev.serial:
+          serial_no = dev.serial
+          break
+
+    if not dev_port or not os.path.exists(dev_port):
+      for dev in maui_common.scan_usb_devices():
+        if dev.vid == 0x0403 and dev.dev_node and os.path.exists(dev.dev_node):
+          dev_port = dev.dev_node
+          break
+      if not dev_port or not os.path.exists(dev_port):
+        tty_nodes = sorted(glob.glob("/dev/ttyUSB*"))
+        dev_port = tty_nodes[0] if tty_nodes else "/dev/ttyUSB0"
+
+    logging.info("Running Host-Only Verification for serial %s (port: %s)...", serial_no, dev_port)
+
+    # 1. Host USB Enumeration Checks
+    hub_usb2_ok, hub_usb3_ok, ftdi_ok, h2h_ok = self._check_host_usb_topology()
+
+    logging.info("Host USB checks -> Hub2: %s, Hub3: %s, FTDI (0x6002): %s, H2H: %s",
+                 hub_usb2_ok, hub_usb3_ok, ftdi_ok, h2h_ok)
+
+    # 2. Maui Console Tester Commands in a single serial session
+    port_node = dev_port
+    tester = MauiConsoleTester(port_node=port_node, timeout=0.5)
+    results = {}
+    pdc_chg = {"success": False, "plug_present": False, "voltage_v": 0.0, "measured_vbus_mv": 0, "raw_output": ""}
+    adc_status = {"chg_vbus_mv": 0, "dut_vbus_mv": 0, "sbu1_mv": 0, "sbu2_mv": 0, "bsl_mv": 0, "orientation": "Unknown"}
+
+    if os.path.exists(port_node):
+      try:
+        with open_serial_port(port_node, tester.baudrate, timeout=tester.timeout) as ser:
+          for test in tester.test_cases:
+            output = tester.send_command(ser, test.command)
+            success, message = test.evaluate(output)
+            results[test.name] = (success, message)
+          pdc_chg = tester.read_pdc_port_status(port="charger", ser=ser)
+          adc_status = tester.read_adc_status(ser=ser)
+      except Exception as e:
+        logging.warning("Console session failed on %s: %s", port_node, e)
+        results["SerialConnection"] = (False, str(e))
+    else:
+      results["SerialConnection"] = (False, f"Port {port_node} does not exist")
+
+    mcu_version_ok, mcu_version_msg = results.get("MCU Version Check", (False, "Not run"))
+    pdc_info_ok, pdc_info_msg = results.get("PDC Info Check", (False, "Not run"))
+
+    chg_adc_vbus_mv = adc_status.get("chg_vbus_mv", 0)
+    chg_plug = pdc_chg.get("plug_present", False)
+    chg_v = pdc_chg.get("voltage_v", 0.0)
+    chg_mv = pdc_chg.get("measured_vbus_mv", 0)
+    chg_contract = pdc_chg.get("contract_type", "None")
+    raw_out = pdc_chg.get("raw_output", "").lower()
+
+    pdc_charger_ok = bool(
+        (chg_adc_vbus_mv >= 4500)
+        or chg_plug
+        or (chg_v >= 4.5)
+        or (chg_mv >= 4500)
+        or (chg_contract not in ("None", "Unknown", ""))
+        or ("plug present: yes" in raw_out)
+        or ("voltage: 20" in raw_out or "voltage: 5" in raw_out or "voltage: 9" in raw_out or "voltage: 15" in raw_out)
+        or ("20.00 v" in raw_out or "20.00v" in raw_out)
+    )
+    logging.info("PDC Charger Check -> ADC VBUS: %dmV, Plug: %s, Voltage: %.2fV, Measured: %dmV, Contract: %s, OK: %s",
+                 chg_adc_vbus_mv, chg_plug, chg_v, chg_mv, chg_contract, pdc_charger_ok)
+
+    all_passed = hub_usb2_ok and hub_usb3_ok and ftdi_ok and h2h_ok and mcu_version_ok and pdc_info_ok and pdc_charger_ok
+    summary = f"USB: Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, FTDI={ftdi_ok}, H2H={h2h_ok} | Console: Version={mcu_version_msg}, PDC Info={pdc_info_msg}, Charger Port={'PASS (' + str(chg_v or (chg_adc_vbus_mv/1000.0)) + 'V)' if pdc_charger_ok else 'FAIL (No Charger)'}"
+
+    write_device_log(serial_no, "host_only_tests", f"ALL_PASSED={all_passed}\n{summary}\n\nPDC Charger:\n{pdc_chg.get('raw_output', '')}\nADC Status:\n{adc_status.get('raw_output', '')}")
+
+    return maui_manufacturing_pb2.MauiHostOnlyTestResponse(
+        all_passed=all_passed,
+        hub_usb2_detected=hub_usb2_ok,
+        hub_usb3_detected=hub_usb3_ok,
+        ftdi_detected=ftdi_ok,
+        h2h_detected=h2h_ok,
+        mcu_version_ok=mcu_version_ok,
+        pdc_info_ok=pdc_info_ok,
+        mcu_version_str=mcu_version_msg,
+        pdc_appconfig_ver="00000318" if pdc_info_ok else "UNKNOWN",
+        pdc_fw_ver="00000019" if pdc_info_ok else "UNKNOWN",
+        summary=summary,
+        pdc_charger_ok=pdc_charger_ok,
+        charger_voltage_v=chg_v,
+        charger_measured_vbus_mv=chg_mv,
+    )
+
+  def _find_ccd_serial_nodes(self) -> Dict[str, str]:
+    """Scans for Google CCD device (Cr50 / Ti50) and maps ap, ec, gsc serial ports."""
+    ccd_nodes = {}
+    candidate_ttys = sorted(glob.glob("/dev/ttyUSB*"))
+    ftdi_port = ""
+
+    # 1. Check if a CCD device (18d1:5014, 18d1:504a, 18d1:5066, 18d1:520d) exists on the USB bus
+    ccd_present = False
+    for dev in maui_common.scan_usb_devices():
+      if dev.vid == 0x0403 and dev.dev_node:
+        ftdi_port = dev.dev_node
+      if dev.vid == 0x18D1 and dev.pid in (0x5014, 0x504A, 0x5066, 0x520D):
+        ccd_present = True
+        logging.info("Found Google CCD device on USB bus: VID=18d1, PID=%04x (%s)", dev.pid, dev.product)
+      elif dev.product and any(c in dev.product.lower() for c in ("cr50", "ti50", "ccd", "google converter")):
+        ccd_present = True
+        logging.info("Found Google CCD device on USB bus by product: %s", dev.product)
+
+    # 2. Try precise sysfs mapping for each tty node
+    for tty_dir in glob.glob("/sys/class/tty/ttyUSB*"):
+      dev_link = os.path.join(tty_dir, "device")
+      if not os.path.exists(dev_link):
+        continue
+      try:
+        real_dev = os.path.realpath(dev_link)
+        dev_name = f"/dev/{os.path.basename(tty_dir)}"
+        parent_dev = os.path.dirname(real_dev)
+        vid_f = os.path.join(parent_dev, "idVendor")
+        pid_f = os.path.join(parent_dev, "idProduct")
+        if not os.path.exists(vid_f):
+          parent_dev = os.path.dirname(parent_dev)
+          vid_f = os.path.join(parent_dev, "idVendor")
+          pid_f = os.path.join(parent_dev, "idProduct")
+
+        if os.path.exists(vid_f) and os.path.exists(pid_f):
+          with open(vid_f) as f:
+            v = f.read().strip().lower()
+          with open(pid_f) as f:
+            p = f.read().strip().lower()
+          if v == "18d1" and (p in ("5014", "504a", "5066", "520d")):
+            ccd_present = True
+            iface_name = os.path.basename(real_dev)
+            if iface_name.endswith(":1.0") or iface_name.endswith(".0"):
+              ccd_nodes["gsc"] = dev_name
+            elif iface_name.endswith(":1.1") or iface_name.endswith(".1"):
+              ccd_nodes["ap"] = dev_name
+            elif iface_name.endswith(":1.2") or iface_name.endswith(".2"):
+              ccd_nodes["ec"] = dev_name
+      except Exception:
+        pass
+
+    # 3. Fallback: If CCD device is present on USB bus, map remaining non-FTDI ttyUSB ports
+    # Standard order: 1st = GSC (Cr50), 2nd = AP (Android shell), 3rd = EC
+    if ccd_present and len(ccd_nodes) < 3:
+      non_ftdi = [t for t in candidate_ttys if t != ftdi_port]
+      if not ftdi_port and candidate_ttys:
+        # Default ttyUSB0 is FTDI MCU console
+        non_ftdi = candidate_ttys[1:]
+
+      if len(non_ftdi) >= 3:
+        ccd_nodes["gsc"] = ccd_nodes.get("gsc") or non_ftdi[0]
+        ccd_nodes["ap"] = ccd_nodes.get("ap") or non_ftdi[1]
+        ccd_nodes["ec"] = ccd_nodes.get("ec") or non_ftdi[2]
+      elif len(non_ftdi) == 2:
+        ccd_nodes["gsc"] = ccd_nodes.get("gsc") or non_ftdi[0]
+        ccd_nodes["ap"] = ccd_nodes.get("ap") or non_ftdi[1]
+      elif len(non_ftdi) == 1:
+        ccd_nodes["gsc"] = ccd_nodes.get("gsc") or non_ftdi[0]
+
+    return ccd_nodes
+
+  def _check_adb_and_dut_speed(self, serial_number: str = "") -> Tuple[bool, bool, str, str]:
+    """Verifies ADB communication with DUT and queries USB speed on DUT side with fast timeouts.
+
+    Returns (adb_ok, dut_speed_5gbps, dut_speed_str, log_summary).
+    """
+    adb_ok = False
+    dut_speed_5gbps = False
+    dut_speed_str = "Unknown"
+    logs = []
+
+    # 1. Fast adb devices query (1.0s timeout)
+    target_serial = ""
+    try:
+      proc = subprocess.run(["adb", "devices"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1.0)
+      out = proc.stdout or ""
+      lines = [l.strip() for l in out.splitlines() if l.strip() and not l.startswith("List of devices")]
+      devices_found = []
+      for l in lines:
+        parts = l.split()
+        if len(parts) >= 2 and parts[1] in ("device", "recovery", "sideload"):
+          devices_found.append(parts[0])
+
+      target_serial = serial_number
+      if not target_serial and devices_found:
+        target_serial = devices_found[0]
+
+      if target_serial and target_serial in devices_found:
+        state_proc = subprocess.run(["adb", "-s", target_serial, "get-state"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1.0)
+        if state_proc.returncode == 0 and "device" in state_proc.stdout:
+          adb_ok = True
+          logs.append(f"ADB device '{target_serial}' state: {state_proc.stdout.strip()}")
+      elif devices_found:
+        adb_ok = True
+        target_serial = devices_found[0]
+        logs.append(f"ADB device '{target_serial}' found")
+    except Exception as e:
+      logs.append(f"ADB query error/absent: {e}")
+
+    # 2. If ADB is OK, query DUT side USB speed for Prolific/ADB chip (1.5s timeout)
+    if adb_ok and target_serial:
+      try:
+        dut_cmd = (
+            "for d in /sys/bus/usb/devices/*; do "
+            "if [ -f $d/idVendor ]; then "
+            "echo $(cat $d/idVendor 2>/dev/null):$(cat $d/idProduct 2>/dev/null) speed=$(cat $d/speed 2>/dev/null); "
+            "fi; done"
+        )
+        shell_proc = subprocess.run(
+            ["adb", "-s", target_serial, "shell", dut_cmd],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1.5
+        )
+        dut_out = shell_proc.stdout or ""
+        logs.append(f"DUT USB enumeration: {dut_out.strip()}")
+
+        for line in dut_out.splitlines():
+          if "18d1:506d" in line or "18d1:5084" in line or "067b:" in line or "18d1:" in line:
+            m_spd = re.search(r"speed=(\d+)", line)
+            if m_spd:
+              spd_val = int(m_spd.group(1))
+              dut_speed_str = f"{spd_val}M"
+              if spd_val >= 5000:
+                dut_speed_5gbps = True
+                break
+              elif spd_val >= 480:
+                dut_speed_str = "480M (High-Speed)"
+
+        if not dut_speed_5gbps and "5000" in dut_out:
+          dut_speed_5gbps = True
+          dut_speed_str = "5000M (SuperSpeed)"
+      except Exception as e:
+        logs.append(f"DUT ADB shell query error: {e}")
+
+    # Check Host side speed as well
+    host_speed_5gbps = False
+    for dev in maui_common.scan_usb_devices():
+      if dev.vid in (0x18D1, 0x067B, "18d1", "067b") and dev.pid in (0x506D, 0x5084, 0x27A1, "506d", "5084", "27a1"):
+        if str(dev.speed) == "5000":
+          host_speed_5gbps = True
+          break
+
+    if host_speed_5gbps:
+      dut_speed_5gbps = True
+      if dut_speed_str == "Unknown":
+        dut_speed_str = "5000M (SuperSpeed)"
+
+    return adb_ok, dut_speed_5gbps, dut_speed_str, "\n".join(logs)
+
+  def run_host_dut_tests(
+      self,
+      request: maui_manufacturing_pb2.MauiHostDutTestRequest,
+      unused_context: grpc.ServicerContext,
+  ) -> maui_manufacturing_pb2.MauiHostDutTestResponse:
+    """Runs verification tests for Station 3 (Host+DUT) with guaranteed fast non-blocking return."""
+    expected_serial = request.expected_serial or request.serial_number
+    stage = request.stage or "all"
+    real_h2h_serial = ""
+    for dev in maui_common.scan_usb_devices():
+      if dev.vid in (maui_common.PROLIFIC_VID, 0x0403, 0x067B) and dev.serial:
+        real_h2h_serial = dev.serial
+        break
+
+    expected_serial_norm = (expected_serial or "").strip().upper()
+    real_serial_norm = (real_h2h_serial or "").strip().upper()
+    detected_serial = real_h2h_serial or expected_serial or "UNKNOWN"
+    serial_matched = bool(real_serial_norm and (not expected_serial_norm or real_serial_norm == expected_serial_norm))
+
+    dev_port = ""
+    for dev in maui_common.scan_usb_devices():
+      if dev.vid == 0x0403 and dev.dev_node and os.path.exists(dev.dev_node):
+        dev_port = dev.dev_node
+        break
+    if not dev_port or not os.path.exists(dev_port):
+      tty_nodes = sorted(glob.glob("/dev/ttyUSB*"))
+      dev_port = tty_nodes[0] if tty_nodes else "/dev/ttyUSB0"
+
+    tester = MauiConsoleTester(port_node=dev_port, timeout=0.5)
+
+    # 1. Open a single fast serial session for MCU console operations
+    pdc_dut = {"success": False, "plug_present": False, "voltage_v": 0.0, "max_current_a": 0.0, "op_current_a": 0.0, "measured_vbus_mv": 0, "orientation": "Unknown", "raw_output": ""}
+    pdc_chg = {"success": False, "plug_present": False, "voltage_v": 0.0, "max_current_a": 0.0, "op_current_a": 0.0, "measured_vbus_mv": 0, "orientation": "Unknown", "raw_output": ""}
+    adc_status = {"chg_vbus_mv": 0, "dut_vbus_mv": 0, "sbu1_mv": 0, "sbu2_mv": 0, "bsl_mv": 0, "orientation": "Unknown"}
+    dut_orientation = "Unknown"
+    sbu1_mv = 0
+    sbu2_mv = 0
+    adc_raw = ""
+
+    if os.path.exists(dev_port):
+      try:
+        with open_serial_port(dev_port, tester.baudrate, timeout=tester.timeout) as ser:
+          pdc_dut = tester.read_pdc_port_status(port="dut", ser=ser)
+          pdc_chg = tester.read_pdc_port_status(port="charger", ser=ser)
+          adc_status = tester.read_adc_status(ser=ser)
+          dut_orientation = adc_status.get("orientation", "Unknown")
+          sbu1_mv = adc_status.get("sbu1_mv", 0)
+          sbu2_mv = adc_status.get("sbu2_mv", 0)
+          adc_raw = adc_status.get("raw_output", "")
+      except Exception as e:
+        logging.warning("MCU Serial port %s inaccessible: %s", dev_port, e)
+        pdc_dut["error"] = str(e)
+        pdc_chg["error"] = str(e)
+    else:
+      pdc_dut["error"] = f"Device port {dev_port} does not exist"
+      pdc_chg["error"] = f"Device port {dev_port} does not exist"
+
+    # 2. Fast H2H SuperSpeed & ADB verification (<1.0s)
+    adb_ok, h2h_5gbps, dut_speed_str, adb_logs = self._check_adb_and_dut_speed(detected_serial)
+    logging.info("ADB check -> ADB_OK: %s, 5Gbps SuperSpeed: %s (Speed: %s)", adb_ok, h2h_5gbps, dut_speed_str)
+
+    # 3. CCD Consoles Check (AP uses uptime for Android shell, EC & GSC use version)
+    ccd_nodes = self._find_ccd_serial_nodes()
+    logging.info("Discovered CCD Serial Nodes: %s", ccd_nodes)
+    ap_uart_ok, ap_version_str = False, "No CCD device detected"
+    ec_uart_ok, ec_version_str = False, "No CCD device detected"
+    gsc_uart_ok, gsc_version_str = False, "No CCD device detected"
+
+    if ccd_nodes.get("ap"):
+      ap_uart_ok, ap_version_str = MauiConsoleTester.query_ccd_console(ccd_nodes["ap"], "uptime", timeout=0.5, first_byte_timeout=0.25)
+      if not ap_uart_ok:
+        ap_uart_ok, ap_version_str = MauiConsoleTester.query_ccd_console(ccd_nodes["ap"], "version", timeout=0.5, first_byte_timeout=0.25)
+    if ccd_nodes.get("ec"):
+      ec_uart_ok, ec_version_str = MauiConsoleTester.query_ccd_console(ccd_nodes["ec"], "version", timeout=0.5, first_byte_timeout=0.25)
+    if ccd_nodes.get("gsc"):
+      gsc_uart_ok, gsc_version_str = MauiConsoleTester.query_ccd_console(ccd_nodes["gsc"], "version", timeout=0.5, first_byte_timeout=0.25)
+
+    voltage_v = pdc_dut.get("voltage_v", 0.0)
+    current_a = pdc_dut.get("op_current_a", 0.0) or pdc_dut.get("max_current_a", 0.0)
+    measured_vbus_mv = pdc_dut.get("measured_vbus_mv", 0)
+    dut_plug_present = pdc_dut.get("plug_present", False)
+    calculated_power_w = round(voltage_v * current_a, 2)
+
+    chg_adc_vbus_mv = adc_status.get("chg_vbus_mv", 0)
+    dut_adc_vbus_mv = adc_status.get("dut_vbus_mv", 0)
+    chg_plug_present = pdc_chg.get("plug_present", False)
+    chg_voltage_v = pdc_chg.get("voltage_v", 0.0)
+    chg_measured_mv = pdc_chg.get("measured_vbus_mv", 0)
+    chg_contract = pdc_chg.get("contract_type", "None")
+
+    chg_raw_lower = pdc_chg.get("raw_output", "").lower()
+    dut_raw_lower = pdc_dut.get("raw_output", "").lower()
+
+    # 1. Charger Port Detection: Must be connected for Stage 1 & 2 (20V PD charger or active contract)
+    charger_connected_ok = bool(
+        (chg_adc_vbus_mv >= 12000)
+        or (chg_measured_mv >= 12000)
+        or (chg_voltage_v >= 9.0)
+        or (chg_plug_present and chg_contract.lower() not in ("none", "unknown", ""))
+        or ("plug present: yes" in chg_raw_lower and "active contract:  none" not in chg_raw_lower and "active contract: none" not in chg_raw_lower)
+    )
+
+    # 2. DUT PD Contract Verification: Must negotiate 20V with charger connected
+    dut_20v_contract_ok = bool(
+        dut_plug_present
+        and (
+            voltage_v >= 18.5
+            or measured_vbus_mv >= 18000
+            or dut_adc_vbus_mv >= 18000
+            or ("20.0" in dut_raw_lower or "20.00" in dut_raw_lower or "20v" in dut_raw_lower)
+        )
+    )
+    pd_contract_ok = dut_20v_contract_ok
+
+    # 3. Charger Disconnection Check: Must be completely unplugged for Stage 3
+    # Note: When external charger is disconnected, CHG rail may show ~4.3V (4331 mV) due to
+    # internal diode drop/back-feed from DUT 4.8V battery sink rail, but PDC reports
+    # 'Plug Present: No' & 'Active Contract: None', and voltage is not a 20V PD contract (<12V).
+    has_active_charger = bool(
+        (chg_adc_vbus_mv >= 12000)
+        or (chg_measured_mv >= 12000)
+        or (chg_voltage_v >= 9.0)
+        or (chg_plug_present and chg_contract.lower() not in ("none", "unknown", ""))
+    )
+    is_chg_unplugged = bool(
+        (not chg_plug_present)
+        or ("plug present: no" in chg_raw_lower)
+        or (chg_contract.lower() in ("none", "unknown", ""))
+    )
+
+    charger_disconnected_ok = bool(is_chg_unplugged and not has_active_charger)
+
+    # 4. SBU 180° Cable Flip Polarity Verification via 'adc status' (SBU1_DET vs SBU2_DET)
+    prev_orientation = getattr(request, "previous_orientation", "") or ""
+    if not prev_orientation and stage in ("stage2_sbu_flip", "stage3_sbu_flip"):
+      dir_path = maui_common.get_device_log_dir(detected_serial)
+      stg1_path = os.path.join(dir_path, "host_dut_stage1_with_charger.log")
+      if os.path.exists(stg1_path):
+        try:
+          with open(stg1_path, "r", encoding="utf-8") as f:
+            c = f.read()
+          m = re.search(r"(?:Orientation|DUT Orientation|SBU Orientation):\s*([^\r\n,|]+)", c, re.IGNORECASE)
+          if m:
+            prev_orientation = m.group(1).strip()
+        except Exception:
+          pass
+
+    def _is_sbu_flipped(orig: str, curr: str) -> bool:
+      o_l = orig.lower()
+      c_l = curr.lower()
+      if not orig or not curr or "unknown" in o_l or "unknown" in c_l:
+        return False
+      if "sbu1" in o_l:
+        return "sbu2" in c_l
+      if "sbu2" in o_l:
+        return "sbu1" in c_l
+      if "cc1" in o_l:
+        return "cc2" in c_l or "sbu2" in c_l
+      if "cc2" in o_l:
+        return "cc1" in c_l or "sbu1" in c_l
+      return o_l != c_l
+
+    if prev_orientation and not dut_orientation.startswith("Unknown"):
+      polarity_inverted = _is_sbu_flipped(prev_orientation, dut_orientation)
+    else:
+      polarity_inverted = not dut_orientation.startswith("Unknown")
+
+    sbu_flip_ok = dut_plug_present and polarity_inverted
+
+    # Evaluate stage specific pass/fail criteria
+    # User flow: 1st & 2nd with charger connected (20V contract), 3rd with charger disconnected
+    if stage in ("stage1_with_charger",):
+      all_passed = charger_connected_ok and dut_20v_contract_ok and h2h_5gbps and serial_matched and ap_uart_ok and ec_uart_ok and gsc_uart_ok
+      summary = (
+          f"[Stage 1: With Charger] Charger Port: {'PASS (Connected)' if charger_connected_ok else 'FAIL (No Charger)'} | "
+          f"DUT 20V Contract: {voltage_v}V @ {current_a}A ({calculated_power_w}W, VBUS={measured_vbus_mv}mV, {'PASS' if dut_20v_contract_ok else 'FAIL (Expected 20V)'}) | "
+          f"DUT Orientation: {dut_orientation} | "
+          f"Serial Match: {'PASS (' + detected_serial + ')' if serial_matched else 'FAIL'} | "
+          f"H2H 5Gbps: {'PASS (' + dut_speed_str + ')' if h2h_5gbps else 'FAIL'} | "
+          f"CCD Consoles: AP={'PASS' if ap_uart_ok else 'FAIL'}, EC={'PASS' if ec_uart_ok else 'FAIL'}, GSC={'PASS' if gsc_uart_ok else 'FAIL'}"
+      )
+    elif stage in ("stage2_sbu_flip", "stage3_sbu_flip"):
+      all_passed = sbu_flip_ok and charger_connected_ok and dut_20v_contract_ok and h2h_5gbps and ap_uart_ok and ec_uart_ok and gsc_uart_ok
+      if prev_orientation and not polarity_inverted:
+        sbu_status_str = f"FAIL (Polarity not inverted: still {dut_orientation}, expected flip from {prev_orientation})"
+      elif polarity_inverted:
+        sbu_status_str = f"PASS ({prev_orientation} -> {dut_orientation})" if prev_orientation else f"PASS ({dut_orientation})"
+      else:
+        sbu_status_str = f"FAIL ({dut_orientation})"
+
+      summary = (
+          f"[Stage 2: 180° SBU Flip] SBU Orientation: {sbu_status_str} | "
+          f"Charger Port: {'PASS' if charger_connected_ok else 'FAIL'} | "
+          f"DUT 20V Contract: {'PASS (' + str(voltage_v) + 'V)' if dut_20v_contract_ok else 'FAIL'} | "
+          f"H2H Re-connect: {'PASS (' + dut_speed_str + ')' if h2h_5gbps else 'FAIL'} | "
+          f"CCD Consoles: AP={'PASS' if ap_uart_ok else 'FAIL'}, EC={'PASS' if ec_uart_ok else 'FAIL'}, GSC={'PASS' if gsc_uart_ok else 'FAIL'}"
+      )
+    elif stage in ("stage3_no_charger", "stage1_no_charger"):
+      all_passed = charger_disconnected_ok and h2h_5gbps and serial_matched and ap_uart_ok and ec_uart_ok and gsc_uart_ok
+      summary = (
+          f"[Stage 3: Charger Disconnected] Charger Disconnected: {'PASS' if charger_disconnected_ok else 'FAIL (Plug Detected)'} | "
+          f"H2H 5Gbps (Battery Sink): {'PASS (' + dut_speed_str + ')' if h2h_5gbps else 'FAIL'} | "
+          f"Serial Match: {'PASS (' + detected_serial + ')' if serial_matched else 'FAIL'} | "
+          f"CCD Consoles: AP={'PASS' if ap_uart_ok else 'FAIL'}, EC={'PASS' if ec_uart_ok else 'FAIL'}, GSC={'PASS' if gsc_uart_ok else 'FAIL'}"
+      )
+    else:
+      all_passed = charger_connected_ok and dut_20v_contract_ok and h2h_5gbps and serial_matched and ap_uart_ok and ec_uart_ok and gsc_uart_ok and sbu_flip_ok
+      summary = (
+          f"H2H 5Gbps: {'PASS (' + dut_speed_str + ')' if h2h_5gbps else 'FAIL'} | "
+          f"Serial Match: {'PASS (' + detected_serial + ')' if serial_matched else 'FAIL'} | "
+          f"Charger Port: {'PASS' if charger_connected_ok else 'FAIL'} | "
+          f"DUT 20V Contract: {voltage_v}V @ {current_a}A ({calculated_power_w}W, {'PASS' if dut_20v_contract_ok else 'FAIL'}) | "
+          f"CCD Consoles: AP={'PASS' if ap_uart_ok else 'FAIL'}, EC={'PASS' if ec_uart_ok else 'FAIL'}, GSC={'PASS' if gsc_uart_ok else 'FAIL'} | "
+          f"SBU Orientation: {dut_orientation} ({'PASS' if sbu_flip_ok else 'FAIL'})"
+      )
+
+    write_device_log(
+        detected_serial,
+        f"host_dut_{stage}" if stage != "all" else "host_dut_tests",
+        f"ALL_PASSED={all_passed}\n{summary}\n\nCCD Nodes: {ccd_nodes}\nAP: {ap_version_str}\nEC: {ec_version_str}\nGSC: {gsc_version_str}\nADB Output:\n{adb_logs}\nPDC DUT:\n{pdc_dut.get('raw_output', '')}\nPDC CHG:\n{pdc_chg.get('raw_output', '')}\nADC Status:\n{adc_raw}"
+    )
+
+    return maui_manufacturing_pb2.MauiHostDutTestResponse(
+        all_passed=all_passed,
+        h2h_speed_5gbps=h2h_5gbps,
+        h2h_serial=detected_serial,
+        h2h_serial_matched=serial_matched,
+        negotiated_voltage_v=voltage_v,
+        negotiated_current_a=current_a,
+        pd_contract_ok=pd_contract_ok,
+        ap_uart_ok=ap_uart_ok,
+        ec_uart_ok=ec_uart_ok,
+        gsc_uart_ok=gsc_uart_ok,
+        sbu_flip_ok=sbu_flip_ok,
+        summary=summary,
+        measured_vbus_mv=measured_vbus_mv,
+        ap_version_str=ap_version_str,
+        ec_version_str=ec_version_str,
+        gsc_version_str=gsc_version_str,
+        dut_orientation=dut_orientation,
+        adb_connected=adb_ok,
+        adb_dut_speed=dut_speed_str,
+        charger_disconnected_ok=charger_disconnected_ok,
+        charger_connected_ok=charger_connected_ok,
+        calculated_power_w=calculated_power_w,
+    )

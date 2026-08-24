@@ -37,6 +37,11 @@ import {MatAutocompleteModule} from '@angular/material/autocomplete';
 import {MatIconRegistry} from '@angular/material/icon';
 import {ServoV4p1ManufacturingComponent} from './servo-v4p1-manufacturing/servo-v4p1-manufacturing';
 import {ServoMicroManufacturingComponent} from './servo-micro-manufacturing/servo-micro-manufacturing';
+import {MauiInitialFlashingComponent} from './maui-initial-flashing/maui-initial-flashing';
+import {MauiPdcFlashingComponent} from './maui-pdc-flashing/maui-pdc-flashing';
+import {MauiHostTestingComponent} from './maui-host-testing/maui-host-testing';
+import {MauiDutTestingComponent} from './maui-dut-testing/maui-dut-testing';
+import {MauiLabelingComponent} from './maui-labeling/maui-labeling';
 
 @NgModule({
   imports: [
@@ -62,6 +67,11 @@ import {ServoMicroManufacturingComponent} from './servo-micro-manufacturing/serv
     MatAutocompleteModule,
     ServoV4p1ManufacturingComponent,
     ServoMicroManufacturingComponent,
+    MauiInitialFlashingComponent,
+    MauiPdcFlashingComponent,
+    MauiHostTestingComponent,
+    MauiDutTestingComponent,
+    MauiLabelingComponent,
   ],
   providers: [provideAnimationsAsync()],
 })

@@ -1,0 +1,45 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<div class="failure-dialog-container">
+  <div class="dialog-header">
+    <mat-icon class="header-icon">warning</mat-icon>
+    <h2 mat-dialog-title class="dialog-title">{{ title }}</h2>
+  </div>
+
+  <mat-dialog-content class="dialog-content">
+    <div class="error-box">
+      <pre class="error-text">{{ formattedError }}</pre>
+    </div>
+    <div class="helper-note" style="flex-direction: column; align-items: flex-start; gap: 4px;">
+      <div style="display: flex; align-items: center; gap: 6px; font-weight: 600; color: #1a73e8;">
+        <mat-icon class="note-icon">info</mat-icon>
+        <span>Operator Protocol:</span>
+      </div>
+      <ol style="margin: 0; padding-left: 18px; font-size: 0.8rem; line-height: 1.4; color: #3c4043;">
+        <li>Read the error message and test steps above carefully and make sure you did not miss any required cable connections or setup steps.</li>
+        <li>Retry this test at least once using the <strong>Retry Test</strong> button.</li>
+        <li>If retrying does not help, <strong>unplug all cables</strong> from Maui, <strong>re-plug only what is required in this test</strong>, and retry for the second time.</li>
+        <li>If the test still fails, click <strong>Continue / Bypass</strong> to proceed to the next step, leaving this stage marked as failed.</li>
+      </ol>
+    </div>
+  </mat-dialog-content>
+
+  <mat-dialog-actions align="end" class="dialog-actions">
+    <button mat-button color="primary" (click)="onClose()">
+      Cancel
+    </button>
+    @if (allowBypass) {
+      <button mat-stroked-button color="warn" class="bypass-btn" (click)="onBypass()">
+        <mat-icon>skip_next</mat-icon>
+        Continue / Bypass
+      </button>
+    }
+    <button mat-raised-button color="primary" class="retry-btn" (click)="onRetry()">
+      <mat-icon>refresh</mat-icon>
+      Retry Test
+    </button>
+  </mat-dialog-actions>
+</div>

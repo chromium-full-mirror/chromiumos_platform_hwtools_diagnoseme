@@ -38,9 +38,9 @@ docker build -t envoy:latest -f dockerfiles/envoy/Dockerfile .
 docker build --output "./src/generated_tmp" --target copytohost -f dockerfiles/utilities/Dockerfile.protoc .
 
 # Handle Python generated files
-rm -rf ./src/server/generated
+rm -rf ./src/server/generated/* 2>/dev/null || true
 mkdir -p ./src/server/generated
-cp -r ./src/generated_tmp/python/server/generated/* ./src/server/generated/
+cp -rf ./src/generated_tmp/python/server/generated/* ./src/server/generated/
 
 # Handle TypeScript generated files
 rm -rf ./src/ui/src/proto

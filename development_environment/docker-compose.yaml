@@ -35,8 +35,10 @@ services:
     volumes:
       - logs:/var/log/rpcserver
       - /dev:/dev
-      - /sys:/sys
+      - /sys:/sys:ro
       - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp:/tmp
+      - ${HOME}/diagnoseme_results:/root/diagnoseme_results
 
   #############################################################################
   envoy:

@@ -1,0 +1,15 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<div class="footer-actions">
+  <button mat-raised-button color="accent" class="action-btn-wide" (click)="refresh()">
+    <mat-icon>refresh</mat-icon>
+    Refresh for Next Unit
+  </button>
+  <button mat-raised-button color="primary" class="action-btn-wide" (click)="goToNext()">
+    <mat-icon>arrow_forward</mat-icon>
+    {{ nextStationLabel }}
+  </button>
+</div>

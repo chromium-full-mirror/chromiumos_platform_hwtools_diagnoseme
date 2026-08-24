@@ -1,0 +1,89 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+.failure-dialog-container {
+  padding: 16px;
+  max-width: 560px;
+
+  .dialog-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+
+    .header-icon {
+      color: #d93025;
+      font-size: 28px;
+      width: 28px;
+      height: 28px;
+    }
+
+    .dialog-title {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 500;
+      color: #202124;
+    }
+  }
+
+  .dialog-content {
+    margin-top: 8px;
+    padding: 0;
+    max-height: 380px;
+
+    .error-box {
+      background-color: #fce8e6;
+      border: 1px solid #fad2cf;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 12px;
+
+      .error-text {
+        margin: 0;
+        font-family: monospace;
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #c5221f;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+    }
+
+    .helper-note {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      color: #5f6368;
+      background: #f8f9fa;
+      padding: 8px 12px;
+      border-radius: 4px;
+
+      .note-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        color: #1a73e8;
+      }
+    }
+  }
+
+  .dialog-actions {
+    margin-top: 16px;
+    padding: 0;
+    display: flex;
+    gap: 8px;
+
+    .bypass-btn {
+      color: #e37400;
+      border-color: #f9ab00;
+    }
+
+    .retry-btn {
+      background-color: #1a73e8;
+      color: #ffffff;
+    }
+  }
+}

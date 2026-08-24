@@ -202,20 +202,53 @@ def discover_servo_micro_serial_path(
     )
 
 
-def is_usb_device_present(vid: int, pids: List[int]) -> bool:
-    """Check if a USB device is present on the system.
+def is_usb_device_present(vid: Any, pids: List[Any]) -> bool:
+    """Check if a USB device is present on the system using fast sysfs inspection.
 
     Args:
-        vid: Vendor ID.
-        pids: List of Product IDs.
+        vid: Vendor ID (int or hex string like "0bda" or 0x0BDA).
+        pids: List of Product IDs (int or hex string like "5411" or 0x5411).
 
     Returns:
         True if found.
     """
-    lsusb = run_command(["lsusb"]).stdout.lower()
+    try:
+        vid_int = int(vid, 16) if isinstance(vid, str) else int(vid)
+    except Exception:
+        vid_int = 0
+
+    pids_int = []
     for pid in pids:
-        if f"{vid:04x}:{pid:04x}" in lsusb:
-            return True
+        try:
+            pids_int.append(int(pid, 16) if isinstance(pid, str) else int(pid))
+        except Exception:
+            pass
+
+    # Fast sysfs search (instant, non-blocking)
+    for dev_dir in glob.glob("/sys/bus/usb/devices/*"):
+        vid_f = os.path.join(dev_dir, "idVendor")
+        pid_f = os.path.join(dev_dir, "idProduct")
+        if os.path.exists(vid_f) and os.path.exists(pid_f):
+            try:
+                with open(vid_f, "r") as f:
+                    v_str = f.read().strip()
+                with open(pid_f, "r") as f:
+                    p_str = f.read().strip()
+                if int(v_str, 16) == vid_int and int(p_str, 16) in pids_int:
+                    return True
+            except Exception:
+                continue
+
+    # Fallback to lsusb with strict 0.5s timeout
+    try:
+        proc = run_command(["lsusb"], check=False, timeout=0.5)
+        lsusb_out = (proc.stdout or "").lower()
+        for pid_int in pids_int:
+            if f"{vid_int:04x}:{pid_int:04x}" in lsusb_out:
+                return True
+    except Exception:
+        pass
+
     return False
 
 

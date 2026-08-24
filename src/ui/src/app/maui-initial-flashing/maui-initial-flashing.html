@@ -1,0 +1,167 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<div class="maui-container">
+  <div class="header-section">
+    <h2>Maui Station 1: Initial Flashing & Provisioning</h2>
+    <p class="subtitle">
+      Automated MCU BSL flashing and FTDI EEPROM configuration for fresh Maui units.
+    </p>
+  </div>
+
+  <div class="cards-column">
+    <!-- Card 1: MCU & FTDI Initial Provisioning -->
+    <diagnoseme-rework-card
+      id="s1-card-1"
+      title="1. MCU & FTDI Initial Provisioning"
+      [progress]="provisioningInProgress"
+      [disabled]="false">
+
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text">Plug the test station USB-C cable into the Maui <strong>Host USB-C port</strong>.</span>
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text">Flashing triggers automatically (or click <strong>Start Provisioning</strong> for manual retry).</span>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          <div class="info-row">
+            <span class="label">Detection Status:</span>
+            <span class="badge" [class.badge-active]="bslDetected || provisioningSuccessful" [class.badge-idle]="!bslDetected && !provisioningSuccessful">
+              {{ bslStatusMessage }}
+            </span>
+          </div>
+
+          @if (detectedPid) {
+            <div class="info-row">
+              <span class="label">FTDI State:</span>
+              <span class="value" [class.tag-unprog]="isUnprogrammed" [class.tag-prog]="isProgrammed">
+                {{ pidStatusText }}
+              </span>
+            </div>
+          }
+
+          <div class="info-row">
+            <span class="label">MCU Flashing:</span>
+            <span
+              class="value"
+              [class.tag-prog]="mcuFlashingSuccessful"
+              [class.tag-unprog]="mcuFlashingFailed">
+              {{ mcuStatusMessage }}
+            </span>
+          </div>
+
+          @if (discoveredSerial) {
+            <div class="info-row">
+              <span class="label">Target Serial:</span>
+              <span class="value serial-badge">{{ discoveredSerial }}</span>
+            </div>
+          }
+
+          <div class="info-row">
+            <span class="label">FTDI Config:</span>
+            <span
+              class="value"
+              [class.tag-prog]="ftdiProgrammingSuccessful"
+              [class.tag-unprog]="provisioningFailed && !ftdiProgrammingSuccessful">
+              {{ ftdiStatusMessage }}
+            </span>
+          </div>
+
+          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+            <button
+              #provisionBtn
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="provisioningInProgress || provisioningSuccessful"
+              (click)="startProvisioning()">
+              <mat-icon>flash_on</mat-icon>
+              {{ provisioningFailed ? 'Retry Provisioning' : 'Start Provisioning' }}
+            </button>
+            <button
+              mat-stroked-button
+              color="warn"
+              [disabled]="provisioningInProgress || provisioningSuccessful"
+              (click)="bypassProvisioning()">
+              <mat-icon>skip_next</mat-icon>
+              Bypass
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #provisionStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+
+    <!-- Card 2: Disconnect Device & Save Logs -->
+    <diagnoseme-rework-card
+      id="s1-card-2"
+      title="2. Disconnect Device & Save Logs"
+      [progress]="checkingDisconnect || savingLogs"
+      [disabled]="!provisioningSuccessful">
+
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text">Unplug the Maui board from the Host USB-C cable.</span>
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text">Click <strong>Save Logs</strong> to record station results.</span>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          <div class="info-row">
+            <span class="label">Unit Status:</span>
+            <span
+              class="value"
+              [class.tag-prog]="deviceDisconnected || (!deviceStillConnectedError && provisioningSuccessful)"
+              [class.tag-unprog]="deviceStillConnectedError">
+              {{ disconnectStatusMessage || (provisioningSuccessful ? 'Ready to Disconnect' : 'Awaiting Provisioning') }}
+            </span>
+          </div>
+
+          <div class="actions-wrapper">
+            @if (!logsSaved) {
+              <button
+                #completeButton
+                mat-raised-button
+                color="accent"
+                class="action-btn-wide"
+                [disabled]="!provisioningSuccessful || checkingDisconnect || savingLogs"
+                (click)="saveLogs()">
+                <mat-icon>save</mat-icon>
+                Save Logs
+              </button>
+            } @else {
+              <app-maui-station-footer
+                nextStationRoute="/maui-pdc-flashing"
+                nextStationLabel="Go to Next Station">
+              </app-maui-station-footer>
+            }
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #completeStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+  </div>
+</div>

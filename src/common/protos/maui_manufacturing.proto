@@ -1,0 +1,456 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+syntax = "proto3";
+
+package diagnoseme;
+
+import "google/protobuf/empty.proto";
+
+// ==========================================
+// STATION 1: Initial Flashing & Provisioning (MCU & FTDI)
+// ==========================================
+service MauiStation1InitialFlashing {
+  // Real-time BSL auto-discovery stream to capture <10s window and detect 0403:6001 vs 0403:6002
+  rpc stream_bsl_auto_discovery(google.protobuf.Empty) returns (stream MauiBslDiscoveryResponse) {}
+
+  // Auto/Manual MCU BSL Flashing
+  rpc auto_program_mcu_bsl(MauiAutoProgramMcuRequest) returns (MauiProgramMcuResponse) {}
+
+  // Read Pre-flashed Serial & Discover FTDI Topology via Container ID
+  rpc discover_topology_and_serial(google.protobuf.Empty) returns (MauiTopologyDiscoveryResponse) {}
+
+  // FTDI EEPROM Programming via ft232r_prog (--new-pid 0x6002 --new-serial-number)
+  rpc program_ftdi_eeprom(MauiProgramFtdiRequest) returns (MauiProgramFtdiResponse) {}
+}
+
+// ==========================================
+// DEDICATED PDC FLASHING: Parallel Multi-Device Programming
+// ==========================================
+service MauiPdcFlashing {
+  // Discover all connected 0403:6002 devices (up to 4 devices)
+  rpc discover_connected_pdc_devices(google.protobuf.Empty) returns (MauiConnectedPdcDevicesResponse) {}
+
+  // Program a single PDC device with real-time block progress streaming
+  rpc program_single_pdc(MauiProgramSinglePdcRequest) returns (stream MauiProgramPdcProgressResponse) {}
+
+  // Legacy single-device method
+  rpc program_pdc(MauiProgramPdcRequest) returns (stream MauiProgramPdcProgressResponse) {}
+}
+
+// ==========================================
+// FUNCTIONAL TESTING & VERIFICATION
+// ==========================================
+service MauiStation2FunctionalTesting {
+  // Station Pre-checks
+  rpc check_station2_setup(MauiStation2SetupRequest) returns (MauiStation2SetupResponse) {}
+
+  // Card A: Host-Only Verification (Host USB enumeration, MCU version, PDC info)
+  rpc run_host_only_tests(MauiHostOnlyTestRequest) returns (MauiHostOnlyTestResponse) {}
+
+  // Host cable 180° re-plug test with 3s settling delay
+  rpc test_host_replug(MauiHostReplugTestRequest) returns (MauiHostReplugTestResponse) {}
+
+  // Automated Interactive RESET Button Test (reads kernel uptime T1 >= 10s, waits for reset + 5s re-enumeration, reads T2 < T1)
+  rpc test_reset_button(MauiResetButtonTestRequest) returns (MauiResetButtonTestResponse) {}
+
+  // Automated Interactive BSL Button Test (samples `adc status` every 0.2s for max 5s, checks BSL >= 2500mV)
+  rpc test_bsl_button(MauiBslButtonTestRequest) returns (MauiBslButtonTestResponse) {}
+
+  // Card B: Host + DUT Verification (5Gbps H2H Link, 20V/100W PD Contract, CCD via servod, SBU Flip)
+  rpc run_host_dut_tests(MauiHostDutTestRequest) returns (MauiHostDutTestResponse) {}
+
+  // Interactive Visual Tests (LEDs)
+  rpc run_interactive_test(MauiInteractiveTestRequest) returns (MauiInteractiveTestResponse) {}
+
+  // MES Webhook Transmission & Sign-off
+  rpc submit_mes_results(MauiSubmitMesResultsRequest) returns (MauiSubmitMesResultsResponse) {}
+
+  // Legacy compatibility RPCs
+  rpc verify_h2h_bridge(MauiVerifyH2hRequest) returns (MauiVerifyH2hResponse) {}
+  rpc run_functional_verification(MauiFunctionalTestRequest) returns (MauiFunctionalTestResponse) {}
+}
+
+// ==========================================
+// LOGS MANAGEMENT & FINAL LABELING / MES
+// ==========================================
+service MauiDeviceManagement {
+  // Read real electronic serial number from the physically connected Maui device
+  rpc read_connected_device_serial(google.protobuf.Empty) returns (MauiReadSerialResponse) {}
+
+  // Inspect /tmp/<serial>_diagnoseme_logs directory and return available logs
+  rpc get_device_logs_status(MauiLogsStatusRequest) returns (MauiLogsStatusResponse) {}
+
+  // Save/append specific card log into /tmp/<serial>_diagnoseme_logs/<step>.log
+  rpc save_card_log(MauiSaveLogRequest) returns (MauiSaveLogResponse) {}
+
+  // Verify scanned label matches device serial number
+  rpc verify_scanned_label(MauiVerifyLabelRequest) returns (MauiVerifyLabelResponse) {}
+
+  // Final manufacturing submission: creates final_results.json and mocks upstream MES dispatch
+  rpc submit_final_manufacturing_results(MauiFinalSubmissionRequest) returns (MauiFinalSubmissionResponse) {}
+}
+
+// Data Messages
+message MauiBslDiscoveryResponse {
+  bool bsl_detected = 1;
+  string device_port = 2;       // e.g. /dev/ttyUSB0
+  int32 time_remaining_sec = 3; // Countdown from 10s
+  string message = 4;
+  uint32 vid = 5;               // e.g. 0x0403
+  uint32 pid = 6;               // e.g. 0x6001 or 0x6002
+  bool auto_flash_eligible = 7;  // True if 0x6001, False if 0x6002
+  string detected_serial = 8;
+}
+
+message MauiAutoProgramMcuRequest {
+  string serial_number = 1;
+  string fw_channel = 2;        // "stable"
+  string device_port = 3;
+}
+
+message MauiProgramMcuResponse {
+  bool success = 1;
+  string build_hash = 2;
+  string detected_hwrev = 3;
+  string message = 4;
+  string logs = 5;
+}
+
+message MauiTopologyDiscoveryResponse {
+  bool success = 1;
+  string read_serial_number = 2; // e.g. <SERIAL> read from Prolific 18d1:506d/5084
+  string usb2_hub_serial = 3;    // e.g. CC00086185C0
+  string ftdi_dev_node = 4;      // e.g. /dev/ttyUSB0
+  string container_id = 5;
+  string error_message = 6;
+}
+
+message MauiProgramFtdiRequest {
+  string serial_number = 1;
+  uint32 vid = 2;               // 0x0403
+  uint32 pid = 3;               // 0x6002
+  string product_name = 4;      // "Maui Serial Console"
+  string ftdi_dev_node = 5;
+}
+
+message MauiProgramFtdiResponse {
+  bool success = 1;
+  string eeprom_checksum = 2;
+  string message = 3;
+  string logs = 4;
+}
+
+// Multi-device PDC Flashing Messages
+message MauiPdcDeviceInfo {
+  int32 slot_index = 1;         // 1 to 4
+  string serial_number = 2;     // e.g. <SERIAL>
+  string device_port = 3;       // e.g. /dev/ttyUSB0
+  string container_id = 4;
+  string product_description = 5;
+}
+
+message MauiConnectedPdcDevicesResponse {
+  bool success = 1;
+  repeated MauiPdcDeviceInfo devices = 2;
+  string message = 3;
+}
+
+message MauiProgramSinglePdcRequest {
+  int32 slot_index = 1;
+  string serial_number = 2;
+  string device_port = 3;
+  string fw_channel = 4;        // "stable"
+}
+
+message MauiProgramPdcProgressResponse {
+  bool is_complete = 1;
+  int32 progress_percent = 2;   // 0 to 100%
+  string current_block = 3;     // e.g. "Block 4: 12000/16384 bytes"
+  string status_message = 4;
+  string error_message = 5;
+  int32 slot_index = 6;
+  string serial_number = 7;
+}
+
+message MauiProgramPdcRequest {
+  string fw_channel = 1;        // "stable"
+}
+
+// Testing Messages
+message MauiHostOnlyTestRequest {
+  string serial_number = 1;
+  string device_port = 2;
+}
+
+message MauiHostOnlyTestResponse {
+  bool all_passed = 1;
+  bool hub_usb2_detected = 2;
+  bool hub_usb3_detected = 3;
+  bool ftdi_detected = 4;       // Checked for PID 0x6002 exclusively
+  bool h2h_detected = 5;
+  bool mcu_version_ok = 6;
+  bool pdc_info_ok = 7;
+  string mcu_version_str = 8;
+  string pdc_appconfig_ver = 9;
+  string pdc_fw_ver = 10;
+  string summary = 11;
+  bool pdc_charger_ok = 12;
+  double charger_voltage_v = 13;
+  int32 charger_measured_vbus_mv = 14;
+}
+
+message MauiHostDutTestRequest {
+  string serial_number = 1;
+  string expected_serial = 2;
+  string stage = 3;             // "stage1_with_charger", "stage2_sbu_flip", "stage3_no_charger", "all"
+  string previous_orientation = 4; // e.g. "Normal (CC1)" from stage 1 to verify flip in stage 2
+}
+
+message MauiHostDutTestResponse {
+  bool all_passed = 1;
+  bool h2h_speed_5gbps = 2;
+  string h2h_serial = 3;
+  bool h2h_serial_matched = 4;
+  double negotiated_voltage_v = 5;
+  double negotiated_current_a = 6;
+  bool pd_contract_ok = 7;      // PD contract verification (>= 60W, target 100W)
+  bool ap_uart_ok = 8;
+  bool ec_uart_ok = 9;
+  bool gsc_uart_ok = 10;
+  bool sbu_flip_ok = 11;
+  string summary = 12;
+  int32 measured_vbus_mv = 13;
+  string ap_version_str = 14;
+  string ec_version_str = 15;
+  string gsc_version_str = 16;
+  string dut_orientation = 17;
+  bool adb_connected = 18;
+  string adb_dut_speed = 19;
+  bool charger_disconnected_ok = 20;
+  bool charger_connected_ok = 21;
+  double calculated_power_w = 22;
+}
+
+message MauiStation2SetupRequest {
+  string station_id = 1;
+  string operator_id = 2;
+}
+
+message MauiStation2SetupResponse {
+  bool is_ready = 1;
+  bool dut_ready = 2;
+  bool charger_ready = 3;
+  bool mes_reachable = 4;
+  string error_message = 5;
+}
+
+message MauiVerifyH2hRequest {
+  string expected_serial = 1;
+}
+
+message MauiVerifyH2hResponse {
+  bool success = 1;
+  string detected_serial = 2;
+  string link_speed = 3;        // e.g. "5Gbps"
+  bool serial_matched = 4;
+  string message = 5;
+}
+
+message MauiInteractiveTestRequest {
+  string test_type = 1;         // "reset_button", "bsl_button", "led_check"
+  bool led1_green_1hz = 2;
+  bool led2_amber_solid = 3;
+}
+
+message MauiInteractiveTestResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message MauiFunctionalTestRequest {
+  string serial_number = 1;
+  bool test_power_delivery = 2;
+  bool test_ccd_consoles = 3;
+  bool test_sbu_flip = 4;
+}
+
+message MauiFunctionalTestResponse {
+  bool all_passed = 1;
+  double negotiated_voltage_v = 2;
+  double negotiated_current_a = 3;
+  bool ap_uart_ok = 4;
+  bool ec_uart_ok = 5;
+  bool gsc_uart_ok = 6;
+  bool sbu_flip_ok = 7;
+  string summary = 8;
+}
+
+message MauiStepResult {
+  bool success = 1;
+  int32 retry_count = 2;
+  repeated string failure_logs = 3;
+}
+
+message MauiSubmitMesResultsRequest {
+  string station_id = 1;
+  string operator_id = 2;
+  string serial_number = 3;
+  MauiStepResult pdc_flashing = 4;
+  MauiStepResult h2h_verification = 5;
+  MauiStepResult interactive_tests = 6;
+  MauiStepResult functional_tests = 7;
+}
+
+message MauiSubmitMesResultsResponse {
+  bool success = 1;
+  string mes_ack_code = 2;
+  string message = 3;
+}
+
+// Host Re-plug Messages
+message MauiHostReplugTestRequest {
+  string serial_number = 1;
+  string device_port = 2;
+}
+
+message MauiHostReplugTestResponse {
+  bool all_passed = 1;
+  bool hub_usb2_detected = 2;
+  bool hub_usb3_detected = 3;
+  bool ftdi_detected = 4;
+  bool h2h_detected = 5;
+  string message = 6;
+}
+
+// Reset Button Test Messages
+message MauiResetButtonTestRequest {
+  string serial_number = 1;
+  string device_port = 2;
+  string action = 3;            // "check_initial_uptime" or "verify_post_reset_uptime"
+  int64 initial_uptime_ms = 4;
+}
+
+message MauiResetButtonTestResponse {
+  bool success = 1;
+  int64 current_uptime_ms = 2;
+  bool uptime_sufficient = 3;   // >= 10000 ms
+  bool reset_verified = 4;      // current_uptime < initial_uptime
+  string message = 5;
+  string raw_output = 6;
+}
+
+// BSL Button ADC Test Messages
+message MauiBslButtonTestRequest {
+  string serial_number = 1;
+  string device_port = 2;
+  int32 max_sample_duration_sec = 3; // default 5s
+}
+
+message MauiBslButtonTestResponse {
+  bool success = 1;
+  int32 peak_bsl_mv = 2;        // Peak ADC reading (expected >= 2500mV)
+  int32 threshold_mv = 3;       // 2500mV
+  string message = 4;
+  string raw_adc_table = 5;
+}
+
+// Logs Management Messages
+message MauiLogFileInfo {
+  string log_name = 1;          // e.g. "mcu_flashing.log"
+  string file_path = 2;
+  int64 file_size_bytes = 3;
+  bool is_present = 4;
+  string stage_verdict = 5;     // "PASSED", "BYPASSED", "FAILED", "MISSING", "PASSED (SKIPPED)"
+  string details = 6;           // Short summary of evaluated result
+}
+
+message MauiLogsStatusRequest {
+  string serial_number = 1;
+}
+
+message MauiLogsStatusResponse {
+  bool directory_exists = 1;
+  string directory_path = 2;    // e.g. "/tmp/<SERIAL>_diagnoseme_logs"
+  repeated MauiLogFileInfo logs = 3;
+  bool all_required_logs_present = 4;
+  string message = 5;
+  map<string, string> stage_statuses = 6; // map of stage -> "PASSED" | "BYPASSED" | "FAILED" | "NOT_RUN"
+  string overall_verdict = 7;             // "PASS" | "PASS_WITH_BYPASS" | "FAIL" | "INCOMPLETE"
+}
+
+message MauiSaveLogRequest {
+  string serial_number = 1;
+  string log_step_name = 2;     // "mcu_flashing", "ftdi_programming", "pdc_flashing", "host_only_tests", "host_dut_tests"
+  string log_content = 3;
+}
+
+message MauiSaveLogResponse {
+  bool success = 1;
+  string saved_file_path = 2;
+  string message = 3;
+}
+
+// Label Verification Messages
+message MauiVerifyLabelRequest {
+  string electronic_serial = 1; // Expected device serial (or primary serial)
+  string scanned_barcode = 2;   // Scanned from physical sticker label
+  string adb_serial = 3;        // Serial read from ADB endpoint (18d1:506d / 5084)
+  string ftdi_serial = 4;       // Serial read from FTDI endpoint (0403:6002 / 6001)
+}
+
+message MauiVerifyLabelResponse {
+  bool matches = 1;             // True if ADB == FTDI == Scanned Barcode
+  string electronic_serial = 2;
+  string scanned_barcode = 3;
+  string adb_serial = 4;
+  string ftdi_serial = 5;
+  bool adb_matches = 6;         // Scanned barcode == ADB serial
+  bool ftdi_matches = 7;        // Scanned barcode == FTDI serial
+  bool dual_endpoints_match = 8;// ADB serial == FTDI serial
+  string message = 9;
+}
+
+// Final Submission Messages
+message MauiFinalSubmissionRequest {
+  string serial_number = 1;
+  string operator_id = 2;
+  string station_id = 3;
+  bool mcu_flashed = 4;
+  bool ftdi_programmed = 5;
+  bool pdc_flashed = 6;
+  bool host_only_passed = 7;
+  bool host_dut_passed = 8;
+  bool label_verified = 9;
+  map<string, string> stage_statuses = 10; // Map of stage name -> "PASSED" | "FAILED" | "BYPASSED"
+  string adb_serial = 11;
+  string ftdi_serial = 12;
+  string scanned_barcode = 13;
+}
+
+message MauiFinalSubmissionResponse {
+  bool success = 1;
+  string summary_file_path = 2; // e.g. "/tmp/<SERIAL>_diagnoseme_logs/final_results.json"
+  string mes_tracking_id = 3;
+  string message = 4;
+}
+
+message MauiReadSerialResponse {
+  bool is_connected = 1;
+  string serial_number = 2;       // Primary electronic serial
+  string device_port = 3;          // FTDI console port e.g. /dev/ttyUSB0
+  string product_name = 4;
+  string message = 5;
+  string adb_serial = 6;          // VID 18d1, PID 506d (Google ADB v1) / 5084
+  bool adb_connected = 7;
+  string adb_product = 8;
+  string ftdi_serial = 9;         // VID 0403, PID 6002 (FT232R USB UART)
+  bool ftdi_connected = 10;
+  string ftdi_product = 11;
+  bool dual_endpoints_match = 12; // adb_serial == ftdi_serial AND ftdi_pid == 0x6002
+  int32 ftdi_pid = 13;            // e.g. 0x6001 (unprogrammed) or 0x6002 (programmed)
+  bool ftdi_is_programmed = 14;   // True exclusively when ftdi_pid == 0x6002
+}
+
+

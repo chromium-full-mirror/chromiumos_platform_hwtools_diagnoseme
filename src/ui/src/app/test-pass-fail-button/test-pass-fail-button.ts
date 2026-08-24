@@ -35,6 +35,11 @@ export class TestPassFailButton {
     this.statusIcon = 'close';
     this.statusCSS = 'test-fail-button';
   };
+  showBypassed = () => {
+    this.display = true;
+    this.statusIcon = 'fast_forward';
+    this.statusCSS = 'test-bypassed-button';
+  };
   hide = () => {
     this.display = false;
   };

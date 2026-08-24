@@ -22,10 +22,19 @@ from grpc_reflection.v1alpha import reflection
 
 from server import diagnoseme_service
 from server import dolos
+from server import maui_station1_service
+from server import maui_station2_service
 from server import servo_manufacturing
 from server import servo_micro_manufacturing
 from server import servod
 from server.config import config
+from server.generated import maui_manufacturing_pb2
+from server.generated.maui_manufacturing_pb2_grpc import (
+    add_MauiStation1InitialFlashingServicer_to_server,
+    add_MauiPdcFlashingServicer_to_server,
+    add_MauiStation2FunctionalTestingServicer_to_server,
+    add_MauiDeviceManagementServicer_to_server,
+)
 
 # pylint: disable=no-name-in-module,import-error
 from server.generated import diagnoseme_dolos_pb2
@@ -146,6 +155,54 @@ async def serve():
             service_name = (
                 servo_manufacturing_pb2.DESCRIPTOR.services_by_name[  # pylint: disable=no-member
                     "ServoMicroManufacturing"
+                ].full_name,
+                reflection.SERVICE_NAME,
+            )
+            reflection.enable_server_reflection(service_name, server)
+
+            add_MauiStation1InitialFlashingServicer_to_server(
+                maui_station1_service.MauiStation1Servicer(),
+                server,
+            )
+            service_name = (
+                maui_manufacturing_pb2.DESCRIPTOR.services_by_name[  # pylint: disable=no-member
+                    "MauiStation1InitialFlashing"
+                ].full_name,
+                reflection.SERVICE_NAME,
+            )
+            reflection.enable_server_reflection(service_name, server)
+
+            add_MauiPdcFlashingServicer_to_server(
+                maui_station1_service.MauiPdcServicer(),
+                server,
+            )
+            service_name = (
+                maui_manufacturing_pb2.DESCRIPTOR.services_by_name[  # pylint: disable=no-member
+                    "MauiPdcFlashing"
+                ].full_name,
+                reflection.SERVICE_NAME,
+            )
+            reflection.enable_server_reflection(service_name, server)
+
+            add_MauiStation2FunctionalTestingServicer_to_server(
+                maui_station2_service.MauiStation2Servicer(),
+                server,
+            )
+            service_name = (
+                maui_manufacturing_pb2.DESCRIPTOR.services_by_name[  # pylint: disable=no-member
+                    "MauiStation2FunctionalTesting"
+                ].full_name,
+                reflection.SERVICE_NAME,
+            )
+            reflection.enable_server_reflection(service_name, server)
+
+            add_MauiDeviceManagementServicer_to_server(
+                maui_station1_service.MauiDeviceManagementServicer(),
+                server,
+            )
+            service_name = (
+                maui_manufacturing_pb2.DESCRIPTOR.services_by_name[  # pylint: disable=no-member
+                    "MauiDeviceManagement"
                 ].full_name,
                 reflection.SERVICE_NAME,
             )

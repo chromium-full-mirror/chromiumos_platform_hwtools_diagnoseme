@@ -1,0 +1,163 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+.maui-container {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+
+  .header-section {
+    margin-bottom: 24px;
+    h2 {
+      margin: 0 0 6px 0;
+      color: #202124;
+      font-size: 22px;
+      font-weight: 500;
+    }
+    .subtitle {
+      margin: 0;
+      color: #5f6368;
+      font-size: 14px;
+    }
+  }
+
+  .cards-column {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+}
+
+.steps-vertical-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.instructions-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+
+  .step-num {
+    background-color: #e8f0fe;
+    color: #1a73e8;
+    font-weight: 600;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    white-space: nowrap;
+  }
+  .step-text {
+    color: #3c4043;
+  }
+}
+
+.status-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  .info-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+
+    .label {
+      font-weight: 500;
+      color: #5f6368;
+      min-width: 130px;
+    }
+    .value {
+      font-weight: 600;
+      color: #202124;
+    }
+  }
+
+  .actions-wrapper {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+}
+
+.action-btn-wide {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 16px;
+  white-space: nowrap;
+}
+
+// Badges & Status Tags
+.serial-badge {
+  background: #e6f4ea;
+  color: #137333;
+  font-weight: 700;
+  font-family: monospace;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.tag-prog {
+  background: #e8f0fe;
+  color: #1a73e8;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.tag-unprog {
+  background: #fef7e0;
+  color: #b06000;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.tag-bypass {
+  background: #fef7e0;
+  color: #b06000;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.device-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  margin-top: 12px;
+  font-size: 14px;
+
+  &.connected {
+    background-color: #e6f4ea;
+    color: #137333;
+    border: 1px solid #ceead6;
+  }
+  &.warning {
+    background-color: #fef7e0;
+    color: #b06000;
+    border: 1px solid #feefc3;
+  }
+  &.disconnected {
+    background-color: #fce8e6;
+    color: #c5221f;
+    border: 1px solid #fad2cf;
+  }
+
+  .device-status-text {
+    flex: 1;
+  }
+}
+
+
