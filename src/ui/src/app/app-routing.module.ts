@@ -43,7 +43,7 @@ const routes: Routes = [
     path: 'maui-labeling',
     component: MauiLabelingComponent,
   },
-  {path: '', redirectTo: '/dolos-rework', pathMatch: 'full'},
+  {path: '', redirectTo: '/maui-initial-flashing', pathMatch: 'full'},
 ];
 
 @NgModule({

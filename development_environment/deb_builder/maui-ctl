@@ -1,0 +1,14 @@
+#!/bin/bash
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# Forward maui-ctl command to the running server container or local python script
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^server$'; then
+    docker exec -i server maui-ctl "$@"
+elif [ -f /usr/local/maui/tools/src/maui_ctl.py ]; then
+    python3 /usr/local/maui/tools/src/maui_ctl.py "$@"
+else
+    echo "Error: DiagnoseMe server container is not running. Please run 'start-diagnoseme' first."
+    exit 1
+fi

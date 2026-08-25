@@ -42,8 +42,8 @@ RUN rm -f /docker-entrypoint.d/*
 RUN rm -f /var/log/nginx/*
 RUN chmod uog+rw /var/log/nginx
 
-COPY src/ui/src/assets/* /etc/nginx/html/assets/img/
-COPY src/ui/src/assets/build_info.json /etc/nginx/html/assets/
+COPY src/ui/src/assets/ /etc/nginx/html/assets/
+RUN chmod -R 755 /etc/nginx/html
 
 
 

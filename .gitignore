@@ -31,3 +31,6 @@ src/ui/package-lock.json
 src/ui/src/proto/**
 src/ui/src/assets/build_info.json
 dist/**
+*.iso
+test_server/iso_build/**
+offline_update_bundle/**

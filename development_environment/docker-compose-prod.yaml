@@ -6,26 +6,26 @@ services:
   ##############################################################################
   ui:
     container_name: ui
-    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/ui:release
+    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/ui:maui
     hostname: ui
     restart: unless-stopped
-    pull_policy: always
+    pull_policy: ${PULL_POLICY:-if_not_present}
 
     networks:
       diagnoseme:
         ipv4_address: 192.168.100.10
 
     volumes:
-      - logs:/var/log/nginx
+      - /var/log/diagnoseme/nginx:/var/log/nginx
 
   ##############################################################################
   server:
     container_name: server
-    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/server:release
+    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/server:maui
     hostname: server
     restart: unless-stopped
     privileged: true
-    pull_policy: always
+    pull_policy: ${PULL_POLICY:-if_not_present}
     network_mode: host
     environment:
       - TEST_DUT=brya
@@ -33,37 +33,41 @@ services:
       - RESULTS_SERVER=${RESULTS_SERVER:-}
 
     volumes:
-      - logs:/var/log/rpcserver
+      - /var/log/diagnoseme/rpcserver:/var/log/rpcserver
+      - /tmp:/tmp
+      - /home:/home
+      - ${HOME:-/home/diagnoseme}/diagnoseme_results:/root/diagnoseme_results
       - /dev:/dev
       - /sys:/sys
       - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/diagnoseme/firmware:/var/lib/diagnoseme/firmware:ro
 
   #############################################################################
   envoy:
     container_name: envoy
-    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/envoy:release
+    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/envoy:maui
     restart: unless-stopped
-    pull_policy: always
+    pull_policy: ${PULL_POLICY:-if_not_present}
     network_mode: host
     environment:
       ENVOY_UID: 0
 
     hostname: envoy-proxy
     volumes:
-      - logs:/var/log/envoy
+      - /var/log/diagnoseme/envoy:/var/log/envoy
 
   #############################################################################
   watchtower:
     container_name: watchtower
     image: nickfedor/watchtower:latest
     restart: unless-stopped
+    pull_policy: if_not_present
+    profiles:
+      - online
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     command: --interval 3600 --include-restarting ui server envoy
   #############################################################################
-
-volumes:
-  logs: {}
 
 networks:
   diagnoseme:

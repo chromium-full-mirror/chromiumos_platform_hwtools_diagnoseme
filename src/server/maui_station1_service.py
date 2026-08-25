@@ -23,7 +23,13 @@ from server import maui_common
 from server import util
 from server.generated import maui_manufacturing_pb2
 from server.generated import maui_manufacturing_pb2_grpc
-from server.maui_common import get_device_log_dir, write_device_log
+from server.maui_common import (
+    find_offline_fw_file,
+    get_device_log_dir,
+    get_maui_env,
+    resolve_maui_tool,
+    write_device_log,
+)
 
 
 class MauiStation1Servicer(
@@ -42,6 +48,8 @@ class MauiStation1Servicer(
   PROLIFIC_PID_H2H = maui_common.PROLIFIC_PID_H2H
   HUB_USB2_VID_PID = maui_common.HUB_USB2_VID_PID
   HUB_USB3_VID_PID = maui_common.HUB_USB3_VID_PID
+
+  _find_offline_fw_file = staticmethod(find_offline_fw_file)
 
   def __init__(self):
     pass
@@ -216,12 +224,26 @@ class MauiStation1Servicer(
     if "ACM" in dev_port or ("usb" in dev_port.lower() and "ttyusb" not in dev_port.lower()):
       common_args.append("--usb")
 
+    offline_fw = find_offline_fw_file("mcu")
+    if offline_fw and (fw_channel in ("offline", "stable") or not fw_channel):
+      logging.info("Found local offline MCU firmware: %s. Using --file.", offline_fw)
+      mcu_flash_args = ["mcu", "--file", offline_fw, "--bsl-mode"]
+    elif fw_channel == "offline":
+      logging.error("Offline MCU firmware file not found in /usr/local/server/firmware/mcu or /var/lib/diagnoseme/firmware/mcu.")
+      return maui_manufacturing_pb2.MauiProgramMcuResponse(
+          success=False,
+          message="Offline MCU firmware not found on system.",
+          logs="Error: Local MCU firmware binary (.txt/.hex/.bin) not found in /usr/local/server/firmware/mcu or /var/lib/diagnoseme/firmware/mcu.",
+      )
+    else:
+      mcu_flash_args = ["mcu", "--fw_channel", fw_channel, "--bsl-mode"]
+
     if os.path.exists(maui_flash_bin) or shutil.which("maui-flash"):
-      cmd = [maui_flash_bin] + common_args + ["mcu", "--fw_channel", fw_channel, "--bsl-mode"]
+      cmd = [maui_flash_bin] + common_args + mcu_flash_args
     elif os.path.exists("/usr/local/maui/tools/src/maui_flash.py"):
-      cmd = ["python3", "/usr/local/maui/tools/src/maui_flash.py"] + common_args + ["mcu", "--fw_channel", fw_channel, "--bsl-mode"]
+      cmd = ["python3", "/usr/local/maui/tools/src/maui_flash.py"] + common_args + mcu_flash_args
     elif os.path.exists("/usr/local/maui/tools/scripts/maui-flash"):
-      cmd = ["/usr/local/maui/tools/scripts/maui-flash"] + common_args + ["mcu", "--fw_channel", fw_channel, "--bsl-mode"]
+      cmd = ["/usr/local/maui/tools/scripts/maui-flash"] + common_args + mcu_flash_args
     else:
       logging.error("maui-flash tool not found on system.")
       return maui_manufacturing_pb2.MauiProgramMcuResponse(
@@ -230,8 +252,7 @@ class MauiStation1Servicer(
           logs="Error: maui-flash binary not found in PATH or /usr/local/bin/maui-flash. Please ensure maui tools are installed.",
       )
 
-    env = os.environ.copy()
-    env["PYTHONPATH"] = f"/usr/local/maui/tools:/usr/local/maui:{env.get('PYTHONPATH', '')}"
+    env = get_maui_env()
 
     try:
       proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=True, timeout=30, env=env)
@@ -566,6 +587,8 @@ class MauiStation1Servicer(
 class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
   """Dedicated multi-device PDC flashing servicer (supports up to 4 parallel 0403:6002 devices)."""
 
+  _find_offline_fw_file = staticmethod(find_offline_fw_file)
+
   def discover_connected_pdc_devices(
       self,
       unused_request: empty_pb2.Empty,
@@ -675,10 +698,29 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
     elif serial_no:
       common_args.extend(["--serial", serial_no])
 
+    offline_fw = find_offline_fw_file("pdc")
+    if offline_fw and (fw_channel in ("offline", "stable") or not fw_channel):
+      logging.info("Found local offline PDC firmware: %s. Using --file.", offline_fw)
+      pdc_flash_args = ["pdc", "--file", offline_fw]
+    elif fw_channel == "offline":
+      logging.error("[Slot %d] Offline PDC firmware file not found in firmware cache directories.", slot_index)
+      yield maui_manufacturing_pb2.MauiProgramPdcProgressResponse(
+          is_complete=True,
+          progress_percent=0,
+          current_block="Failed",
+          status_message="Offline PDC firmware binary not found.",
+          error_message="Error: Local PDC firmware (.bin) not found in /usr/local/server/firmware/pdc or /var/lib/diagnoseme/firmware/pdc.",
+          slot_index=slot_index,
+          serial_number=serial_no,
+      )
+      return
+    else:
+      pdc_flash_args = ["pdc", "--fw_channel", fw_channel]
+
     if os.path.exists(maui_flash_bin) or shutil.which("maui-flash"):
-      cmd = [maui_flash_bin] + common_args + ["pdc", "--fw_channel", fw_channel]
+      cmd = [maui_flash_bin] + common_args + pdc_flash_args
     elif os.path.exists("/usr/local/maui/tools/src/maui_flash.py"):
-      cmd = ["python3", "/usr/local/maui/tools/src/maui_flash.py"] + common_args + ["pdc", "--fw_channel", fw_channel]
+      cmd = ["python3", "/usr/local/maui/tools/src/maui_flash.py"] + common_args + pdc_flash_args
     else:
       logging.warning("maui-flash executable not found. Simulating PDC flash for dev mode.")
       for p in range(0, 101, 20):
@@ -694,8 +736,7 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
       return
 
     try:
-      env = os.environ.copy()
-      env["PYTHONPATH"] = f"/usr/local/maui/tools:/usr/local/maui:{env.get('PYTHONPATH', '')}"
+      env = get_maui_env()
       proc = await asyncio.create_subprocess_exec(
           *cmd,
           stdout=asyncio.subprocess.PIPE,

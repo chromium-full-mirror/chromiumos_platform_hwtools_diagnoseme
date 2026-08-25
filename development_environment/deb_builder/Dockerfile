@@ -21,28 +21,59 @@ RUN mkdir -p usr/local/bin \
              etc/diagnoseme \
              usr/local/server/binfiles \
              etc/modprobe.d \
+             usr/share/applications \
+             etc/skel/Desktop \
+             var/lib/diagnoseme/firmware/mcu \
+             var/lib/diagnoseme/firmware/pdc \
+             var/log/diagnoseme/rpcserver \
+             var/log/diagnoseme/nginx \
+             var/log/diagnoseme/envoy \
              DEBIAN
 
-# Copy start script
-COPY development_environment/deb_builder/start-diagnoseme usr/local/bin/
-RUN chmod 755 usr/local/bin/start-diagnoseme
+# Copy offline firmware into package
+COPY dist/firmware/mcu/* var/lib/diagnoseme/firmware/mcu/
+COPY dist/firmware/pdc/* var/lib/diagnoseme/firmware/pdc/
+RUN chmod 644 var/lib/diagnoseme/firmware/mcu/* var/lib/diagnoseme/firmware/pdc/*
 
-# Copy docker-compose
+# Copy CLI helper scripts
+COPY development_environment/deb_builder/start-diagnoseme usr/local/bin/
+COPY development_environment/deb_builder/stop-diagnoseme usr/local/bin/
+COPY development_environment/deb_builder/diagnoseme-dashboard usr/local/bin/
+COPY development_environment/deb_builder/diagnoseme-logs usr/local/bin/
+COPY development_environment/deb_builder/diagnoseme-offline-update usr/local/bin/
+COPY development_environment/deb_builder/maui-flash usr/local/bin/
+COPY development_environment/deb_builder/maui-ctl usr/local/bin/
+RUN chmod 755 usr/local/bin/start-diagnoseme \
+              usr/local/bin/stop-diagnoseme \
+              usr/local/bin/diagnoseme-dashboard \
+              usr/local/bin/diagnoseme-logs \
+              usr/local/bin/diagnoseme-offline-update \
+              usr/local/bin/maui-flash \
+              usr/local/bin/maui-ctl
+
+# Copy docker-compose and default config
 COPY development_environment/docker-compose-prod.yaml etc/diagnoseme/docker-compose.yaml
+COPY development_environment/deb_builder/config.env etc/diagnoseme/config.env
+RUN chmod 644 etc/diagnoseme/docker-compose.yaml etc/diagnoseme/config.env
+
+# Copy desktop launchers
+COPY development_environment/deb_builder/desktop_launchers/*.desktop usr/share/applications/
+COPY development_environment/deb_builder/desktop_launchers/*.desktop etc/skel/Desktop/
+RUN chmod 644 usr/share/applications/*.desktop
+RUN chmod 755 etc/skel/Desktop/*.desktop
 
 # Copy Realtek tools
 COPY --from=rtk-tools-builder /build/*/rtunicpg-x86_64 usr/local/bin/rtunicpg
 COPY --from=rtk-tools-builder /build/*/EF8153B* usr/local/server/binfiles/
 COPY --from=rtk-tools-builder /build/*/EE8153B* usr/local/server/binfiles/
+RUN chmod 755 usr/local/bin/rtunicpg && chmod 644 usr/local/server/binfiles/*
 
 # Block conflicting modules
 RUN printf "black""list cdc_ether\n" > etc/modprobe.d/diagnoseme-denylist.conf
 
 # Copy Realtek driver source for DKMS
-COPY dist/r8152.tar.bz2 /tmp/
-RUN mkdir -p /tmp/r8152-2.21.4 && tar -xvf /tmp/r8152.tar.bz2 -C /tmp/r8152-2.21.4
-RUN mkdir -p usr/src/r8152-2.21.4
-RUN cp /tmp/r8152-2.21.4/Makefile /tmp/r8152-2.21.4/r8152.c /tmp/r8152-2.21.4/compatibility.h usr/src/r8152-2.21.4/
+COPY dist/r8152-2.21.4.tar.bz2 /tmp/
+RUN mkdir -p usr/src/r8152-2.21.4 && tar -xvf /tmp/r8152-2.21.4.tar.bz2 -C usr/src/r8152-2.21.4
 RUN printf "PACKAGE_NAME=\"r8152\"\nPACKAGE_VERSION=\"2.21.4\"\nBUILT_MODULE_NAME[0]=\"r8152\"\nDEST_MODULE_LOCATION[0]=\"/updates\"\nAUTOINSTALL=\"yes\"" > usr/src/r8152-2.21.4/dkms.conf
 
 ARG DEB_VERSION="1.0.0"
@@ -54,7 +85,7 @@ Maintainer: DiagnoseMe Team\n\
 Depends: docker.io, docker-compose, dkms, build-essential, linux-headers-amd64, libcurl4, libxmlb2, libjcat1, ethtool, usbutils\n\
 Description: Diagnose Me hardware verification tool\n" > DEBIAN/control
 
-# Post-inst script to setup DKMS and permissions
+# Post-inst script to setup DKMS, desktop shortcuts and permissions
 RUN printf "#!/bin/sh\n\
 set -e\n\
 echo \"Setting up Realtek driver via DKMS...\"\n\
@@ -74,9 +105,31 @@ else\n\
     echo \"Warning: Could not detect sudo user. Please run 'sudo usermod -aG docker \$USER' manually.\"\n\
 fi\n\
 \n\
+echo \"Setting up desktop shortcuts...\"\n\
+if [ -d /home/diagnoseme ]; then\n\
+    mkdir -p /home/diagnoseme/Desktop\n\
+    cp -u /usr/share/applications/start-diagnoseme*.desktop /usr/share/applications/stop-diagnoseme.desktop /usr/share/applications/diagnoseme-*.desktop /home/diagnoseme/Desktop/ 2>/dev/null || true\n\
+    chmod +x /home/diagnoseme/Desktop/*.desktop 2>/dev/null || true\n\
+    chown -R diagnoseme:diagnoseme /home/diagnoseme/Desktop 2>/dev/null || true\n\
+fi\n\
+\n\
 echo \"Setting up permissions...\"\n\
 chmod 755 /usr/local/bin/start-diagnoseme\n\
+chmod 755 /usr/local/bin/stop-diagnoseme\n\
+chmod 755 /usr/local/bin/diagnoseme-dashboard\n\
+chmod 755 /usr/local/bin/diagnoseme-logs\n\
+chmod 755 /usr/local/bin/diagnoseme-offline-update\n\
+chmod 755 /usr/local/bin/maui-flash\n\
+chmod 755 /usr/local/bin/maui-ctl\n\
 chmod 755 /usr/local/bin/rtunicpg\n\
+mkdir -p /var/lib/diagnoseme/firmware/mcu /var/lib/diagnoseme/firmware/pdc\n\
+mkdir -p /var/log/diagnoseme/rpcserver /var/log/diagnoseme/nginx /var/log/diagnoseme/envoy\n\
+chmod -R 777 /var/log/diagnoseme 2>/dev/null || true\n\
+if [ -d /home/diagnoseme ]; then\n\
+    mkdir -p /home/diagnoseme/diagnoseme_results/highlevel /home/diagnoseme/diagnoseme_results/detailed\n\
+    chmod -R 777 /home/diagnoseme/diagnoseme_results 2>/dev/null || true\n\
+    chown -R diagnoseme:diagnoseme /home/diagnoseme/diagnoseme_results 2>/dev/null || true\n\
+fi\n\
 " > DEBIAN/postinst
 RUN chmod 755 DEBIAN/postinst
 

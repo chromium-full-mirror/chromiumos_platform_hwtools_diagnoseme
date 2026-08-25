@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Start DiagnoseMe (Online)
+Comment=Start DiagnoseMe testing services and pull latest online images
+Exec=xfce4-terminal --title="Starting DiagnoseMe (Online)" --hold -e "start-diagnoseme --online"
+Icon=utilities-terminal
+Terminal=false
+Categories=System;Utility;

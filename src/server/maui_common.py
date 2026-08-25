@@ -212,6 +212,28 @@ def write_device_log(
     return ""
 
 
+def find_offline_fw_file(component: str) -> Optional[str]:
+  """Checks for local offline firmware files in standard firmware directories."""
+  candidates = [
+      f"/var/lib/diagnoseme/firmware/{component}",
+      f"/usr/local/server/firmware/{component}",
+      f"/usr/share/diagnoseme/firmware/{component}",
+      f"/usr/local/maui/firmware/{component}",
+      f"/dist/firmware/{component}",
+      f"/offline_assets/firmware/{component}",
+      "/var/lib/diagnoseme/firmware",
+      "/usr/local/server/firmware",
+  ]
+  exts = [".txt", ".bin", ".hex"] if component == "mcu" else [".bin", ".hex", ".txt"]
+  for d in candidates:
+    if os.path.isdir(d):
+      for ext in exts:
+        matches = glob.glob(os.path.join(d, f"*{ext}"))
+        if matches:
+          return sorted(matches)[-1]
+  return None
+
+
 def resolve_maui_tool(tool_name: str) -> str:
   """Resolves the executable path for a Maui CLI utility (e.g. maui-flash, maui-ctl)."""
   return shutil.which(tool_name) or f"/usr/local/bin/{tool_name}"

@@ -1,0 +1,247 @@
+#!/bin/bash
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+set -e
+
+echo "=================================================="
+echo " DiagnoseMe Offline USB Update Tool"
+echo "=================================================="
+
+# Check for root / sudo
+if [ "$EUID" -ne 0 ]; then
+    echo "This tool must be run as root (or via sudo)."
+    exit 1
+fi
+
+TEMP_MOUNT_POINT="/mnt/diagnoseme_usb_tmp"
+CLEANUP_TEMP_MOUNT=false
+
+cleanup() {
+    if [ "$CLEANUP_TEMP_MOUNT" = true ] && mountpoint -q "$TEMP_MOUNT_POINT" 2>/dev/null; then
+        echo "Cleaning up temporary USB mount at $TEMP_MOUNT_POINT..."
+        umount "$TEMP_MOUNT_POINT" 2>/dev/null || true
+        rm -rf "$TEMP_MOUNT_POINT" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+# If no path provided, search for mounted removable drives containing diagnoseme-update or .zip
+if [ -z "$BUNDLE_DIR" ]; then
+    echo "Scanning mounted storage for update bundle..."
+    FOUND_DIRS=$(find /media /mnt /run/media -maxdepth 3 -type d \( -name "diagnoseme-update" -o -name "offline_bundle" \) 2>/dev/null || true)
+    
+    for D in $FOUND_DIRS; do
+        if [ -f "$D/MANIFEST.json" ]; then
+            BUNDLE_DIR="$D"
+            break
+        fi
+    done
+
+    # Check for raw .zip archive on already mounted USB media
+    if [ -z "$BUNDLE_DIR" ]; then
+        ZIP_FILE=$(find /media /mnt /run/media -maxdepth 3 -type f -name "*diagnoseme*offline*.zip" 2>/dev/null | head -n 1 || true)
+        if [ -n "$ZIP_FILE" ]; then
+            echo "Found update ZIP file: $ZIP_FILE"
+            echo "Extracting bundle to /tmp..."
+            TMP_DIR="/tmp/diagnoseme-update-pkg"
+            rm -rf "$TMP_DIR" && mkdir -p "$TMP_DIR"
+            unzip -q -o "$ZIP_FILE" -d "$TMP_DIR"
+            if [ -d "$TMP_DIR/diagnoseme-update" ]; then
+                BUNDLE_DIR="$TMP_DIR/diagnoseme-update"
+            else
+                BUNDLE_DIR="$TMP_DIR"
+            fi
+        fi
+    fi
+
+    # If still not found, probe all unmounted block devices / partitions
+    if [ -z "$BUNDLE_DIR" ]; then
+        echo "Searching unmounted USB / block devices..."
+        mkdir -p "$TEMP_MOUNT_POINT"
+        
+        # Get list of partitions and whole disks that are not currently mounted
+        CANDIDATE_DEVS=$(lsblk -lnpo NAME,TYPE,MOUNTPOINT | awk '$2=="part" || $2=="disk" {if ($3=="") print $1}')
+        
+        for DEV in $CANDIDATE_DEVS; do
+            # Skip loop/ram devices
+            if [[ "$DEV" =~ loop|ram|zram ]]; then
+                continue
+            fi
+            
+            # Attempt read-only mount
+            if mount -o ro "$DEV" "$TEMP_MOUNT_POINT" > /dev/null 2>&1; then
+                if [ -f "$TEMP_MOUNT_POINT/diagnoseme-update/MANIFEST.json" ]; then
+                    echo "Found update bundle on $DEV (inside /diagnoseme-update)!"
+                    BUNDLE_DIR="$TEMP_MOUNT_POINT/diagnoseme-update"
+                    CLEANUP_TEMP_MOUNT=true
+                    break
+                elif [ -f "$TEMP_MOUNT_POINT/MANIFEST.json" ]; then
+                    echo "Found update bundle at root of $DEV!"
+                    BUNDLE_DIR="$TEMP_MOUNT_POINT"
+                    CLEANUP_TEMP_MOUNT=true
+                    break
+                else
+                    # Check for ZIP archive on this device
+                    ZIP_ON_DEV=$(find "$TEMP_MOUNT_POINT" -maxdepth 2 -type f -name "*diagnoseme*offline*.zip" 2>/dev/null | head -n 1 || true)
+                    if [ -n "$ZIP_ON_DEV" ]; then
+                        echo "Found update ZIP on $DEV: $ZIP_ON_DEV"
+                        TMP_DIR="/tmp/diagnoseme-update-pkg"
+                        rm -rf "$TMP_DIR" && mkdir -p "$TMP_DIR"
+                        unzip -q -o "$ZIP_ON_DEV" -d "$TMP_DIR"
+                        umount "$TEMP_MOUNT_POINT" 2>/dev/null || true
+                        if [ -d "$TMP_DIR/diagnoseme-update" ]; then
+                            BUNDLE_DIR="$TMP_DIR/diagnoseme-update"
+                        else
+                            BUNDLE_DIR="$TMP_DIR"
+                        fi
+                        break
+                    fi
+                fi
+                umount "$TEMP_MOUNT_POINT" 2>/dev/null || true
+            fi
+        done
+    fi
+
+    # If still not found, prompt user with interactive device selection
+    if [ -z "$BUNDLE_DIR" ]; then
+        echo ""
+        echo "No update bundle found automatically. Let's inspect available drives:"
+        echo "=================================================="
+        
+        DEVS=()
+        i=1
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            dev_name=$(echo "$line" | awk '{print $1}')
+            [[ "$dev_name" =~ loop|ram|zram ]] && continue
+            DEVS+=("$dev_name")
+            echo "  [$i] $line"
+            ((i++))
+        done < <(lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT -pn 2>/dev/null)
+
+        if [ ${#DEVS[@]} -gt 0 ]; then
+            echo "=================================================="
+            read -r -p "Select device number to mount [1-${#DEVS[@]}] (or 'q' to cancel): " choice
+            if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#DEVS[@]}" ]; then
+                SELECTED_DEV="${DEVS[$((choice-1))]}"
+                echo "Mounting $SELECTED_DEV to $TEMP_MOUNT_POINT..."
+                mkdir -p "$TEMP_MOUNT_POINT"
+                if mount -o ro "$SELECTED_DEV" "$TEMP_MOUNT_POINT" 2>/dev/null; then
+                    CLEANUP_TEMP_MOUNT=true
+                    if [ -f "$TEMP_MOUNT_POINT/diagnoseme-update/MANIFEST.json" ]; then
+                        BUNDLE_DIR="$TEMP_MOUNT_POINT/diagnoseme-update"
+                    elif [ -f "$TEMP_MOUNT_POINT/MANIFEST.json" ]; then
+                        BUNDLE_DIR="$TEMP_MOUNT_POINT"
+                    else
+                        ZIP_ON_DEV=$(find "$TEMP_MOUNT_POINT" -maxdepth 2 -type f -name "*diagnoseme*offline*.zip" 2>/dev/null | head -n 1 || true)
+                        if [ -n "$ZIP_ON_DEV" ]; then
+                            TMP_DIR="/tmp/diagnoseme-update-pkg"
+                            rm -rf "$TMP_DIR" && mkdir -p "$TMP_DIR"
+                            unzip -q -o "$ZIP_ON_DEV" -d "$TMP_DIR"
+                            if [ -d "$TMP_DIR/diagnoseme-update" ]; then
+                                BUNDLE_DIR="$TMP_DIR/diagnoseme-update"
+                            else
+                                BUNDLE_DIR="$TMP_DIR"
+                            fi
+                        fi
+                    fi
+                else
+                    echo "Failed to mount $SELECTED_DEV."
+                fi
+            fi
+        fi
+    fi
+fi
+
+if [ -z "$BUNDLE_DIR" ] || [ ! -d "$BUNDLE_DIR" ]; then
+    echo "Error: Could not locate a valid DiagnoseMe offline update bundle or ZIP."
+    echo "Please insert your update USB stick and try again."
+    exit 1
+fi
+
+echo "Found update bundle at: $BUNDLE_DIR"
+cd "$BUNDLE_DIR"
+
+if [ ! -f "MANIFEST.json" ]; then
+    echo "Error: MANIFEST.json not found in $BUNDLE_DIR"
+    exit 1
+fi
+
+echo "Verifying SHA256 checksums from MANIFEST.json..."
+if command -v sha256sum > /dev/null 2>&1; then
+    # Parse MANIFEST.json and verify files if present
+    python3 - <<EOF
+import json, hashlib, sys, os
+
+try:
+    with open("MANIFEST.json") as f:
+        manifest = json.load(f)
+except Exception as e:
+    print(f"Warning: Failed to parse MANIFEST.json ({e}). Skipping integrity checksum verification.")
+    manifest = None
+
+if manifest:
+    files = manifest.get("files", {})
+    for rel_path, expected_sha in files.items():
+        if not os.path.exists(rel_path):
+            print(f"Error: Missing bundle file {rel_path}")
+            sys.exit(1)
+        with open(rel_path, "rb") as f:
+            computed = hashlib.sha256(f.read()).hexdigest()
+        if computed != expected_sha:
+            print(f"Checksum mismatch for {rel_path}!")
+            print(f"  Expected: {expected_sha}")
+            print(f"  Got:      {computed}")
+            sys.exit(1)
+        print(f"  Verified OK: {rel_path}")
+    print("All bundle checksums verified successfully.")
+else:
+    print("Continuing without checksum verification...")
+EOF
+fi
+
+# 1. Update Debian Package if provided
+if [ -d "deb" ]; then
+    DEB_FILE=$(find deb -type f -name "*.deb" | head -n 1)
+    if [ -n "$DEB_FILE" ]; then
+        echo "Installing updated Debian package ($DEB_FILE)..."
+        dpkg -i "$DEB_FILE" || apt-get install -f -y
+    fi
+fi
+
+# 2. Load Docker Images if provided
+if [ -d "images" ]; then
+    echo "Loading Docker images from bundle..."
+    for IMG_ARCHIVE in images/*.tar.gz images/*.tar; do
+        if [ -f "$IMG_ARCHIVE" ]; then
+            echo "  Loading $IMG_ARCHIVE into Docker..."
+            docker load -i "$IMG_ARCHIVE"
+        fi
+    done
+fi
+
+# 3. Update Offline Firmware Cache if provided
+FW_TARGET="/var/lib/diagnoseme/firmware"
+mkdir -p "$FW_TARGET/mcu" "$FW_TARGET/pdc"
+
+if [ -d "firmware" ]; then
+    echo "Updating offline Maui firmware cache in $FW_TARGET..."
+    if [ -d "firmware/mcu" ]; then
+        cp -v firmware/mcu/* "$FW_TARGET/mcu/" 2>/dev/null || true
+    fi
+    if [ -d "firmware/pdc" ]; then
+        cp -v firmware/pdc/* "$FW_TARGET/pdc/" 2>/dev/null || true
+    fi
+fi
+
+# 4. Restart Services
+echo "Restarting DiagnoseMe services..."
+if [ -f "/usr/local/bin/start-diagnoseme" ]; then
+    /usr/local/bin/start-diagnoseme --offline --no-browser
+fi
+
+echo "=================================================="
+echo " Offline update completed successfully!"
+echo "=================================================="

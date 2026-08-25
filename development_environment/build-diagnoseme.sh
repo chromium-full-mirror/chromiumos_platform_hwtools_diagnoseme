@@ -56,4 +56,10 @@ echo "{\"buildDate\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\", \"commitSha\": \"$(g
 docker build -t ui:latest -f dockerfiles/ui/Dockerfile .
 rm -rf ./src/generated_tmp
 
+# Tag images with :maui and registry tags
+for IMG in ui server envoy; do
+    docker tag "${IMG}:latest" "${IMG}:maui" 2>/dev/null || true
+    docker tag "${IMG}:latest" "us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/${IMG}:maui" 2>/dev/null || true
+done
+
 popd

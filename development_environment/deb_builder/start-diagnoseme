@@ -6,15 +6,208 @@
 set -e
 
 COMPOSE_FILE="/etc/diagnoseme/docker-compose.yaml"
+CONFIG_FILE="/etc/diagnoseme/config.env"
+DEFAULT_UI_URL="http://localhost:8888/maui-initial-flashing"
+
+# Load configuration if available
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    source "$CONFIG_FILE"
+fi
+
+MODE="${MODE:-offline}"
+AUTO_OPEN_BROWSER="${AUTO_OPEN_BROWSER:-true}"
+UI_URL="${UI_URL:-$DEFAULT_UI_URL}"
+DOCKER_TAG="${DOCKER_TAG:-maui}"
+
+# Parse command line options
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --online)
+            MODE="online"
+            shift
+            ;;
+        --offline)
+            MODE="offline"
+            shift
+            ;;
+        --no-browser)
+            AUTO_OPEN_BROWSER="false"
+            shift
+            ;;
+        --tag)
+            DOCKER_TAG="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: start-diagnoseme [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --online        Run in online mode (pulls latest :maui Docker images)"
+            echo "  --offline       Run in offline mode (uses pre-loaded local images, default)"
+            echo "  --no-browser    Start services without launching the web browser"
+            echo "  --tag <tag>     Override Docker image tag (default: maui)"
+            echo "  -h, --help      Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Run 'start-diagnoseme --help' for usage."
+            exit 1
+            ;;
+    esac
+done
 
 if [ ! -f "$COMPOSE_FILE" ]; then
     echo "Error: Docker compose file not found at $COMPOSE_FILE"
     exit 1
 fi
 
-echo "Starting Diagnose Me services..."
-docker compose -f "$COMPOSE_FILE" down
-docker compose -f "$COMPOSE_FILE" pull
-docker compose -f "$COMPOSE_FILE" up -d
+echo "=================================================="
+echo " Starting DiagnoseMe [Mode: ${MODE^^}]"
+echo " Image Tag: ${DOCKER_TAG}"
+echo "=================================================="
 
-echo "Diagnose Me services started successfully."
+export DOCKER_TAG="${DOCKER_TAG:-maui}"
+
+# Ensure local image aliases exist for Docker Compose
+for IMG in ui server envoy; do
+    if docker image inspect "${IMG}:${DOCKER_TAG}" > /dev/null 2>&1 && ! docker image inspect "us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/${IMG}:${DOCKER_TAG}" > /dev/null 2>&1; then
+        docker tag "${IMG}:${DOCKER_TAG}" "us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/${IMG}:${DOCKER_TAG}" 2>/dev/null || true
+    fi
+done
+
+# Ensure host log and results directories exist with full permissions
+mkdir -p /var/log/diagnoseme/nginx /var/log/diagnoseme/rpcserver /var/log/diagnoseme/envoy /var/lib/diagnoseme/firmware/mcu /var/lib/diagnoseme/firmware/pdc "${HOME:-/home/diagnoseme}/diagnoseme_results/highlevel" "${HOME:-/home/diagnoseme}/diagnoseme_results/detailed" 2>/dev/null || true
+chmod -R 777 /var/log/diagnoseme "${HOME:-/home/diagnoseme}/diagnoseme_results" 2>/dev/null || true
+
+PROFILE_ARGS=""
+if [ "$MODE" == "online" ]; then
+    export PULL_POLICY="always"
+    PROFILE_ARGS="--profile online"
+    echo "Pulling updated Docker images (:tag ${DOCKER_TAG})..."
+    docker compose -f "$COMPOSE_FILE" --profile online pull || {
+        echo "WARNING: Online pull failed. Falling back to existing local images."
+        export PULL_POLICY="if_not_present"
+    }
+
+    echo "Checking for updated Maui firmware from cloud..."
+    python3 - <<'EOF' 2>/dev/null || true
+import os, urllib.request, xml.etree.ElementTree as ET
+
+GCS_BASE = "https://storage.googleapis.com/maui-firmware"
+FW_DIR = "/var/lib/diagnoseme/firmware"
+
+def sync_fw(comp, suffix, ext, dest):
+    try:
+        req = urllib.request.Request(f"{GCS_BASE}?prefix={comp}/", headers={"User-Agent": "DiagnoseMe"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            root = ET.fromstring(r.read())
+        target_key = None
+        for child in root:
+            if child.tag.endswith("Contents"):
+                for sub in child:
+                    if sub.tag.endswith("Key") and sub.text and sub.text.endswith(f"/stable{suffix}"):
+                        target_key = os.path.dirname(sub.text)
+                        break
+                if target_key:
+                    break
+        if not target_key:
+            return
+        sub_req = urllib.request.Request(f"{GCS_BASE}?prefix={target_key}/", headers={"User-Agent": "DiagnoseMe"})
+        with urllib.request.urlopen(sub_req, timeout=5) as r:
+            sub_root = ET.fromstring(r.read())
+        for child in sub_root:
+            if child.tag.endswith("Contents"):
+                for sub in child:
+                    if sub.tag.endswith("Key") and sub.text and sub.text.endswith(ext):
+                        fname = os.path.basename(sub.text)
+                        out_f = os.path.join(dest, fname)
+                        if not os.path.exists(out_f):
+                            os.makedirs(dest, exist_ok=True)
+                            with urllib.request.urlopen(f"{GCS_BASE}/{sub.text}", timeout=15) as fin, open(out_f, "wb") as fout:
+                                fout.write(fin.read())
+                            print(f"Synced new {comp} firmware from cloud -> {fname}")
+    except Exception:
+        pass
+
+sync_fw("mcu-fw", ".mcufw", ".txt", f"{FW_DIR}/mcu")
+sync_fw("pdc-fw", ".pdcfw", ".bin", f"{FW_DIR}/pdc")
+EOF
+else
+    export PULL_POLICY="if_not_present"
+fi
+
+echo "Bringing up DiagnoseMe containers..."
+docker compose -f "$COMPOSE_FILE" down --remove-orphans || true
+# shellcheck disable=SC2086
+docker compose -f "$COMPOSE_FILE" $PROFILE_ARGS up -d
+
+echo "Waiting for services to become ready..."
+MAX_WAIT=30
+WAITED=0
+HEALTHY=false
+
+while [ $WAITED -lt $MAX_WAIT ]; do
+    if curl -s -f "$UI_URL" > /dev/null 2>&1; then
+        HEALTHY=true
+        break
+    fi
+    sleep 2
+    WAITED=$((WAITED + 2))
+    echo -n "."
+done
+echo ""
+
+if [ "$HEALTHY" = true ]; then
+    echo "DiagnoseMe services are healthy and running at $UI_URL."
+else
+    echo "DiagnoseMe services started, but web UI did not respond within ${MAX_WAIT}s."
+    echo "Check logs with 'diagnoseme-logs'."
+fi
+
+if [ "$AUTO_OPEN_BROWSER" = "true" ]; then
+    echo "Opening web interface in browser..."
+    export DISPLAY="${DISPLAY:-:0}"
+
+    # Determine desktop user and Xauthority for reliable graphical launch
+    TARGET_USER="${SUDO_USER:-$USER}"
+    if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ]; then
+        if [ -d /home/diagnoseme ]; then
+            TARGET_USER="diagnoseme"
+        fi
+    fi
+    TARGET_HOME=$(getent passwd "$TARGET_USER" 2>/dev/null | cut -d: -f6 || echo "/home/$TARGET_USER")
+    if [ -z "$XAUTHORITY" ] && [ -f "$TARGET_HOME/.Xauthority" ]; then
+        export XAUTHORITY="$TARGET_HOME/.Xauthority"
+    fi
+
+    BROWSER_BIN=""
+    for B in google-chrome google-chrome-stable chromium chromium-browser x-www-browser xdg-open firefox-esr firefox; do
+        if command -v "$B" > /dev/null 2>&1; then
+            BROWSER_BIN="$B"
+            break
+        fi
+    done
+
+    if [ -n "$BROWSER_BIN" ]; then
+        CHROME_FLAGS=(--start-maximized --no-first-run --no-default-browser-check --disable-session-crashed-bubble)
+        if [ "$(id -u)" -eq 0 ]; then
+            if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+                sudo -u "$SUDO_USER" env DISPLAY="${DISPLAY:-:0}" XAUTHORITY="${XAUTHORITY:-$TARGET_HOME/.Xauthority}" nohup "$BROWSER_BIN" "${CHROME_FLAGS[@]}" "$UI_URL" > /dev/null 2>&1 &
+            else
+                nohup "$BROWSER_BIN" --no-sandbox "${CHROME_FLAGS[@]}" "$UI_URL" > /dev/null 2>&1 &
+            fi
+        else
+            nohup "$BROWSER_BIN" "${CHROME_FLAGS[@]}" "$UI_URL" > /dev/null 2>&1 &
+        fi
+        disown 2>/dev/null || true
+        echo "Launched $BROWSER_BIN at $UI_URL"
+    else
+        echo "Browser not found. Please navigate manually to $UI_URL"
+    fi
+fi
+
+echo "=================================================="
+echo " Done! Use 'stop-diagnoseme' to stop all services."
+echo "=================================================="

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=DiagnoseMe Offline Update
+Comment=Apply offline update from plugged USB drive
+Exec=xfce4-terminal --title="DiagnoseMe Offline Update" --hold -e "sudo diagnoseme-offline-update"
+Icon=system-software-update
+Terminal=false
+Categories=System;Utility;

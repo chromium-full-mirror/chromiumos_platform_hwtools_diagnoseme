@@ -12,6 +12,7 @@ from unittest import mock
 from server.generated import maui_manufacturing_pb2
 from server.maui_common import (
     UsbDeviceInfo,
+    find_offline_fw_file,
     get_device_log_dir,
     write_device_log,
 )
@@ -69,6 +70,35 @@ class TestMauiStation1Servicer(unittest.TestCase):
     self.assertIn("failed", resp.message)
 
   @mock.patch("server.maui_station1_service.write_device_log")
+  @mock.patch("server.maui_station1_service.find_offline_fw_file", return_value="/var/lib/diagnoseme/firmware/mcu/zephyr.txt")
+  @mock.patch("subprocess.run")
+  def test_auto_program_mcu_bsl_offline_file(self, mock_run, mock_find, mock_log):
+    mock_run.return_value = mock.Mock(
+        stdout="INFO: MCU firmware update successful from zephyr.txt\n",
+        returncode=0,
+    )
+    req = maui_manufacturing_pb2.MauiAutoProgramMcuRequest(
+        device_port="/dev/ttyUSB0",
+        fw_channel="offline",
+    )
+    resp = self.servicer.auto_program_mcu_bsl(req, self.context)
+    self.assertTrue(resp.success)
+    # Ensure --file flag was used instead of --fw_channel
+    called_cmd = mock_run.call_args[0][0]
+    self.assertIn("--file", called_cmd)
+    self.assertIn("/var/lib/diagnoseme/firmware/mcu/zephyr.txt", called_cmd)
+
+  @mock.patch("server.maui_station1_service.find_offline_fw_file", return_value=None)
+  def test_auto_program_mcu_bsl_offline_missing(self, mock_find):
+    req = maui_manufacturing_pb2.MauiAutoProgramMcuRequest(
+        device_port="/dev/ttyUSB0",
+        fw_channel="offline",
+    )
+    resp = self.servicer.auto_program_mcu_bsl(req, self.context)
+    self.assertFalse(resp.success)
+    self.assertIn("Offline MCU firmware not found", resp.message)
+
+  @mock.patch("server.maui_station1_service.write_device_log")
   @mock.patch("subprocess.run")
   def test_program_ftdi_eeprom_success(self, mock_run, mock_log):
     mock_run.return_value = mock.Mock(
@@ -82,6 +112,79 @@ class TestMauiStation1Servicer(unittest.TestCase):
     resp = self.servicer.program_ftdi_eeprom(req, self.context)
     self.assertTrue(resp.success)
     self.assertIn("0x6002", resp.message)
+
+
+class TestMauiPdcServicer(unittest.IsolatedAsyncioTestCase):
+  """Tests for MauiPdcServicer."""
+
+  def setUp(self):
+    self.servicer = MauiPdcServicer()
+    self.context = mock.MagicMock()
+    self.context.done.return_value = False
+
+  def test_find_offline_fw_file(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      mcu_dir = os.path.join(tmpdir, "mcu")
+      os.makedirs(mcu_dir)
+      fw_file = os.path.join(mcu_dir, "test_zephyr.txt")
+      with open(fw_file, "w") as f:
+        f.write("test fw")
+
+      with mock.patch("server.maui_common.glob.glob", side_effect=lambda p: [fw_file] if "mcu" in p else []):
+        with mock.patch("os.path.isdir", return_value=True):
+          found = find_offline_fw_file("mcu")
+          self.assertEqual(found, fw_file)
+
+  @mock.patch("server.maui_station1_service.find_offline_fw_file", return_value=None)
+  async def test_program_single_pdc_offline_missing_fails_cleanly(self, mock_find):
+    req = maui_manufacturing_pb2.MauiProgramSinglePdcRequest(
+        slot_index=1,
+        serial_number="TEST_MAUI_SERIAL_001",
+        device_port="/dev/ttyUSB0",
+        fw_channel="offline",
+    )
+    responses = []
+    async for resp in self.servicer.program_single_pdc(req, self.context):
+      responses.append(resp)
+
+    self.assertEqual(len(responses), 1)
+    self.assertTrue(responses[0].is_complete)
+    self.assertEqual(responses[0].current_block, "Failed")
+    self.assertIn("Offline PDC firmware binary not found", responses[0].status_message)
+
+  @mock.patch("server.maui_station1_service.find_offline_fw_file", return_value="/var/lib/diagnoseme/firmware/pdc/v20_0325.bin")
+  @mock.patch("asyncio.create_subprocess_exec")
+  async def test_program_single_pdc_offline_file_success(self, mock_exec, mock_find):
+    mock_proc = mock.AsyncMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout.readline.side_effect = [
+        b"Block 1: Progress: 500/1000 bytes transferred (50.0%)\n",
+        b"",
+    ]
+    mock_proc.stdout.read.return_value = b"Flashing complete."
+    mock_proc.wait.return_value = 0
+    mock_exec.return_value = mock_proc
+
+    req = maui_manufacturing_pb2.MauiProgramSinglePdcRequest(
+        slot_index=1,
+        serial_number="TEST_MAUI_SERIAL_001",
+        device_port="/dev/ttyUSB0",
+        fw_channel="offline",
+    )
+    responses = []
+    async for resp in self.servicer.program_single_pdc(req, self.context):
+      responses.append(resp)
+
+    self.assertTrue(len(responses) >= 1)
+    final_resp = responses[-1]
+    self.assertTrue(final_resp.is_complete)
+    self.assertEqual(final_resp.current_block, "Complete")
+    self.assertIn("succeeded", final_resp.status_message)
+
+    # Verify that --file was passed to maui-flash subprocess
+    call_args = mock_exec.call_args[0]
+    self.assertIn("--file", call_args)
+    self.assertIn("/var/lib/diagnoseme/firmware/pdc/v20_0325.bin", call_args)
 
 
 class TestMauiDeviceManagementServicer(unittest.TestCase):

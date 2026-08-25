@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Stop DiagnoseMe
+Comment=Stop all DiagnoseMe testing containers
+Exec=xfce4-terminal --title="Stopping DiagnoseMe" --hold -e "stop-diagnoseme"
+Icon=process-stop
+Terminal=false
+Categories=System;Utility;
