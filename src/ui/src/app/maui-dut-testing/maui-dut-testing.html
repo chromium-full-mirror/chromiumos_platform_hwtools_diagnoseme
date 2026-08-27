@@ -5,7 +5,7 @@
 
 <div class="maui-container">
   <div class="header-section">
-    <h2>Maui Station 3: Host + DUT System Verification</h2>
+    <h2>Maui Stage 3: Host + DUT System Verification</h2>
     <p class="subtitle">
       System-level verification requiring both Host test station and Chromebook DUT connected to Maui.
     </p>
@@ -15,7 +15,7 @@
         @if (deviceConnected && deviceProgrammed) {
           <strong>Programmed Maui Device:</strong> {{ serialNumber }}
         } @else if (deviceConnected && !deviceProgrammed) {
-          <strong>Unprogrammed Device Detected:</strong> {{ serialNumber || 'Unknown' }} (FTDI PID: {{ ftdiPid || '0x6001' }}) — <em>Station 1 flashing required before Station 3 testing</em>
+          <strong>Unprogrammed Device Detected:</strong> {{ serialNumber || 'Unknown' }} (FTDI PID: {{ ftdiPid || '0x6001' }}) — <em>Stage 1 flashing required before Stage 3 testing</em>
         } @else {
           <strong>No Maui Device Detected:</strong> Please connect Maui Host USB-C cable to this test station.
         }
@@ -299,7 +299,7 @@
             } @else {
               <app-maui-station-footer
                 nextStationRoute="/maui-labeling"
-                nextStationLabel="Go to Next Station">
+                nextStationLabel="Go to Next Stage">
               </app-maui-station-footer>
             }
           </div>

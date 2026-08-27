@@ -5,7 +5,7 @@
 
 <div class="maui-container">
   <div class="header-section">
-    <h2>Maui Station 2: Host-Only Functional Verification</h2>
+    <h2>Maui Stage 2: Host-Only Functional Verification</h2>
     <p class="subtitle">
       Automated and interactive testing requiring ONLY the host cable connected (No DUT required).
     </p>
@@ -15,7 +15,7 @@
         @if (deviceConnected && deviceProgrammed) {
           <strong>Programmed Maui Device:</strong> {{ serialNumber }} (Port: {{ devicePort || '/dev/ttyUSB0' }})
         } @else if (deviceConnected && !deviceProgrammed) {
-          <strong>Unprogrammed Device Detected:</strong> {{ serialNumber || 'Unknown' }} (FTDI PID: {{ ftdiPid || '0x6001' }}) — <em>Station 1 flashing required before Station 2 testing</em>
+          <strong>Unprogrammed Device Detected:</strong> {{ serialNumber || 'Unknown' }} (FTDI PID: {{ ftdiPid || '0x6001' }}) — <em>Stage 1 flashing required before Stage 2 testing</em>
         } @else {
           <strong>No Maui Device Detected:</strong> Please connect Maui Host USB-C cable to this test station.
         }
@@ -466,7 +466,7 @@
             } @else {
               <app-maui-station-footer
                 nextStationRoute="/maui-dut-testing"
-                nextStationLabel="Go to Next Station">
+                nextStationLabel="Go to Next Stage">
               </app-maui-station-footer>
             }
           </div>

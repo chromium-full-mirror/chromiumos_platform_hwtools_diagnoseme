@@ -5,9 +5,9 @@
 
 <div class="maui-container">
   <div class="header-section">
-    <h2>Maui Final Provisioning: Labeling & MES Submission</h2>
+    <h2>Maui Final Provisioning: Labeling & Results</h2>
     <p class="subtitle">
-      Electronic serial confirmation, barcode sticker verification, directory log validation, and final MES submission.
+      Electronic serial confirmation, barcode sticker verification, directory log validation, and final results export.
     </p>
   </div>
 
@@ -251,10 +251,10 @@
       </diagnoseme-rework-card-column>
     </diagnoseme-rework-card>
 
-    <!-- Card 4: Final MES Submission & Save Logs -->
+    <!-- Card 4: Final Results & Save Logs -->
     <diagnoseme-rework-card
       id="label-card-4"
-      title="4. MES Webhook Submission & Save Final Results"
+      title="4. Save Final Results"
       [progress]="submissionInProgress"
       [disabled]="!barcodeMatches">
 
@@ -276,7 +276,7 @@
             </div>
             @if (finalOverallStatus) {
               <div class="info-row">
-                <span class="label">MES Status:</span>
+                <span class="label">Result Status:</span>
                 <span class="value">{{ finalOverallStatus }}</span>
               </div>
             }
@@ -296,7 +296,7 @@
             } @else {
               <app-maui-station-footer
                 nextStationRoute="/maui-initial-flashing"
-                nextStationLabel="Start New Unit at Station 1">
+                nextStationLabel="Start New Unit at Stage 1">
               </app-maui-station-footer>
             }
           </div>
