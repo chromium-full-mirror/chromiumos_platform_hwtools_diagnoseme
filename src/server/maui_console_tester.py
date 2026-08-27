@@ -349,7 +349,9 @@ class MauiConsoleTester:
     """Sends 'adc status' to MCU console and reads all analog voltage channels.
 
     Returns:
-      dict with keys: 'orientation', 'sbu1_mv', 'sbu2_mv', 'chg_vbus_mv', 'dut_vbus_mv', 'bsl_mv', 'raw_output'
+      dict with keys: 'orientation', 'sbu1_mv', 'sbu2_mv', 'chg_vbus_mv', 'dut_vbus_mv',
+                      'bsl_mv', 'host_cc1_mv', 'host_cc2_mv', 'host_vbus_mv',
+                      'host_orientation', 'raw_output'
     """
     res = {
         "orientation": "Unknown",
@@ -358,6 +360,10 @@ class MauiConsoleTester:
         "chg_vbus_mv": 0,
         "dut_vbus_mv": 0,
         "bsl_mv": 0,
+        "host_cc1_mv": 0,
+        "host_cc2_mv": 0,
+        "host_vbus_mv": 0,
+        "host_orientation": "Unknown",
         "raw_output": "",
     }
     try:
@@ -368,6 +374,18 @@ class MauiConsoleTester:
           output = self.send_command(s, "adc status", timeout=1.0, first_byte_timeout=0.5)
 
       res["raw_output"] = output
+
+      m_cc1 = re.search(r"\[\s*USB_HOST_CC1\s*\]\s*=\s*(\d+)\s*mV", output, re.IGNORECASE)
+      if m_cc1:
+        res["host_cc1_mv"] = int(m_cc1.group(1))
+
+      m_cc2 = re.search(r"\[\s*USB_HOST_CC2\s*\]\s*=\s*(\d+)\s*mV", output, re.IGNORECASE)
+      if m_cc2:
+        res["host_cc2_mv"] = int(m_cc2.group(1))
+
+      m_host_vbus = re.search(r"\[\s*PP5000_USB_HOST_VBUS\s*\]\s*=\s*(\d+)\s*mV", output, re.IGNORECASE)
+      if m_host_vbus:
+        res["host_vbus_mv"] = int(m_host_vbus.group(1))
 
       m_sbu1 = re.search(r"\[\s*SBU1_DET\s*\]\s*=\s*(\d+)\s*mV", output, re.IGNORECASE)
       if m_sbu1:
@@ -389,6 +407,7 @@ class MauiConsoleTester:
       if m_bsl:
         res["bsl_mv"] = int(m_bsl.group(1))
 
+      # SBU orientation check
       sbu1 = res["sbu1_mv"]
       sbu2 = res["sbu2_mv"]
       if sbu1 >= 1500 and sbu2 < 1000:
@@ -402,10 +421,26 @@ class MauiConsoleTester:
       else:
         res["orientation"] = f"Unknown ({sbu1}mV / {sbu2}mV)"
 
+      # Host CC orientation check matching Maui firmware CONFIG_HOST_MUX_HIGH_THRESH (200 mV)
+      cc1 = res["host_cc1_mv"]
+      cc2 = res["host_cc2_mv"]
+      cc_thresh = 200
+      if cc1 >= cc_thresh and cc2 < cc_thresh:
+        res["host_orientation"] = f"CC1 ({cc1}mV / {cc2}mV)"
+      elif cc2 >= cc_thresh and cc1 < cc_thresh:
+        res["host_orientation"] = f"CC2 ({cc1}mV / {cc2}mV)"
+      elif cc1 > cc2 + 300:
+        res["host_orientation"] = f"CC1 ({cc1}mV / {cc2}mV)"
+      elif cc2 > cc1 + 300:
+        res["host_orientation"] = f"CC2 ({cc1}mV / {cc2}mV)"
+      else:
+        res["host_orientation"] = f"Unknown ({cc1}mV / {cc2}mV)"
+
       return res
     except Exception as e:
       logging.warning("Failed to read ADC status on %s: %s", self.port_node, e)
       res["orientation"] = f"Error: {e}"
+      res["host_orientation"] = f"Error: {e}"
       res["raw_output"] = str(e)
       return res
 
@@ -417,6 +452,15 @@ class MauiConsoleTester:
     """
     res = self.read_adc_status(ser=ser)
     return res["orientation"], res["sbu1_mv"], res["sbu2_mv"], res["raw_output"]
+
+  def read_adc_host_orientation(self, ser: Optional[serial.Serial] = None) -> Tuple[str, int, int, str]:
+    """Sends 'adc status' to MCU console and reads USB_HOST_CC1 and USB_HOST_CC2 voltages.
+
+    Returns:
+      (host_orientation_str, cc1_mv, cc2_mv, raw_output)
+    """
+    res = self.read_adc_status(ser=ser)
+    return res["host_orientation"], res["host_cc1_mv"], res["host_cc2_mv"], res["raw_output"]
 
   def ensure_dut_data_and_power(self, ser: Optional[serial.Serial] = None) -> Tuple[bool, str]:
     """Ensures DUT power and data multiplexers are enabled (power_dut on && data_dut on)."""

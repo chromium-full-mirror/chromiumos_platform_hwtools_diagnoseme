@@ -65,6 +65,12 @@
               <span class="value code">{{ pdcAppConfigStr }}</span>
             </div>
           }
+          @if (hostOrientation) {
+            <div class="info-row">
+              <span class="label">Host CC Orientation:</span>
+              <span class="value code">{{ hostOrientation }}</span>
+            </div>
+          }
           <div class="actions-wrapper" style="display: flex; gap: 8px;">
             <button
               #usbBtn
@@ -119,6 +125,12 @@
 
       <diagnoseme-rework-card-column column="2">
         <div class="status-panel">
+          @if (hostOrientation) {
+            <div class="info-row">
+              <span class="label">Host CC Orientation:</span>
+              <span class="value code">{{ hostOrientation }}</span>
+            </div>
+          }
           @if (replugMessage) {
             <div class="info-row">
               <span class="label">Flip Status:</span>

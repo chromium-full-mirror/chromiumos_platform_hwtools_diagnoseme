@@ -199,6 +199,9 @@ message MauiHostOnlyTestResponse {
   bool pdc_charger_ok = 12;
   double charger_voltage_v = 13;
   int32 charger_measured_vbus_mv = 14;
+  string host_orientation = 15;
+  int32 cc1_mv = 16;
+  int32 cc2_mv = 17;
 }
 
 message MauiHostDutTestRequest {
@@ -313,6 +316,7 @@ message MauiSubmitMesResultsResponse {
 message MauiHostReplugTestRequest {
   string serial_number = 1;
   string device_port = 2;
+  string previous_orientation = 3;
 }
 
 message MauiHostReplugTestResponse {
@@ -322,6 +326,10 @@ message MauiHostReplugTestResponse {
   bool ftdi_detected = 4;
   bool h2h_detected = 5;
   string message = 6;
+  bool host_flip_ok = 7;
+  string host_orientation = 8;
+  int32 cc1_mv = 9;
+  int32 cc2_mv = 10;
 }
 
 // Reset Button Test Messages

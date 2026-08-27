@@ -65,12 +65,15 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
   usbSummary = '';
   mcuVersionStr = '';
   pdcAppConfigStr = '';
+  card1Orientation = '';
+  hostOrientation = '';
 
   // Section 2: Host Cable 180° Flip Test
   replugInProgress = false;
   replugPassed = false;
   replugStatusValue: 'NOT_RUN' | 'PASSED' | 'FAILED' | 'BYPASSED' = 'NOT_RUN';
   replugMessage = '';
+  card2Orientation = '';
 
   // Section 3: RESET Button Test
   resetBaselineInProgress = false;
@@ -163,6 +166,8 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
             this.usbSummary = res.summary;
             this.mcuVersionStr = res.mcuVersionStr;
             this.pdcAppConfigStr = res.pdcAppconfigVer;
+            this.card1Orientation = res.hostOrientation;
+            this.hostOrientation = res.hostOrientation;
 
             if (res.allPassed) {
               this.usbStatusValue = 'PASSED';
@@ -205,12 +210,18 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
 
     this.subs.add(
       this.mauiService
-        .testHostReplug(this.serialNumber, this.devicePort)
+        .testHostReplug(
+          this.serialNumber,
+          this.devicePort,
+          this.card1Orientation,
+        )
         .subscribe({
           next: res => {
             this.replugInProgress = false;
             this.replugPassed = res.allPassed;
             this.replugMessage = res.message;
+            this.card2Orientation = res.hostOrientation;
+            this.hostOrientation = res.hostOrientation;
 
             if (res.allPassed) {
               this.replugStatusValue = 'PASSED';
@@ -220,8 +231,9 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
               this.replugStatusValue = 'FAILED';
               this.replugStatus?.showFailed();
               this.dialogService.openFailure(
-                'Host Re-plug Test Failed',
-                res.message,
+                'Host 180° Flip Verification Failed',
+                res.message ||
+                  'Host cable polarity was not inverted or USB devices failed re-enumeration.',
                 () => this.runHostReplug(),
                 () => this.bypassHostReplug(),
               );

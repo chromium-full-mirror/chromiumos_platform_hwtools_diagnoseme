@@ -70,4 +70,41 @@ describe('MauiHostTestingComponent', () => {
   it('should create', () => {
     expect(component).toBeTruthy();
   });
+
+  it('should record card1Orientation on runUsbCheck', () => {
+    mockMauiService.runHostOnlyTests.and.returnValue(
+      of({
+        allPassed: true,
+        summary: 'OK',
+        mcuVersionStr: 'v1',
+        pdcAppconfigVer: '00000318',
+        hostOrientation: 'CC1 (895mV / 58mV)',
+      }),
+    );
+    component.runUsbCheck();
+    expect(component.card1Orientation).toBe('CC1 (895mV / 58mV)');
+    expect(component.hostOrientation).toBe('CC1 (895mV / 58mV)');
+    expect(component.usbCheckPassed).toBeTrue();
+  });
+
+  it('should pass card1Orientation to testHostReplug and update orientation', () => {
+    component.card1Orientation = 'CC1 (895mV / 58mV)';
+    mockMauiService.testHostReplug.and.returnValue(
+      of({
+        allPassed: true,
+        hostFlipOk: true,
+        hostOrientation: 'CC2 (61mV / 938mV)',
+        message: 'Host 180° Flip: PASS (CC1 -> CC2)',
+      }),
+    );
+    component.runHostReplug();
+    expect(mockMauiService.testHostReplug).toHaveBeenCalledWith(
+      component.serialNumber,
+      component.devicePort,
+      'CC1 (895mV / 58mV)',
+    );
+    expect(component.replugPassed).toBeTrue();
+    expect(component.card2Orientation).toBe('CC2 (61mV / 938mV)');
+    expect(component.hostOrientation).toBe('CC2 (61mV / 938mV)');
+  });
 });

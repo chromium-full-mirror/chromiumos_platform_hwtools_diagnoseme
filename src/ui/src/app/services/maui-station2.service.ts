@@ -37,10 +37,12 @@ export class MauiStation2Service {
   testHostReplug(
     serialNumber = '',
     devicePort = '',
+    previousOrientation = '',
   ): Observable<MauiHostReplugTestResponse> {
     const request = new MauiHostReplugTestRequest();
     request.serialNumber = serialNumber;
     request.devicePort = devicePort;
+    request.previousOrientation = previousOrientation;
     return this.client.testHostReplug(request);
   }
 

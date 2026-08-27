@@ -27,7 +27,11 @@ from server.maui_station1_service import (
     MauiStation1Servicer,
     analyze_device_manufacturing_logs,
 )
-from server.maui_station2_service import MauiStation2Servicer
+from server.maui_station2_service import (
+    MauiStation2Servicer,
+    is_host_cc_flipped,
+    is_sbu_flipped,
+)
 
 
 class TestMauiStation1Servicer(unittest.TestCase):
@@ -357,7 +361,7 @@ class TestMauiStation2Servicer(unittest.TestCase):
           "Maui version 0.47-f010696\r\nmaui$ ",
           "App Config Version: 00000318\r\nFW Version: 00000019\r\nmaui$ ",
           "Plug Present: Yes\r\nVoltage: 20.0 V\r\nMeasured VBUS: 20.0 V (20000 mV)\r\nmaui$ ",
-          "[ PPVAR_USB_CHG_VBUS] = 20000 mV\r\n[ PPVAR_USB_DUT_VBUS] = 20000 mV\r\nmaui$ ",
+          "[ USB_HOST_CC1] = 895 mV\r\n[ USB_HOST_CC2] = 58 mV\r\n[ PPVAR_USB_CHG_VBUS] = 20000 mV\r\n[ PPVAR_USB_DUT_VBUS] = 20000 mV\r\nmaui$ ",
       ]
       req = maui_manufacturing_pb2.MauiHostOnlyTestRequest(
           serial_number="TEST_MAUI_SERIAL_001",
@@ -367,6 +371,9 @@ class TestMauiStation2Servicer(unittest.TestCase):
       self.assertTrue(resp.all_passed)
       self.assertTrue(resp.hub_usb2_detected)
       self.assertTrue(resp.ftdi_detected)
+      self.assertTrue(resp.host_orientation.startswith("CC1"))
+      self.assertEqual(resp.cc1_mv, 895)
+      self.assertEqual(resp.cc2_mv, 58)
 
   @mock.patch("os.path.exists", return_value=True)
   @mock.patch("server.maui_station2_service.open_serial_port")
@@ -578,6 +585,138 @@ maui$ """
     self.assertTrue(resp.success)
     self.assertTrue(resp.reset_verified)
     self.assertEqual(resp.current_uptime_ms, 1200)
+
+  @mock.patch("server.maui_console_tester.open_serial_port")
+  def test_read_adc_host_orientation(self, mock_open_serial):
+    tester = MauiConsoleTester("/dev/ttyUSB0")
+    sample_adc_normal = """maui$ adc status
+ADC values:
+[        USB_HOST_CC1] =  895 mV
+[        USB_HOST_CC2] =   58 mV
+[         TEMP_SENSOR] =  596 mV
+[            SBU1_DET] =    0 mV
+[            SBU2_DET] =    0 mV
+[                 BSL] =    1 mV
+[  PPVAR_USB_CHG_VBUS] = 5105 mV
+[  PPVAR_USB_DUT_VBUS] =    0 mV
+[PP5000_USB_HOST_VBUS] = 2609 mV
+[              PP5000] = 2599 mV
+maui$ """
+    sample_adc_flipped = """maui$ adc status
+ADC values:
+[        USB_HOST_CC1] =   61 mV
+[        USB_HOST_CC2] =  938 mV
+[         TEMP_SENSOR] =  621 mV
+[            SBU1_DET] =    0 mV
+[            SBU2_DET] =    0 mV
+[                 BSL] =    2 mV
+[  PPVAR_USB_CHG_VBUS] = 5283 mV
+[  PPVAR_USB_DUT_VBUS] =    9 mV
+[PP5000_USB_HOST_VBUS] = 2713 mV
+[              PP5000] = 2706 mV
+maui$ """
+    with mock.patch.object(MauiConsoleTester, "send_command", return_value=sample_adc_normal):
+      ori_str, cc1, cc2, _ = tester.read_adc_host_orientation()
+      self.assertTrue(ori_str.startswith("CC1"))
+      self.assertEqual(cc1, 895)
+      self.assertEqual(cc2, 58)
+
+    with mock.patch.object(MauiConsoleTester, "send_command", return_value=sample_adc_flipped):
+      ori_str, cc1, cc2, _ = tester.read_adc_host_orientation()
+      self.assertTrue(ori_str.startswith("CC2"))
+      self.assertEqual(cc1, 61)
+      self.assertEqual(cc2, 938)
+
+  def test_is_host_cc_flipped(self):
+    self.assertTrue(is_host_cc_flipped("CC1 (895mV / 58mV)", "CC2 (61mV / 938mV)"))
+    self.assertTrue(is_host_cc_flipped("CC2 (61mV / 938mV)", "CC1 (895mV / 58mV)"))
+    self.assertFalse(is_host_cc_flipped("CC1 (895mV / 58mV)", "CC1 (895mV / 58mV)"))
+    self.assertFalse(is_host_cc_flipped("Unknown", "CC2"))
+    self.assertFalse(is_host_cc_flipped("CC1", "Unknown"))
+
+  @mock.patch("os.path.exists", return_value=True)
+  @mock.patch("server.maui_station2_service.open_serial_port")
+  @mock.patch("server.maui_common.write_device_log")
+  @mock.patch(
+      "server.maui_common.scan_usb_devices",
+      return_value=[
+          UsbDeviceInfo(sys_path="/sys/bus/usb/devices/1", vid=0x0BDA, pid=0x5411),
+          UsbDeviceInfo(sys_path="/sys/bus/usb/devices/2", vid=0x0BDA, pid=0x0411),
+          UsbDeviceInfo(sys_path="/sys/bus/usb/devices/3", vid=0x0403, pid=0x6002),
+          UsbDeviceInfo(sys_path="/sys/bus/usb/devices/4", vid=0x18D1, pid=0x506D),
+      ],
+  )
+  def test_host_replug_flip_success(self, mock_scan, mock_log, mock_serial, mock_exists):
+    mock_ser_instance = mock.MagicMock()
+    mock_serial.return_value.__enter__.return_value = mock_ser_instance
+
+    sample_adc_flipped = """maui$ adc status
+ADC values:
+[        USB_HOST_CC1] =   61 mV
+[        USB_HOST_CC2] =  938 mV
+[         TEMP_SENSOR] =  621 mV
+[  PPVAR_USB_CHG_VBUS] = 5283 mV
+[PP5000_USB_HOST_VBUS] = 2713 mV
+maui$ """
+    with mock.patch.object(MauiConsoleTester, "send_command") as mock_send:
+      mock_send.side_effect = [
+          "Maui version 0.47-f010696\r\nmaui$ ",
+          "App Config Version: 00000318\r\nFW Version: 00000019\r\nmaui$ ",
+          sample_adc_flipped,
+      ]
+      req = maui_manufacturing_pb2.MauiHostReplugTestRequest(
+          serial_number="TEST_MAUI_SERIAL_001",
+          device_port="/dev/ttyUSB0",
+          previous_orientation="CC1 (895mV / 58mV)",
+      )
+      resp = self.servicer.test_host_replug(req, self.context)
+      self.assertTrue(resp.all_passed)
+      self.assertTrue(resp.host_flip_ok)
+      self.assertTrue(resp.host_orientation.startswith("CC2"))
+      self.assertEqual(resp.cc1_mv, 61)
+      self.assertEqual(resp.cc2_mv, 938)
+      self.assertIn("PASS (CC1", resp.message)
+
+  @mock.patch("os.path.exists", return_value=True)
+  @mock.patch("server.maui_station2_service.open_serial_port")
+  @mock.patch("server.maui_common.write_device_log")
+  @mock.patch(
+      "server.maui_common.scan_usb_devices",
+      return_value=[
+          UsbDeviceInfo(sys_path="/sys/bus/usb/devices/1", vid=0x0BDA, pid=0x5411),
+          UsbDeviceInfo(sys_path="/sys/bus/usb/devices/2", vid=0x0BDA, pid=0x0411),
+          UsbDeviceInfo(sys_path="/sys/bus/usb/devices/3", vid=0x0403, pid=0x6002),
+          UsbDeviceInfo(sys_path="/sys/bus/usb/devices/4", vid=0x18D1, pid=0x506D),
+      ],
+  )
+  def test_host_replug_flip_fails_when_unflipped(self, mock_scan, mock_log, mock_serial, mock_exists):
+    mock_ser_instance = mock.MagicMock()
+    mock_serial.return_value.__enter__.return_value = mock_ser_instance
+
+    sample_adc_unflipped = """maui$ adc status
+ADC values:
+[        USB_HOST_CC1] =  895 mV
+[        USB_HOST_CC2] =   58 mV
+[         TEMP_SENSOR] =  596 mV
+[  PPVAR_USB_CHG_VBUS] = 5105 mV
+[PP5000_USB_HOST_VBUS] = 2609 mV
+maui$ """
+    with mock.patch.object(MauiConsoleTester, "send_command") as mock_send:
+      mock_send.side_effect = [
+          "Maui version 0.47-f010696\r\nmaui$ ",
+          "App Config Version: 00000318\r\nFW Version: 00000019\r\nmaui$ ",
+          sample_adc_unflipped,
+      ]
+      req = maui_manufacturing_pb2.MauiHostReplugTestRequest(
+          serial_number="TEST_MAUI_SERIAL_001",
+          device_port="/dev/ttyUSB0",
+          previous_orientation="CC1 (895mV / 58mV)",
+      )
+      resp = self.servicer.test_host_replug(req, self.context)
+      self.assertFalse(resp.all_passed)
+      self.assertFalse(resp.host_flip_ok)
+      self.assertTrue(resp.host_orientation.startswith("CC1"))
+      self.assertIn("FAIL (Host cable polarity not inverted", resp.message)
 
 
 if __name__ == "__main__":

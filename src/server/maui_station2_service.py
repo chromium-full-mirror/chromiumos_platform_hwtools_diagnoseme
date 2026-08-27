@@ -21,6 +21,36 @@ from server.maui_common import write_device_log
 from server.maui_console_tester import MauiConsoleTester, open_serial_port
 
 
+def is_sbu_flipped(orig: str, curr: str) -> bool:
+  """Checks if SBU cable orientation flipped (SBU1 <-> SBU2)."""
+  o_l = orig.lower()
+  c_l = curr.lower()
+  if not orig or not curr or "unknown" in o_l or "unknown" in c_l:
+    return False
+  if "sbu1" in o_l:
+    return "sbu2" in c_l
+  if "sbu2" in o_l:
+    return "sbu1" in c_l
+  if "cc1" in o_l:
+    return "cc2" in c_l or "sbu2" in c_l
+  if "cc2" in o_l:
+    return "cc1" in c_l or "sbu1" in c_l
+  return o_l != c_l
+
+
+def is_host_cc_flipped(orig: str, curr: str) -> bool:
+  """Checks if Host CC orientation flipped (CC1 <-> CC2) via USB_HOST_CC1/CC2 ADC readings."""
+  o_l = orig.lower()
+  c_l = curr.lower()
+  if not orig or not curr or "unknown" in o_l or "unknown" in c_l:
+    return False
+  if "cc1" in o_l:
+    return "cc2" in c_l
+  if "cc2" in o_l:
+    return "cc1" in c_l
+  return o_l != c_l
+
+
 class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTestingServicer):
   """Implementation of the Station 2 Functional Testing gRPC service."""
 
@@ -61,7 +91,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
       request: maui_manufacturing_pb2.MauiHostReplugTestRequest,
       unused_context: grpc.ServicerContext,
   ) -> maui_manufacturing_pb2.MauiHostReplugTestResponse:
-    """Verifies that the Maui board re-enumerates properly after a 180° cable flip."""
+    """Verifies that the Maui board re-enumerates and flips CC polarity after a 180° cable flip."""
     serial_no = request.serial_number
     dev_port = request.device_port or ""
 
@@ -83,23 +113,74 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         tty_nodes = sorted(glob.glob("/dev/ttyUSB*"))
         dev_port = tty_nodes[0] if tty_nodes else "/dev/ttyUSB0"
 
-    logging.info("Running Host Re-plug Verification for serial: %s (port: %s)", serial_no, dev_port)
+    logging.info("Running Host Re-plug & 180° Flip Verification for serial: %s (port: %s)", serial_no, dev_port)
 
     hub_usb2_ok, hub_usb3_ok, ftdi_ok, h2h_ok = self._check_host_usb_topology()
 
     port_node = dev_port
     tester = MauiConsoleTester(port_node=port_node, timeout=0.5)
-    console_results = tester.run_all_tests()
+    console_results = {}
+    adc_status = {}
+    if os.path.exists(port_node):
+      try:
+        with open_serial_port(port_node, tester.baudrate, timeout=tester.timeout) as ser:
+          for test in tester.test_cases:
+            output = tester.send_command(ser, test.command)
+            success, message = test.evaluate(output)
+            console_results[test.name] = (success, message)
+          adc_status = tester.read_adc_status(ser=ser)
+      except Exception as e:
+        logging.warning("Console session failed during host replug on %s: %s", port_node, e)
+        console_results["MCU Version Check"] = (False, str(e))
+    else:
+      console_results["MCU Version Check"] = (False, f"Port {port_node} does not exist")
+
     mcu_version_ok, mcu_msg = console_results.get("MCU Version Check", (False, "Not run"))
 
-    all_passed = hub_usb2_ok and hub_usb3_ok and ftdi_ok and h2h_ok and mcu_version_ok
+    curr_orientation = adc_status.get("host_orientation", "Unknown")
+    cc1_mv = adc_status.get("host_cc1_mv", 0)
+    cc2_mv = adc_status.get("host_cc2_mv", 0)
+
+    # Verify Host Cable 180° Flip Polarity via USB_HOST_CC1 / USB_HOST_CC2 ADC voltages
+    prev_orientation = getattr(request, "previous_orientation", "") or ""
+    if not prev_orientation:
+      dir_path = maui_common.get_device_log_dir(serial_no)
+      host1_path = os.path.join(dir_path, "host_only_tests.log")
+      if os.path.exists(host1_path):
+        try:
+          with open(host1_path, "r", encoding="utf-8") as f:
+            c = f.read()
+          m = re.search(r"(?:Host Orientation|Host CC Orientation|Orientation):\s*([^\r\n,|]+)", c, re.IGNORECASE)
+          if m:
+            prev_orientation = m.group(1).strip()
+        except Exception:
+          pass
+
+    if prev_orientation and not curr_orientation.startswith("Unknown"):
+      polarity_inverted = is_host_cc_flipped(prev_orientation, curr_orientation)
+    else:
+      polarity_inverted = not curr_orientation.startswith("Unknown")
+
+    host_flip_ok = polarity_inverted
+    all_passed = hub_usb2_ok and hub_usb3_ok and ftdi_ok and h2h_ok and mcu_version_ok and host_flip_ok
+
+    if prev_orientation and not polarity_inverted:
+      flip_status_str = f"FAIL (Host cable polarity not inverted: still {curr_orientation}, expected flip from {prev_orientation})"
+    elif polarity_inverted:
+      flip_status_str = f"PASS ({prev_orientation} -> {curr_orientation})" if prev_orientation else f"PASS ({curr_orientation})"
+    else:
+      flip_status_str = f"FAIL ({curr_orientation})"
 
     status_msg = (
-        f"Re-plug Check: Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, "
+        f"Host 180° Flip: {flip_status_str} | Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, "
         f"FTDI={ftdi_ok}, H2H={h2h_ok}, Console={mcu_msg}"
     )
 
-    write_device_log(serial_no, "host_replug_test", f"ALL_PASSED={all_passed}\n{status_msg}")
+    write_device_log(
+        serial_no,
+        "host_replug_test",
+        f"ALL_PASSED={all_passed}\n{status_msg}\nHost CC1: {cc1_mv} mV, Host CC2: {cc2_mv} mV\nOrientation: {curr_orientation}\nADC Raw:\n{adc_status.get('raw_output', '')}",
+    )
 
     return maui_manufacturing_pb2.MauiHostReplugTestResponse(
         all_passed=all_passed,
@@ -108,6 +189,10 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         ftdi_detected=ftdi_ok,
         h2h_detected=h2h_ok,
         message=status_msg,
+        host_flip_ok=host_flip_ok,
+        host_orientation=curr_orientation,
+        cc1_mv=cc1_mv,
+        cc2_mv=cc2_mv,
     )
 
   def test_reset_button(
@@ -349,10 +434,23 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     logging.info("PDC Charger Check -> ADC VBUS: %dmV, Plug: %s, Voltage: %.2fV, Measured: %dmV, Contract: %s, OK: %s",
                  chg_adc_vbus_mv, chg_plug, chg_v, chg_mv, chg_contract, pdc_charger_ok)
 
-    all_passed = hub_usb2_ok and hub_usb3_ok and ftdi_ok and h2h_ok and mcu_version_ok and pdc_info_ok and pdc_charger_ok
-    summary = f"USB: Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, FTDI={ftdi_ok}, H2H={h2h_ok} | Console: Version={mcu_version_msg}, PDC Info={pdc_info_msg}, Charger Port={'PASS (' + str(chg_v or (chg_adc_vbus_mv/1000.0)) + 'V)' if pdc_charger_ok else 'FAIL (No Charger)'}"
+    host_orientation = adc_status.get("host_orientation", "Unknown")
+    cc1_mv = adc_status.get("host_cc1_mv", 0)
+    cc2_mv = adc_status.get("host_cc2_mv", 0)
 
-    write_device_log(serial_no, "host_only_tests", f"ALL_PASSED={all_passed}\n{summary}\n\nPDC Charger:\n{pdc_chg.get('raw_output', '')}\nADC Status:\n{adc_status.get('raw_output', '')}")
+    all_passed = hub_usb2_ok and hub_usb3_ok and ftdi_ok and h2h_ok and mcu_version_ok and pdc_info_ok and pdc_charger_ok
+    summary = (
+        f"USB: Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, FTDI={ftdi_ok}, H2H={h2h_ok} | "
+        f"Console: Version={mcu_version_msg}, PDC Info={pdc_info_msg}, "
+        f"Host CC={host_orientation}, "
+        f"Charger Port={'PASS (' + str(chg_v or (chg_adc_vbus_mv/1000.0)) + 'V)' if pdc_charger_ok else 'FAIL (No Charger)'}"
+    )
+
+    write_device_log(
+        serial_no,
+        "host_only_tests",
+        f"ALL_PASSED={all_passed}\n{summary}\nHost Orientation: {host_orientation}\nHost CC1: {cc1_mv} mV, Host CC2: {cc2_mv} mV\n\nPDC Charger:\n{pdc_chg.get('raw_output', '')}\nADC Status:\n{adc_status.get('raw_output', '')}",
+    )
 
     return maui_manufacturing_pb2.MauiHostOnlyTestResponse(
         all_passed=all_passed,
@@ -369,6 +467,9 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         pdc_charger_ok=pdc_charger_ok,
         charger_voltage_v=chg_v,
         charger_measured_vbus_mv=chg_mv,
+        host_orientation=host_orientation,
+        cc1_mv=cc1_mv,
+        cc2_mv=cc2_mv,
     )
 
   def _find_ccd_serial_nodes(self) -> Dict[str, str]:
@@ -676,23 +777,8 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         except Exception:
           pass
 
-    def _is_sbu_flipped(orig: str, curr: str) -> bool:
-      o_l = orig.lower()
-      c_l = curr.lower()
-      if not orig or not curr or "unknown" in o_l or "unknown" in c_l:
-        return False
-      if "sbu1" in o_l:
-        return "sbu2" in c_l
-      if "sbu2" in o_l:
-        return "sbu1" in c_l
-      if "cc1" in o_l:
-        return "cc2" in c_l or "sbu2" in c_l
-      if "cc2" in o_l:
-        return "cc1" in c_l or "sbu1" in c_l
-      return o_l != c_l
-
     if prev_orientation and not dut_orientation.startswith("Unknown"):
-      polarity_inverted = _is_sbu_flipped(prev_orientation, dut_orientation)
+      polarity_inverted = is_sbu_flipped(prev_orientation, dut_orientation)
     else:
       polarity_inverted = not dut_orientation.startswith("Unknown")
 
