@@ -30,6 +30,57 @@ def open_serial_port(
   )
 
 
+# Expected GPIO values for Host-Only Verification (both basic check and after 180 flip)
+EXPECTED_HOST_GPIOS: Dict[str, int] = {
+    "h2h_reset_l": 0,
+    "usb2_mux_hub_oe_l": 1,
+    "usb2_mux_hub_sel": 0,
+    "usb3_mux_dut_oe_r_l": 1,
+    "usb3_mux_dut_sel_r": 0,
+    "usb2_mux_dut_oe_r_l": 1,
+    "usb2_mux_dut_sel_r": 0,
+    "pp5000_cutoff": 0,
+    "usb3_mux_hub_oe_l": 1,
+    "usb3_mux_hub_sel": 0,
+    "usb3_mux_host_oe_r_l": 1,
+    "hub_reset_l": 0,
+    "hub_ss_up_status": 1,
+    "hub_hs_up_status": 0,
+    "hub_ss_suspend": 1,
+    "pdc_hi_priority_irq_l": 0,
+    "pp3300_ec_status": 1,
+    "pp1200_pg_od": 1,
+    "pp3300_pg_od": 1,
+    "pp1100_pg_od": 1,
+    "hub_hs_suspend": 1,
+}
+
+
+def verify_host_adc_voltages(
+    adc_status: Dict[str, Any]
+) -> Tuple[bool, List[str]]:
+  """Verifies PP5000 (+-10% from 2500mV), PP5000_USB_HOST_VBUS (+-10% from 2500mV),
+  and PPVAR_USB_CHG_VBUS (+-10% from 5000mV).
+  """
+  mismatches: List[str] = []
+  pp5000 = adc_status.get("pp5000_mv", 0)
+  host_vbus = adc_status.get("host_vbus_mv", 0)
+  chg_vbus = adc_status.get("chg_vbus_mv", 0)
+
+  if not (2250 <= pp5000 <= 2750):
+    mismatches.append(f"PP5000: {pp5000} mV outside [2250, 2750] mV (2500 mV +-10%)")
+  if not (2250 <= host_vbus <= 2750):
+    mismatches.append(
+        f"PP5000_USB_HOST_VBUS: {host_vbus} mV outside [2250, 2750] mV (2500 mV +-10%)"
+    )
+  if not (4500 <= chg_vbus <= 5500):
+    mismatches.append(
+        f"PPVAR_USB_CHG_VBUS: {chg_vbus} mV outside [4500, 5500] mV (5000 mV +-10%)"
+    )
+
+  return len(mismatches) == 0, mismatches
+
+
 class ConsoleTestCase:
   """Base class for an extensible console test case."""
 
@@ -363,6 +414,7 @@ class MauiConsoleTester:
         "host_cc1_mv": 0,
         "host_cc2_mv": 0,
         "host_vbus_mv": 0,
+        "pp5000_mv": 0,
         "host_orientation": "Unknown",
         "raw_output": "",
     }
@@ -386,6 +438,10 @@ class MauiConsoleTester:
       m_host_vbus = re.search(r"\[\s*PP5000_USB_HOST_VBUS\s*\]\s*=\s*(\d+)\s*mV", output, re.IGNORECASE)
       if m_host_vbus:
         res["host_vbus_mv"] = int(m_host_vbus.group(1))
+
+      m_pp5000 = re.search(r"\[\s*PP5000\s*\]\s*=\s*(\d+)\s*mV", output, re.IGNORECASE)
+      if m_pp5000:
+        res["pp5000_mv"] = int(m_pp5000.group(1))
 
       m_sbu1 = re.search(r"\[\s*SBU1_DET\s*\]\s*=\s*(\d+)\s*mV", output, re.IGNORECASE)
       if m_sbu1:
@@ -461,6 +517,84 @@ class MauiConsoleTester:
     """
     res = self.read_adc_status(ser=ser)
     return res["host_orientation"], res["host_cc1_mv"], res["host_cc2_mv"], res["raw_output"]
+
+  def read_hwrev(self, ser: Optional[serial.Serial] = None) -> Tuple[bool, int, str]:
+    """Sends 'hwrev' to console and checks that hardware revision is 2.
+
+    Returns:
+      Tuple of (is_valid, detected_rev, raw_output)
+    """
+    try:
+      if ser is not None:
+        output = self.send_command(ser, "hwrev", timeout=1.0, first_byte_timeout=0.5)
+      else:
+        with open_serial_port(self.port_node, self.baudrate, timeout=self.timeout) as s:
+          output = self.send_command(s, "hwrev", timeout=1.0, first_byte_timeout=0.5)
+
+      m = re.search(r"Hardware\s+revision:\s*(\d+)", output, re.IGNORECASE)
+      if m:
+        rev = int(m.group(1))
+        return rev == 2, rev, output
+      return False, -1, output
+    except Exception as e:
+      logging.warning("Failed to read hwrev on %s: %s", self.port_node, e)
+      return False, -1, str(e)
+
+  def read_temperature(self, ser: Optional[serial.Serial] = None) -> Tuple[bool, float, str]:
+    """Sends 'temp' to console and verifies temperature is between 20.0 and 65.0 'C.
+
+    Returns:
+      Tuple of (is_within_limits, temp_c, raw_output)
+    """
+    try:
+      if ser is not None:
+        output = self.send_command(ser, "temp", timeout=1.0, first_byte_timeout=0.5)
+      else:
+        with open_serial_port(self.port_node, self.baudrate, timeout=self.timeout) as s:
+          output = self.send_command(s, "temp", timeout=1.0, first_byte_timeout=0.5)
+
+      m = re.search(r"Temperature\s*=\s*([\d.]+)\s*'?C", output, re.IGNORECASE)
+      if m:
+        temp_c = float(m.group(1))
+        return (20.0 <= temp_c <= 65.0), temp_c, output
+      return False, -1.0, output
+    except Exception as e:
+      logging.warning("Failed to read temperature on %s: %s", self.port_node, e)
+      return False, -1.0, str(e)
+
+  def read_and_verify_gpios(
+      self,
+      expected_gpios: Optional[Dict[str, int]] = None,
+      ser: Optional[serial.Serial] = None,
+  ) -> Tuple[bool, Dict[str, int], List[str], str]:
+    """Sends 'gpio get' to console and validates GPIO levels against expected values.
+
+    Returns:
+      Tuple of (all_matched, parsed_gpios, mismatches, raw_output)
+    """
+    expected = expected_gpios if expected_gpios is not None else EXPECTED_HOST_GPIOS
+    try:
+      if ser is not None:
+        output = self.send_command(ser, "gpio get", timeout=1.0, first_byte_timeout=0.5)
+      else:
+        with open_serial_port(self.port_node, self.baudrate, timeout=self.timeout) as s:
+          output = self.send_command(s, "gpio get", timeout=1.0, first_byte_timeout=0.5)
+
+      parsed_gpios: Dict[str, int] = {}
+      for m in re.finditer(r"\[\s*([a-zA-Z0-9_]+)\s*\]\s*(?:[IOio])\s*=\s*([01])", output):
+        parsed_gpios[m.group(1).strip()] = int(m.group(2))
+
+      mismatches: List[str] = []
+      for name, exp_val in expected.items():
+        if name not in parsed_gpios:
+          mismatches.append(f"{name}: missing in 'gpio get'")
+        elif parsed_gpios[name] != exp_val:
+          mismatches.append(f"{name}: expected {exp_val}, got {parsed_gpios[name]}")
+
+      return len(mismatches) == 0, parsed_gpios, mismatches, output
+    except Exception as e:
+      logging.warning("Failed to read GPIOs on %s: %s", self.port_node, e)
+      return False, {}, [str(e)], str(e)
 
   def ensure_dut_data_and_power(self, ser: Optional[serial.Serial] = None) -> Tuple[bool, str]:
     """Ensures DUT power and data multiplexers are enabled (power_dut on && data_dut on)."""

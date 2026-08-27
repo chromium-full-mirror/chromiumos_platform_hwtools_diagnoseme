@@ -65,10 +65,38 @@
               <span class="value code">{{ pdcAppConfigStr }}</span>
             </div>
           }
-          @if (hostOrientation) {
+          @if (card1Hwrev !== null) {
+            <div class="info-row">
+              <span class="label">HW Revision:</span>
+              <span class="value code" [style.color]="card1HwrevOk ? '#137333' : '#c5221f'">{{ card1Hwrev }} (Expected: 2)</span>
+            </div>
+          }
+          @if (card1TempC !== null) {
+            <div class="info-row">
+              <span class="label">Temperature:</span>
+              <span class="value code" [style.color]="card1TempOk ? '#137333' : '#c5221f'">{{ card1TempC | number:'1.1-1' }} °C (20–65°C)</span>
+            </div>
+          }
+          @if (card1Orientation) {
             <div class="info-row">
               <span class="label">Host CC Orientation:</span>
-              <span class="value code">{{ hostOrientation }}</span>
+              <span class="value code">{{ card1Orientation }}</span>
+            </div>
+          }
+          @if (card1Pp5000Mv > 0) {
+            <div class="info-row">
+              <span class="label">Voltages:</span>
+              <span class="value code" [style.color]="card1VoltagesOk ? '#137333' : '#c5221f'">
+                PP5000: {{ card1Pp5000Mv }}mV, Host: {{ card1HostVbusMv }}mV, CHG: {{ card1ChgVbusMv }}mV
+              </span>
+            </div>
+          }
+          @if (card1GpioDetails) {
+            <div class="info-row">
+              <span class="label">GPIOs:</span>
+              <span class="value code" [style.color]="card1GpiosOk ? '#137333' : '#c5221f'">
+                {{ card1GpiosOk ? '21/21 Verified' : card1GpioDetails }}
+              </span>
             </div>
           }
           <div class="actions-wrapper" style="display: flex; gap: 8px;">
@@ -125,10 +153,38 @@
 
       <diagnoseme-rework-card-column column="2">
         <div class="status-panel">
-          @if (hostOrientation) {
+          @if (card2Orientation) {
             <div class="info-row">
               <span class="label">Host CC Orientation:</span>
-              <span class="value code">{{ hostOrientation }}</span>
+              <span class="value code">{{ card2Orientation }}</span>
+            </div>
+          }
+          @if (card2Hwrev !== null) {
+            <div class="info-row">
+              <span class="label">HW Revision:</span>
+              <span class="value code" [style.color]="card2HwrevOk ? '#137333' : '#c5221f'">{{ card2Hwrev }} (Expected: 2)</span>
+            </div>
+          }
+          @if (card2TempC !== null) {
+            <div class="info-row">
+              <span class="label">Temperature:</span>
+              <span class="value code" [style.color]="card2TempOk ? '#137333' : '#c5221f'">{{ card2TempC | number:'1.1-1' }} °C (20–65°C)</span>
+            </div>
+          }
+          @if (card2Pp5000Mv > 0) {
+            <div class="info-row">
+              <span class="label">Voltages:</span>
+              <span class="value code" [style.color]="card2VoltagesOk ? '#137333' : '#c5221f'">
+                PP5000: {{ card2Pp5000Mv }}mV, Host: {{ card2HostVbusMv }}mV, CHG: {{ card2ChgVbusMv }}mV
+              </span>
+            </div>
+          }
+          @if (card2GpioDetails) {
+            <div class="info-row">
+              <span class="label">GPIOs:</span>
+              <span class="value code" [style.color]="card2GpiosOk ? '#137333' : '#c5221f'">
+                {{ card2GpiosOk ? '21/21 Verified' : card2GpioDetails }}
+              </span>
             </div>
           }
           @if (replugMessage) {

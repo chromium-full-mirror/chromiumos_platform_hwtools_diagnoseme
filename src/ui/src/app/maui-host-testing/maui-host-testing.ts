@@ -71,6 +71,17 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
   pdcAppConfigStr = '';
   card1Orientation = '';
   hostOrientation = '';
+  card1Hwrev: number | null = null;
+  card1HwrevOk = false;
+  card1TempC: number | null = null;
+  card1TempOk = false;
+  card1GpiosOk = false;
+  card1GpioDetails = '';
+  card1VoltagesOk = false;
+  card1Pp5000Mv = 0;
+  card1HostVbusMv = 0;
+  card1ChgVbusMv = 0;
+  card1VoltageDetails = '';
 
   // Section 2: Host Cable 180° Flip Test
   replugInProgress = false;
@@ -78,6 +89,17 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
   replugStatusValue: 'NOT_RUN' | 'PASSED' | 'FAILED' | 'BYPASSED' = 'NOT_RUN';
   replugMessage = '';
   card2Orientation = '';
+  card2Hwrev: number | null = null;
+  card2HwrevOk = false;
+  card2TempC: number | null = null;
+  card2TempOk = false;
+  card2GpiosOk = false;
+  card2GpioDetails = '';
+  card2VoltagesOk = false;
+  card2Pp5000Mv = 0;
+  card2HostVbusMv = 0;
+  card2ChgVbusMv = 0;
+  card2VoltageDetails = '';
 
   // Section 3: RESET Button Test
   resetBaselineInProgress = false;
@@ -181,6 +203,17 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
             this.pdcAppConfigStr = res.pdcAppconfigVer;
             this.card1Orientation = res.hostOrientation;
             this.hostOrientation = res.hostOrientation;
+            this.card1Hwrev = res.detectedHwrev ?? null;
+            this.card1HwrevOk = res.hwrevOk ?? false;
+            this.card1TempC = res.temperatureC ?? null;
+            this.card1TempOk = res.tempOk ?? false;
+            this.card1GpiosOk = res.gpiosOk ?? false;
+            this.card1GpioDetails = res.gpioDetails || '';
+            this.card1VoltagesOk = res.voltagesOk ?? false;
+            this.card1Pp5000Mv = res.pp5000Mv ?? 0;
+            this.card1HostVbusMv = res.hostVbusMv ?? 0;
+            this.card1ChgVbusMv = res.chgVbusMv ?? 0;
+            this.card1VoltageDetails = res.voltageDetails || '';
 
             if (res.allPassed) {
               this.usbStatusValue = 'PASSED';
@@ -241,6 +274,17 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
             this.replugMessage = res.message;
             this.card2Orientation = res.hostOrientation;
             this.hostOrientation = res.hostOrientation;
+            this.card2Hwrev = res.detectedHwrev ?? null;
+            this.card2HwrevOk = res.hwrevOk ?? false;
+            this.card2TempC = res.temperatureC ?? null;
+            this.card2TempOk = res.tempOk ?? false;
+            this.card2GpiosOk = res.gpiosOk ?? false;
+            this.card2GpioDetails = res.gpioDetails || '';
+            this.card2VoltagesOk = res.voltagesOk ?? false;
+            this.card2Pp5000Mv = res.pp5000Mv ?? 0;
+            this.card2HostVbusMv = res.hostVbusMv ?? 0;
+            this.card2ChgVbusMv = res.chgVbusMv ?? 0;
+            this.card2VoltageDetails = res.voltageDetails || '';
 
             if (res.allPassed) {
               this.replugStatusValue = 'PASSED';
@@ -556,6 +600,10 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
       `ALL_PASSED=${allPassed}`,
       `USB & PDC Quick Test: ${this.usbStatusValue}`,
       `Host Cable 180° Flip: ${this.replugStatusValue}`,
+      `Hardware Revision: ${this.card1Hwrev ?? 'N/A'} (Expected: 2)`,
+      `Temperature: ${this.card1TempC !== null ? this.card1TempC.toFixed(1) + ' °C' : 'N/A'}`,
+      `Voltages: PP5000=${this.card1Pp5000Mv} mV, Host VBUS=${this.card1HostVbusMv} mV, CHG VBUS=${this.card1ChgVbusMv} mV`,
+      `GPIO Check: ${this.card1GpiosOk ? 'PASSED (21/21 verified)' : 'FAILED: ' + this.card1GpioDetails}`,
       `RESET Button Reboot: ${this.resetStatusValue}`,
       `BSL Button ADC: ${this.bslStatusValue} (Peak: ${this.peakBslMv} mV)`,
       `Visual LEDs: ${this.ledStatusValue} (Green 1Hz & Amber solid)`,

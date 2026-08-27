@@ -202,6 +202,17 @@ message MauiHostOnlyTestResponse {
   string host_orientation = 15;
   int32 cc1_mv = 16;
   int32 cc2_mv = 17;
+  bool gpios_ok = 18;
+  bool hwrev_ok = 19;
+  int32 detected_hwrev = 20;
+  bool temp_ok = 21;
+  double temperature_c = 22;
+  bool voltages_ok = 23;
+  int32 pp5000_mv = 24;
+  int32 host_vbus_mv = 25;
+  int32 chg_vbus_mv = 26;
+  string gpio_details = 27;
+  string voltage_details = 28;
 }
 
 message MauiHostDutTestRequest {
@@ -330,6 +341,17 @@ message MauiHostReplugTestResponse {
   string host_orientation = 8;
   int32 cc1_mv = 9;
   int32 cc2_mv = 10;
+  bool gpios_ok = 11;
+  bool hwrev_ok = 12;
+  int32 detected_hwrev = 13;
+  bool temp_ok = 14;
+  double temperature_c = 15;
+  bool voltages_ok = 16;
+  int32 pp5000_mv = 17;
+  int32 host_vbus_mv = 18;
+  int32 chg_vbus_mv = 19;
+  string gpio_details = 20;
+  string voltage_details = 21;
 }
 
 // Reset Button Test Messages

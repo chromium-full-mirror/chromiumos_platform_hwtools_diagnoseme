@@ -18,7 +18,7 @@ from server import util
 from server.generated import maui_manufacturing_pb2
 from server.generated import maui_manufacturing_pb2_grpc
 from server.maui_common import write_device_log
-from server.maui_console_tester import MauiConsoleTester, open_serial_port
+from server.maui_console_tester import MauiConsoleTester, open_serial_port, verify_host_adc_voltages
 
 
 def is_sbu_flipped(orig: str, curr: str) -> bool:
@@ -121,6 +121,18 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     tester = MauiConsoleTester(port_node=port_node, timeout=0.5)
     console_results = {}
     adc_status = {}
+    hwrev_ok = False
+    detected_hwrev = -1
+    hwrev_raw = ""
+    temp_ok = False
+    temp_c = -1.0
+    temp_raw = ""
+    gpios_ok = False
+    gpio_mismatches = ["Serial port not accessible"]
+    gpios_raw = ""
+    voltages_ok = False
+    voltage_mismatches = ["Serial port not accessible"]
+
     if os.path.exists(port_node):
       try:
         with open_serial_port(port_node, tester.baudrate, timeout=tester.timeout) as ser:
@@ -129,6 +141,10 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
             success, message = test.evaluate(output)
             console_results[test.name] = (success, message)
           adc_status = tester.read_adc_status(ser=ser)
+          hwrev_ok, detected_hwrev, hwrev_raw = tester.read_hwrev(ser=ser)
+          temp_ok, temp_c, temp_raw = tester.read_temperature(ser=ser)
+          gpios_ok, parsed_gpios, gpio_mismatches, gpios_raw = tester.read_and_verify_gpios(ser=ser)
+          voltages_ok, voltage_mismatches = verify_host_adc_voltages(adc_status)
       except Exception as e:
         logging.warning("Console session failed during host replug on %s: %s", port_node, e)
         console_results["MCU Version Check"] = (False, str(e))
@@ -140,6 +156,16 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     curr_orientation = adc_status.get("host_orientation", "Unknown")
     cc1_mv = adc_status.get("host_cc1_mv", 0)
     cc2_mv = adc_status.get("host_cc2_mv", 0)
+    pp5000_mv = adc_status.get("pp5000_mv", 0)
+    host_vbus_mv = adc_status.get("host_vbus_mv", 0)
+    chg_adc_vbus_mv = adc_status.get("chg_vbus_mv", 0)
+
+    gpio_details = "; ".join(gpio_mismatches) if gpio_mismatches else "All 21 GPIOs verified"
+    voltage_details = (
+        "; ".join(voltage_mismatches)
+        if voltage_mismatches
+        else f"PP5000={pp5000_mv}mV, Host={host_vbus_mv}mV, CHG={chg_adc_vbus_mv}mV"
+    )
 
     # Verify Host Cable 180° Flip Polarity via USB_HOST_CC1 / USB_HOST_CC2 ADC voltages
     prev_orientation = getattr(request, "previous_orientation", "") or ""
@@ -162,7 +188,18 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
       polarity_inverted = not curr_orientation.startswith("Unknown")
 
     host_flip_ok = polarity_inverted
-    all_passed = hub_usb2_ok and hub_usb3_ok and ftdi_ok and h2h_ok and mcu_version_ok and host_flip_ok
+    all_passed = (
+        hub_usb2_ok
+        and hub_usb3_ok
+        and ftdi_ok
+        and h2h_ok
+        and mcu_version_ok
+        and host_flip_ok
+        and hwrev_ok
+        and temp_ok
+        and gpios_ok
+        and voltages_ok
+    )
 
     if prev_orientation and not polarity_inverted:
       flip_status_str = f"FAIL (Host cable polarity not inverted: still {curr_orientation}, expected flip from {prev_orientation})"
@@ -173,13 +210,28 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
 
     status_msg = (
         f"Host 180° Flip: {flip_status_str} | Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, "
-        f"FTDI={ftdi_ok}, H2H={h2h_ok}, Console={mcu_msg}"
+        f"FTDI={ftdi_ok}, H2H={h2h_ok}, Console={mcu_msg}, "
+        f"HWRev={detected_hwrev} ({'PASS' if hwrev_ok else 'FAIL'}), "
+        f"Temp={temp_c:.1f}°C ({'PASS' if temp_ok else 'FAIL'}), "
+        f"GPIOs={'PASS' if gpios_ok else 'FAIL (' + gpio_details + ')'}, "
+        f"Voltages={'PASS' if voltages_ok else 'FAIL (' + voltage_details + ')'}"
     )
 
     write_device_log(
         serial_no,
         "host_replug_test",
-        f"ALL_PASSED={all_passed}\n{status_msg}\nHost CC1: {cc1_mv} mV, Host CC2: {cc2_mv} mV\nOrientation: {curr_orientation}\nADC Raw:\n{adc_status.get('raw_output', '')}",
+        f"ALL_PASSED={all_passed}\n{status_msg}\nHost CC1: {cc1_mv} mV, Host CC2: {cc2_mv} mV\n"
+        f"Orientation: {curr_orientation}\n"
+        f"HWRev: {detected_hwrev} (Expected: 2)\n"
+        f"Temperature: {temp_c:.2f} 'C (Limits: 20-65 'C)\n"
+        f"GPIO Status: {'PASS' if gpios_ok else 'FAIL'}\n"
+        f"GPIO Details: {gpio_details}\n"
+        f"Voltages: PP5000={pp5000_mv} mV, Host VBUS={host_vbus_mv} mV, CHG VBUS={chg_adc_vbus_mv} mV\n"
+        f"Voltage Details: {voltage_details}\n\n"
+        f"ADC Raw:\n{adc_status.get('raw_output', '')}\n"
+        f"GPIO Get:\n{gpios_raw}\n"
+        f"HWRev Output:\n{hwrev_raw}\n"
+        f"Temp Output:\n{temp_raw}",
     )
 
     return maui_manufacturing_pb2.MauiHostReplugTestResponse(
@@ -193,6 +245,17 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         host_orientation=curr_orientation,
         cc1_mv=cc1_mv,
         cc2_mv=cc2_mv,
+        gpios_ok=gpios_ok,
+        hwrev_ok=hwrev_ok,
+        detected_hwrev=detected_hwrev,
+        temp_ok=temp_ok,
+        temperature_c=temp_c,
+        voltages_ok=voltages_ok,
+        pp5000_mv=pp5000_mv,
+        host_vbus_mv=host_vbus_mv,
+        chg_vbus_mv=chg_adc_vbus_mv,
+        gpio_details=gpio_details,
+        voltage_details=voltage_details,
     )
 
   def test_reset_button(
@@ -403,6 +466,17 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     results = {}
     pdc_chg = {"success": False, "plug_present": False, "voltage_v": 0.0, "measured_vbus_mv": 0, "raw_output": ""}
     adc_status = {"chg_vbus_mv": 0, "dut_vbus_mv": 0, "sbu1_mv": 0, "sbu2_mv": 0, "bsl_mv": 0, "orientation": "Unknown"}
+    hwrev_ok = False
+    detected_hwrev = -1
+    hwrev_raw = ""
+    temp_ok = False
+    temp_c = -1.0
+    temp_raw = ""
+    gpios_ok = False
+    gpio_mismatches = ["Serial port not accessible"]
+    gpios_raw = ""
+    voltages_ok = False
+    voltage_mismatches = ["Serial port not accessible"]
 
     if os.path.exists(port_node):
       try:
@@ -413,6 +487,10 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
             results[test.name] = (success, message)
           pdc_chg = tester.read_pdc_port_status(port="charger", ser=ser)
           adc_status = tester.read_adc_status(ser=ser)
+          hwrev_ok, detected_hwrev, hwrev_raw = tester.read_hwrev(ser=ser)
+          temp_ok, temp_c, temp_raw = tester.read_temperature(ser=ser)
+          gpios_ok, parsed_gpios, gpio_mismatches, gpios_raw = tester.read_and_verify_gpios(ser=ser)
+          voltages_ok, voltage_mismatches = verify_host_adc_voltages(adc_status)
       except Exception as e:
         logging.warning("Console session failed on %s: %s", port_node, e)
         results["SerialConnection"] = (False, str(e))
@@ -445,11 +523,36 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     host_orientation = adc_status.get("host_orientation", "Unknown")
     cc1_mv = adc_status.get("host_cc1_mv", 0)
     cc2_mv = adc_status.get("host_cc2_mv", 0)
+    pp5000_mv = adc_status.get("pp5000_mv", 0)
+    host_vbus_mv = adc_status.get("host_vbus_mv", 0)
 
-    all_passed = hub_usb2_ok and hub_usb3_ok and ftdi_ok and h2h_ok and mcu_version_ok and pdc_info_ok and pdc_charger_ok
+    gpio_details = "; ".join(gpio_mismatches) if gpio_mismatches else "All 21 GPIOs verified"
+    voltage_details = (
+        "; ".join(voltage_mismatches)
+        if voltage_mismatches
+        else f"PP5000={pp5000_mv}mV, Host={host_vbus_mv}mV, CHG={chg_adc_vbus_mv}mV"
+    )
+
+    all_passed = (
+        hub_usb2_ok
+        and hub_usb3_ok
+        and ftdi_ok
+        and h2h_ok
+        and mcu_version_ok
+        and pdc_info_ok
+        and pdc_charger_ok
+        and hwrev_ok
+        and temp_ok
+        and gpios_ok
+        and voltages_ok
+    )
     summary = (
         f"USB: Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, FTDI={ftdi_ok}, H2H={h2h_ok} | "
-        f"Console: Version={mcu_version_msg}, PDC Info={pdc_info_msg}, "
+        f"Console: Version={mcu_version_msg}, PDC={pdc_info_msg}, "
+        f"HWRev={detected_hwrev} ({'PASS' if hwrev_ok else 'FAIL'}), "
+        f"Temp={temp_c:.1f}°C ({'PASS' if temp_ok else 'FAIL'}), "
+        f"GPIOs={'PASS' if gpios_ok else 'FAIL (' + gpio_details + ')'}, "
+        f"Voltages={'PASS' if voltages_ok else 'FAIL (' + voltage_details + ')'}, "
         f"Host CC={host_orientation}, "
         f"Charger Port={'PASS (' + str(chg_v or (chg_adc_vbus_mv/1000.0)) + 'V)' if pdc_charger_ok else 'FAIL (No Charger)'}"
     )
@@ -457,7 +560,19 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     write_device_log(
         serial_no,
         "host_only_tests",
-        f"ALL_PASSED={all_passed}\n{summary}\nHost Orientation: {host_orientation}\nHost CC1: {cc1_mv} mV, Host CC2: {cc2_mv} mV\n\nPDC Charger:\n{pdc_chg.get('raw_output', '')}\nADC Status:\n{adc_status.get('raw_output', '')}",
+        f"ALL_PASSED={all_passed}\n{summary}\n"
+        f"Host Orientation: {host_orientation}\nHost CC1: {cc1_mv} mV, Host CC2: {cc2_mv} mV\n"
+        f"HWRev: {detected_hwrev} (Expected: 2)\n"
+        f"Temperature: {temp_c:.2f} 'C (Limits: 20-65 'C)\n"
+        f"GPIO Status: {'PASS' if gpios_ok else 'FAIL'}\n"
+        f"GPIO Details: {gpio_details}\n"
+        f"Voltages: PP5000={pp5000_mv} mV, Host VBUS={host_vbus_mv} mV, CHG VBUS={chg_adc_vbus_mv} mV\n"
+        f"Voltage Details: {voltage_details}\n\n"
+        f"PDC Charger:\n{pdc_chg.get('raw_output', '')}\n"
+        f"ADC Status:\n{adc_status.get('raw_output', '')}\n"
+        f"GPIO Get:\n{gpios_raw}\n"
+        f"HWRev Output:\n{hwrev_raw}\n"
+        f"Temp Output:\n{temp_raw}",
     )
 
     return maui_manufacturing_pb2.MauiHostOnlyTestResponse(
@@ -478,6 +593,17 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         host_orientation=host_orientation,
         cc1_mv=cc1_mv,
         cc2_mv=cc2_mv,
+        gpios_ok=gpios_ok,
+        hwrev_ok=hwrev_ok,
+        detected_hwrev=detected_hwrev,
+        temp_ok=temp_ok,
+        temperature_c=temp_c,
+        voltages_ok=voltages_ok,
+        pp5000_mv=pp5000_mv,
+        host_vbus_mv=host_vbus_mv,
+        chg_vbus_mv=chg_adc_vbus_mv,
+        gpio_details=gpio_details,
+        voltage_details=voltage_details,
     )
 
   def _find_ccd_serial_nodes(self) -> Dict[str, str]:

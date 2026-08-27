@@ -114,4 +114,66 @@ describe('MauiHostTestingComponent', () => {
     expect(component.card2Orientation).toBe('CC2 (61mV / 938mV)');
     expect(component.hostOrientation).toBe('CC2 (61mV / 938mV)');
   }));
+
+  it('should capture HWRev, Temp, Voltages, and GPIOs on runUsbCheck', fakeAsync(() => {
+    mockMauiService.runHostOnlyTests.and.returnValue(
+      of({
+        allPassed: true,
+        summary: 'All checks passed',
+        mcuVersionStr: 'v1',
+        pdcAppconfigVer: '00000318',
+        hostOrientation: 'CC1 (895mV / 58mV)',
+        hwrevOk: true,
+        detectedHwrev: 2,
+        tempOk: true,
+        temperatureC: 43.26,
+        gpiosOk: true,
+        gpioDetails: 'All 21 GPIOs verified',
+        voltagesOk: true,
+        pp5000Mv: 2609,
+        hostVbusMv: 2616,
+        chgVbusMv: 5105,
+      }),
+    );
+    component.runUsbCheck();
+    tick(3000);
+    expect(component.card1Hwrev).toBe(2);
+    expect(component.card1HwrevOk).toBeTrue();
+    expect(component.card1TempC).toBe(43.26);
+    expect(component.card1TempOk).toBeTrue();
+    expect(component.card1GpiosOk).toBeTrue();
+    expect(component.card1VoltagesOk).toBeTrue();
+    expect(component.card1Pp5000Mv).toBe(2609);
+    expect(component.card1HostVbusMv).toBe(2616);
+    expect(component.card1ChgVbusMv).toBe(5105);
+  }));
+
+  it('should capture HWRev, Temp, Voltages, and GPIOs on runHostReplug', fakeAsync(() => {
+    mockMauiService.testHostReplug.and.returnValue(
+      of({
+        allPassed: true,
+        hostFlipOk: true,
+        hostOrientation: 'CC2 (61mV / 938mV)',
+        message: 'Host 180° Flip: PASS',
+        hwrevOk: true,
+        detectedHwrev: 2,
+        tempOk: true,
+        temperatureC: 45.1,
+        gpiosOk: true,
+        gpioDetails: 'All 21 GPIOs verified',
+        voltagesOk: true,
+        pp5000Mv: 2550,
+        hostVbusMv: 2580,
+        chgVbusMv: 5020,
+      }),
+    );
+    component.runHostReplug();
+    tick(3000);
+    expect(component.card2Hwrev).toBe(2);
+    expect(component.card2HwrevOk).toBeTrue();
+    expect(component.card2TempC).toBe(45.1);
+    expect(component.card2TempOk).toBeTrue();
+    expect(component.card2GpiosOk).toBeTrue();
+    expect(component.card2VoltagesOk).toBeTrue();
+  }));
 });

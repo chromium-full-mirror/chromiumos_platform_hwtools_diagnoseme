@@ -17,10 +17,71 @@ from server.maui_common import (
     write_device_log,
 )
 from server.maui_console_tester import (
+    EXPECTED_HOST_GPIOS,
     MauiConsoleTester,
     PdcInfoTestCase,
     RegexMatchTestCase,
+    verify_host_adc_voltages,
 )
+
+SAMPLE_HWREV_OUTPUT = "Hardware revision: 2\r\nmaui$ "
+SAMPLE_TEMP_OUTPUT = "Temperature = 43.26 'C\r\nmaui$ "
+SAMPLE_ADC_OUTPUT = """ADC values:
+[        USB_HOST_CC1] =  885 mV
+[        USB_HOST_CC2] =   54 mV
+[         TEMP_SENSOR] =  599 mV
+[            SBU1_DET] =    0 mV
+[            SBU2_DET] =    0 mV
+[                 BSL] =    0 mV
+[  PPVAR_USB_CHG_VBUS] = 5105 mV
+[  PPVAR_USB_DUT_VBUS] =    0 mV
+[PP5000_USB_HOST_VBUS] = 2616 mV
+[              PP5000] = 2609 mV
+maui$ """
+
+SAMPLE_ADC_FLIPPED_OUTPUT = """ADC values:
+[        USB_HOST_CC1] =   61 mV
+[        USB_HOST_CC2] =  938 mV
+[         TEMP_SENSOR] =  621 mV
+[            SBU1_DET] =    0 mV
+[            SBU2_DET] =    0 mV
+[                 BSL] =    0 mV
+[  PPVAR_USB_CHG_VBUS] = 5105 mV
+[  PPVAR_USB_DUT_VBUS] =    0 mV
+[PP5000_USB_HOST_VBUS] = 2616 mV
+[              PP5000] = 2609 mV
+maui$ """
+
+SAMPLE_GPIO_OUTPUT = """[              h2h_reset_l] O = 0
+[        usb2_mux_hub_oe_l] O = 1
+[         usb2_mux_hub_sel] O = 0
+[      usb3_mux_dut_oe_r_l] O = 1
+[       usb3_mux_dut_sel_r] O = 0
+[      usb2_mux_dut_oe_r_l] O = 1
+[       usb2_mux_dut_sel_r] O = 0
+[            pp5000_cutoff] O = 0
+[        usb3_mux_hub_oe_l] O = 1
+[         usb3_mux_hub_sel] O = 0
+[     usb3_mux_host_oe_r_l] O = 1
+[      usb3_mux_host_sel_r] O = 1
+[              hub_reset_l] O = 0
+[    h2h_host_access_led_l] I = 1
+[     h2h_dut_access_led_l] I = 0
+[         hub_ss_up_status] I = 1
+[         hub_hs_up_status] I = 0
+[           hub_ss_suspend] I = 1
+[    pdc_hi_priority_irq_l] I = 0
+[         pp3300_ec_status] I = 1
+[h2h_dut_host_access_led_l] I = 0
+[                pdc_gpio8] I = 1
+[                pdc_gpio9] I = 1
+[               pdc_gpio10] I = 1
+[               pdc_gpio11] I = 1
+[             pp1200_pg_od] I = 1
+[             pp3300_pg_od] I = 1
+[             pp1100_pg_od] I = 1
+[           hub_hs_suspend] I = 1
+maui$ """
 from server.maui_station1_service import (
     MauiDeviceManagementServicer,
     MauiPdcServicer,
@@ -360,8 +421,11 @@ class TestMauiStation2Servicer(unittest.TestCase):
       mock_send.side_effect = [
           "Maui version 0.47-f010696\r\nmaui$ ",
           "App Config Version: 00000318\r\nFW Version: 00000019\r\nmaui$ ",
-          "Plug Present: Yes\r\nVoltage: 20.0 V\r\nMeasured VBUS: 20.0 V (20000 mV)\r\nmaui$ ",
-          "[ USB_HOST_CC1] = 895 mV\r\n[ USB_HOST_CC2] = 58 mV\r\n[ PPVAR_USB_CHG_VBUS] = 20000 mV\r\n[ PPVAR_USB_DUT_VBUS] = 20000 mV\r\nmaui$ ",
+          "Plug Present: Yes\r\nVoltage: 5.0 V\r\nMeasured VBUS: 5.0 V (5105 mV)\r\nmaui$ ",
+          SAMPLE_ADC_OUTPUT,
+          SAMPLE_HWREV_OUTPUT,
+          SAMPLE_TEMP_OUTPUT,
+          SAMPLE_GPIO_OUTPUT,
       ]
       req = maui_manufacturing_pb2.MauiHostOnlyTestRequest(
           serial_number="TEST_MAUI_SERIAL_001",
@@ -372,8 +436,17 @@ class TestMauiStation2Servicer(unittest.TestCase):
       self.assertTrue(resp.hub_usb2_detected)
       self.assertTrue(resp.ftdi_detected)
       self.assertTrue(resp.host_orientation.startswith("CC1"))
-      self.assertEqual(resp.cc1_mv, 895)
-      self.assertEqual(resp.cc2_mv, 58)
+      self.assertEqual(resp.cc1_mv, 885)
+      self.assertEqual(resp.cc2_mv, 54)
+      self.assertTrue(resp.hwrev_ok)
+      self.assertEqual(resp.detected_hwrev, 2)
+      self.assertTrue(resp.temp_ok)
+      self.assertAlmostEqual(resp.temperature_c, 43.26)
+      self.assertTrue(resp.gpios_ok)
+      self.assertTrue(resp.voltages_ok)
+      self.assertEqual(resp.pp5000_mv, 2609)
+      self.assertEqual(resp.host_vbus_mv, 2616)
+      self.assertEqual(resp.chg_vbus_mv, 5105)
 
   @mock.patch("os.path.exists", return_value=True)
   @mock.patch("server.maui_station2_service.open_serial_port")
@@ -719,7 +792,10 @@ maui$ """
       mock_send.side_effect = [
           "Maui version 0.47-f010696\r\nmaui$ ",
           "App Config Version: 00000318\r\nFW Version: 00000019\r\nmaui$ ",
-          sample_adc_flipped,
+          SAMPLE_ADC_FLIPPED_OUTPUT,
+          SAMPLE_HWREV_OUTPUT,
+          SAMPLE_TEMP_OUTPUT,
+          SAMPLE_GPIO_OUTPUT,
       ]
       req = maui_manufacturing_pb2.MauiHostReplugTestRequest(
           serial_number="TEST_MAUI_SERIAL_001",
@@ -732,6 +808,11 @@ maui$ """
       self.assertTrue(resp.host_orientation.startswith("CC2"))
       self.assertEqual(resp.cc1_mv, 61)
       self.assertEqual(resp.cc2_mv, 938)
+      self.assertTrue(resp.hwrev_ok)
+      self.assertEqual(resp.detected_hwrev, 2)
+      self.assertTrue(resp.temp_ok)
+      self.assertTrue(resp.gpios_ok)
+      self.assertTrue(resp.voltages_ok)
       self.assertIn("PASS (CC1", resp.message)
 
   @mock.patch("os.path.exists", return_value=True)
@@ -750,19 +831,14 @@ maui$ """
     mock_ser_instance = mock.MagicMock()
     mock_serial.return_value.__enter__.return_value = mock_ser_instance
 
-    sample_adc_unflipped = """maui$ adc status
-ADC values:
-[        USB_HOST_CC1] =  895 mV
-[        USB_HOST_CC2] =   58 mV
-[         TEMP_SENSOR] =  596 mV
-[  PPVAR_USB_CHG_VBUS] = 5105 mV
-[PP5000_USB_HOST_VBUS] = 2609 mV
-maui$ """
     with mock.patch.object(MauiConsoleTester, "send_command") as mock_send:
       mock_send.side_effect = [
           "Maui version 0.47-f010696\r\nmaui$ ",
           "App Config Version: 00000318\r\nFW Version: 00000019\r\nmaui$ ",
-          sample_adc_unflipped,
+          SAMPLE_ADC_OUTPUT,
+          SAMPLE_HWREV_OUTPUT,
+          SAMPLE_TEMP_OUTPUT,
+          SAMPLE_GPIO_OUTPUT,
       ]
       req = maui_manufacturing_pb2.MauiHostReplugTestRequest(
           serial_number="TEST_MAUI_SERIAL_001",
@@ -774,6 +850,65 @@ maui$ """
       self.assertFalse(resp.host_flip_ok)
       self.assertTrue(resp.host_orientation.startswith("CC1"))
       self.assertIn("FAIL (Host cable polarity not inverted", resp.message)
+
+  def test_read_hwrev(self):
+    tester = MauiConsoleTester(port_node="/dev/ttyUSB0")
+    mock_ser = mock.MagicMock()
+    with mock.patch.object(MauiConsoleTester, "send_command", return_value=SAMPLE_HWREV_OUTPUT):
+      ok, rev, _ = tester.read_hwrev(ser=mock_ser)
+      self.assertTrue(ok)
+      self.assertEqual(rev, 2)
+    with mock.patch.object(MauiConsoleTester, "send_command", return_value="Hardware revision: 1\r\nmaui$ "):
+      ok, rev, _ = tester.read_hwrev(ser=mock_ser)
+      self.assertFalse(ok)
+      self.assertEqual(rev, 1)
+
+  def test_read_temperature(self):
+    tester = MauiConsoleTester(port_node="/dev/ttyUSB0")
+    mock_ser = mock.MagicMock()
+    with mock.patch.object(MauiConsoleTester, "send_command", return_value=SAMPLE_TEMP_OUTPUT):
+      ok, temp_c, _ = tester.read_temperature(ser=mock_ser)
+      self.assertTrue(ok)
+      self.assertAlmostEqual(temp_c, 43.26)
+    with mock.patch.object(MauiConsoleTester, "send_command", return_value="Temperature = 15.0 'C\r\nmaui$ "):
+      ok, temp_c, _ = tester.read_temperature(ser=mock_ser)
+      self.assertFalse(ok)
+    with mock.patch.object(MauiConsoleTester, "send_command", return_value="Temperature = 70.0 'C\r\nmaui$ "):
+      ok, temp_c, _ = tester.read_temperature(ser=mock_ser)
+      self.assertFalse(ok)
+
+  def test_read_and_verify_gpios(self):
+    tester = MauiConsoleTester(port_node="/dev/ttyUSB0")
+    mock_ser = mock.MagicMock()
+    with mock.patch.object(MauiConsoleTester, "send_command", return_value=SAMPLE_GPIO_OUTPUT):
+      ok, gpios, mismatches, _ = tester.read_and_verify_gpios(ser=mock_ser)
+      self.assertTrue(ok)
+      self.assertEqual(len(mismatches), 0)
+      self.assertEqual(gpios["h2h_reset_l"], 0)
+      self.assertEqual(gpios["hub_ss_up_status"], 1)
+
+    bad_gpio = SAMPLE_GPIO_OUTPUT.replace("[         hub_ss_up_status] I = 1", "[         hub_ss_up_status] I = 0")
+    with mock.patch.object(MauiConsoleTester, "send_command", return_value=bad_gpio):
+      ok, gpios, mismatches, _ = tester.read_and_verify_gpios(ser=mock_ser)
+      self.assertFalse(ok)
+      self.assertEqual(len(mismatches), 1)
+      self.assertIn("hub_ss_up_status: expected 1, got 0", mismatches[0])
+
+  def test_verify_host_adc_voltages(self):
+    adc_valid = {"pp5000_mv": 2500, "host_vbus_mv": 2500, "chg_vbus_mv": 5000}
+    ok, mismatches = verify_host_adc_voltages(adc_valid)
+    self.assertTrue(ok)
+    self.assertEqual(len(mismatches), 0)
+
+    adc_bad_pp5000 = {"pp5000_mv": 2100, "host_vbus_mv": 2500, "chg_vbus_mv": 5000}
+    ok, mismatches = verify_host_adc_voltages(adc_bad_pp5000)
+    self.assertFalse(ok)
+    self.assertIn("PP5000: 2100 mV outside", mismatches[0])
+
+    adc_bad_chg = {"pp5000_mv": 2500, "host_vbus_mv": 2500, "chg_vbus_mv": 4200}
+    ok, mismatches = verify_host_adc_voltages(adc_bad_chg)
+    self.assertFalse(ok)
+    self.assertIn("PPVAR_USB_CHG_VBUS: 4200 mV outside", mismatches[0])
 
 
 if __name__ == "__main__":
