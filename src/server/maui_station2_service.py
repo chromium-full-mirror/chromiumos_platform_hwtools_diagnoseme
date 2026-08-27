@@ -215,7 +215,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     if action == "check_initial_uptime":
       logging.info("Step A: Querying baseline kernel uptime on %s...", dev_port)
       uptime_ms, raw_out = tester.read_kernel_uptime()
-      uptime_sufficient = (uptime_ms >= 10000)
+      uptime_sufficient = (uptime_ms >= 7000)
 
       if uptime_ms < 0:
         msg = f"Failed to read kernel uptime from MCU console on {dev_port}. Output: {raw_out}"
@@ -229,9 +229,9 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         )
 
       if uptime_sufficient:
-        msg = f"Baseline uptime captured: {uptime_ms} ms (>= 10000 ms). Operator: Please press the RESET button on the Maui board now."
+        msg = f"Baseline uptime captured: {uptime_ms} ms (>= 7000 ms). Operator: Please press the RESET button on the Maui board now."
       else:
-        msg = f"Initial uptime was only {uptime_ms} ms (< 10000 ms). Please wait for board to be powered on >= 10s."
+        msg = f"Initial uptime was only {uptime_ms} ms (< 7000 ms). Please wait for board to be powered on >= 7s."
 
       return maui_manufacturing_pb2.MauiResetButtonTestResponse(
           success=uptime_sufficient,
@@ -263,13 +263,16 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         logging.info("[RESET Poll %d/%d] Read kernel uptime: %d ms (Initial was %d ms)",
                      attempt, max_attempts, read_uptime, initial_uptime_ms)
 
-        if 0 <= read_uptime < initial_uptime_ms:
-          post_uptime_ms = read_uptime
-          reset_verified = True
-          break
-
+        # Polling is only to ensure we successfully read at least once (read_uptime >= 0).
+        # Once successfully polled, if the read uptime is longer than expected (>= initial),
+        # fail immediately without polling further.
         if read_uptime >= 0:
           post_uptime_ms = read_uptime
+          if read_uptime < initial_uptime_ms:
+            reset_verified = True
+          else:
+            reset_verified = False
+          break
 
         time.sleep(poll_interval_sec)
 
@@ -289,10 +292,15 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
             raw_output=raw_out,
         )
       else:
-        err_msg = (
-            f"RESET Button Test FAILED: Post-reset uptime ({post_uptime_ms} ms) was not smaller than initial uptime ({initial_uptime_ms} ms) "
-            f"after {max_attempts} poll attempts."
-        )
+        if post_uptime_ms >= 0:
+          err_msg = (
+              f"RESET Button Test FAILED: Post-reset uptime ({post_uptime_ms} ms) was not smaller than initial uptime ({initial_uptime_ms} ms). "
+              f"Board did not reboot."
+          )
+        else:
+          err_msg = (
+              f"RESET Button Test FAILED: Failed to read kernel uptime from MCU console after {max_attempts} poll attempts."
+          )
         write_device_log(
             serial_no,
             "reset_button_test",

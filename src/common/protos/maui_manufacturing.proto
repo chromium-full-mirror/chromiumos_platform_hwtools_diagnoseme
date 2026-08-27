@@ -52,7 +52,7 @@ service MauiStation2FunctionalTesting {
   // Host cable 180° re-plug test with 3s settling delay
   rpc test_host_replug(MauiHostReplugTestRequest) returns (MauiHostReplugTestResponse) {}
 
-  // Automated Interactive RESET Button Test (reads kernel uptime T1 >= 10s, waits for reset + 5s re-enumeration, reads T2 < T1)
+  // Automated Interactive RESET Button Test (reads kernel uptime T1 >= 7s, waits for reset + 1s re-enumeration, reads T2 < T1)
   rpc test_reset_button(MauiResetButtonTestRequest) returns (MauiResetButtonTestResponse) {}
 
   // Automated Interactive BSL Button Test (samples `adc status` every 0.2s for max 5s, checks BSL >= 2500mV)
@@ -343,7 +343,7 @@ message MauiResetButtonTestRequest {
 message MauiResetButtonTestResponse {
   bool success = 1;
   int64 current_uptime_ms = 2;
-  bool uptime_sufficient = 3;   // >= 10000 ms
+  bool uptime_sufficient = 3;   // >= 7000 ms (>= 7s)
   bool reset_verified = 4;      // current_uptime < initial_uptime
   string message = 5;
   string raw_output = 6;

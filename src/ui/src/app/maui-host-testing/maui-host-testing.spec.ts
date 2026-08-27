@@ -2,7 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {
+  ComponentFixture,
+  TestBed,
+  fakeAsync,
+  tick,
+} from '@angular/core/testing';
 import {MauiHostTestingComponent} from './maui-host-testing';
 import {MauiStation2Service} from '../services/maui-station2.service';
 import {MauiDeviceMgmtService} from '../services/maui-device-mgmt.service';
@@ -71,7 +76,7 @@ describe('MauiHostTestingComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should record card1Orientation on runUsbCheck', () => {
+  it('should record card1Orientation on runUsbCheck', fakeAsync(() => {
     mockMauiService.runHostOnlyTests.and.returnValue(
       of({
         allPassed: true,
@@ -82,12 +87,13 @@ describe('MauiHostTestingComponent', () => {
       }),
     );
     component.runUsbCheck();
+    tick(3000);
     expect(component.card1Orientation).toBe('CC1 (895mV / 58mV)');
     expect(component.hostOrientation).toBe('CC1 (895mV / 58mV)');
     expect(component.usbCheckPassed).toBeTrue();
-  });
+  }));
 
-  it('should pass card1Orientation to testHostReplug and update orientation', () => {
+  it('should pass card1Orientation to testHostReplug and update orientation', fakeAsync(() => {
     component.card1Orientation = 'CC1 (895mV / 58mV)';
     mockMauiService.testHostReplug.and.returnValue(
       of({
@@ -98,6 +104,7 @@ describe('MauiHostTestingComponent', () => {
       }),
     );
     component.runHostReplug();
+    tick(3000);
     expect(mockMauiService.testHostReplug).toHaveBeenCalledWith(
       component.serialNumber,
       component.devicePort,
@@ -106,5 +113,5 @@ describe('MauiHostTestingComponent', () => {
     expect(component.replugPassed).toBeTrue();
     expect(component.card2Orientation).toBe('CC2 (61mV / 938mV)');
     expect(component.hostOrientation).toBe('CC2 (61mV / 938mV)');
-  });
+  }));
 });

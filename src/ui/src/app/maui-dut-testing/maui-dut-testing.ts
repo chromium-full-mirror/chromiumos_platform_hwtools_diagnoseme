@@ -14,7 +14,7 @@ import {
 import {CommonModule} from '@angular/common';
 import {MatButtonModule} from '@angular/material/button';
 import {MatIconModule} from '@angular/material/icon';
-import {Subscription} from 'rxjs';
+import {Subscription, switchMap, timer} from 'rxjs';
 import {DiagnosemeReworkCard} from '../diagnoseme-rework-card/diagnoseme-rework-card';
 import {DiagnosemeReworkCardColumn} from '../diagnoseme-rework-card-column/diagnoseme-rework-card-column';
 import {MauiDialogService} from '../maui-common/maui-dialog.service';
@@ -52,6 +52,10 @@ export class MauiDutTestingComponent implements OnInit, OnDestroy {
   deviceProgrammed = false;
   ftdiPid = '';
   statusMessage = 'Scanning USB bus for connected Maui device...';
+
+  // 3-second stabilization delay between operator button click and actual test execution
+  // to allow physical connections, voltage rails, and USB enumeration to settle.
+  stabilizationDelayMs = 3000;
 
   // Stage 1: Host + DUT + Charger Verification (PD & Data Path)
   stage1InProgress = false;
@@ -138,12 +142,18 @@ export class MauiDutTestingComponent implements OnInit, OnDestroy {
     this.stage1Status?.showWorking();
     this.cdr.detectChanges();
 
+    // 3-second stabilization delay between operator button click and actual test execution
+    // to allow physical connections, voltage rails, and USB enumeration to settle.
     this.subs.add(
-      this.mauiService
-        .runHostDutTests(
-          this.serialNumber,
-          this.serialNumber,
-          'stage1_with_charger',
+      timer(this.stabilizationDelayMs)
+        .pipe(
+          switchMap(() =>
+            this.mauiService.runHostDutTests(
+              this.serialNumber,
+              this.serialNumber,
+              'stage1_with_charger',
+            ),
+          ),
         )
         .subscribe({
           next: res => {
@@ -210,13 +220,19 @@ export class MauiDutTestingComponent implements OnInit, OnDestroy {
     this.stage2Status?.showWorking();
     this.cdr.detectChanges();
 
+    // 3-second stabilization delay between operator button click and actual test execution
+    // to allow physical connections, voltage rails, and USB enumeration to settle.
     this.subs.add(
-      this.mauiService
-        .runHostDutTests(
-          this.serialNumber,
-          this.serialNumber,
-          'stage2_sbu_flip',
-          this.stage1Orientation,
+      timer(this.stabilizationDelayMs)
+        .pipe(
+          switchMap(() =>
+            this.mauiService.runHostDutTests(
+              this.serialNumber,
+              this.serialNumber,
+              'stage2_sbu_flip',
+              this.stage1Orientation,
+            ),
+          ),
         )
         .subscribe({
           next: res => {
@@ -263,12 +279,18 @@ export class MauiDutTestingComponent implements OnInit, OnDestroy {
     this.stage3Status?.showWorking();
     this.cdr.detectChanges();
 
+    // 3-second stabilization delay between operator button click and actual test execution
+    // to allow physical connections, voltage rails, and USB enumeration to settle.
     this.subs.add(
-      this.mauiService
-        .runHostDutTests(
-          this.serialNumber,
-          this.serialNumber,
-          'stage3_no_charger',
+      timer(this.stabilizationDelayMs)
+        .pipe(
+          switchMap(() =>
+            this.mauiService.runHostDutTests(
+              this.serialNumber,
+              this.serialNumber,
+              'stage3_no_charger',
+            ),
+          ),
         )
         .subscribe({
           next: res => {

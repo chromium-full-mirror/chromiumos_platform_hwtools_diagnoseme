@@ -205,8 +205,8 @@ class MauiConsoleTester:
       logging.warning("Failed to read kernel uptime on %s: %s", self.port_node, e)
       return -1, f"Error: {e}"
 
-  def ensure_min_uptime(self, min_uptime_ms: int = 10000) -> Tuple[int, str]:
-    """Ensures device has been powered on for at least min_uptime_ms (10s) before reset test."""
+  def ensure_min_uptime(self, min_uptime_ms: int = 7000) -> Tuple[int, str]:
+    """Ensures device has been powered on for at least min_uptime_ms (7s) before reset test."""
     uptime_ms, output = self.read_kernel_uptime()
     if 0 <= uptime_ms < min_uptime_ms:
       wait_time_sec = (min_uptime_ms - uptime_ms) / 1000.0 + 0.5

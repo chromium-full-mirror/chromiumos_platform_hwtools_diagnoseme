@@ -2,7 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {
+  ComponentFixture,
+  TestBed,
+  fakeAsync,
+  tick,
+} from '@angular/core/testing';
 import {MauiDutTestingComponent} from './maui-dut-testing';
 import {MauiStation2Service} from '../services/maui-station2.service';
 import {MauiDeviceMgmtService} from '../services/maui-device-mgmt.service';
@@ -63,36 +68,39 @@ describe('MauiDutTestingComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should run stage 1 with charger', () => {
+  it('should run stage 1 with charger', fakeAsync(() => {
     component.serialNumber = 'TEST_MAUI_001';
     component.runStage1WithCharger();
+    tick(3000);
     expect(mockMauiService.runHostDutTests).toHaveBeenCalledWith(
       'TEST_MAUI_001',
       'TEST_MAUI_001',
       'stage1_with_charger',
     );
     expect(component.stage1Passed).toBeTrue();
-  });
+  }));
 
-  it('should run stage 2 SBU flip', () => {
+  it('should run stage 2 SBU flip', fakeAsync(() => {
     component.serialNumber = 'TEST_MAUI_001';
     component.runStage2SbuFlip();
+    tick(3000);
     expect(mockMauiService.runHostDutTests).toHaveBeenCalledWith(
       'TEST_MAUI_001',
       'TEST_MAUI_001',
       'stage2_sbu_flip',
     );
     expect(component.stage2Passed).toBeTrue();
-  });
+  }));
 
-  it('should run stage 3 no charger', () => {
+  it('should run stage 3 no charger', fakeAsync(() => {
     component.serialNumber = 'TEST_MAUI_001';
     component.runStage3NoCharger();
+    tick(3000);
     expect(mockMauiService.runHostDutTests).toHaveBeenCalledWith(
       'TEST_MAUI_001',
       'TEST_MAUI_001',
       'stage3_no_charger',
     );
     expect(component.stage3Passed).toBeTrue();
-  });
+  }));
 });

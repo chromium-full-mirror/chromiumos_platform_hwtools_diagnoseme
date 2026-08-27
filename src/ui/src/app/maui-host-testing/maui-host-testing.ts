@@ -16,7 +16,7 @@ import {FormsModule} from '@angular/forms';
 import {MatButtonModule} from '@angular/material/button';
 import {MatCheckboxModule} from '@angular/material/checkbox';
 import {MatIconModule} from '@angular/material/icon';
-import {Subscription} from 'rxjs';
+import {Subscription, switchMap, timer} from 'rxjs';
 import {DiagnosemeReworkCard} from '../diagnoseme-rework-card/diagnoseme-rework-card';
 import {DiagnosemeReworkCardColumn} from '../diagnoseme-rework-card-column/diagnoseme-rework-card-column';
 import {MauiDialogService} from '../maui-common/maui-dialog.service';
@@ -57,6 +57,10 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
   deviceProgrammed = false;
   ftdiPid = '';
   statusMessage = 'Scanning USB bus for connected Maui device...';
+
+  // 3-second stabilization delay between operator button click and actual test execution
+  // to allow physical connections, voltage rails, and USB enumeration to settle.
+  stabilizationDelayMs = 3000;
 
   // Section 1: USB & Console Check
   usbCheckInProgress = false;
@@ -156,9 +160,18 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
     this.usbStatus?.showWorking();
     this.cdr.detectChanges();
 
+    // 3-second stabilization delay between operator button click and actual test execution
+    // to allow physical connections, voltage rails, and USB enumeration to settle.
     this.subs.add(
-      this.mauiService
-        .runHostOnlyTests(this.serialNumber, this.devicePort)
+      timer(this.stabilizationDelayMs)
+        .pipe(
+          switchMap(() =>
+            this.mauiService.runHostOnlyTests(
+              this.serialNumber,
+              this.devicePort,
+            ),
+          ),
+        )
         .subscribe({
           next: res => {
             this.usbCheckInProgress = false;
@@ -208,12 +221,18 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
     this.replugStatus?.showWorking();
     this.cdr.detectChanges();
 
+    // 3-second stabilization delay between operator button click and actual test execution
+    // to allow physical connections, voltage rails, and USB enumeration to settle.
     this.subs.add(
-      this.mauiService
-        .testHostReplug(
-          this.serialNumber,
-          this.devicePort,
-          this.card1Orientation,
+      timer(this.stabilizationDelayMs)
+        .pipe(
+          switchMap(() =>
+            this.mauiService.testHostReplug(
+              this.serialNumber,
+              this.devicePort,
+              this.card1Orientation,
+            ),
+          ),
         )
         .subscribe({
           next: res => {
@@ -256,7 +275,7 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
     );
   }
 
-  // 3. RESET Button - Step A: Baseline Uptime Check (>= 10s)
+  // 3. RESET Button - Step A: Baseline Uptime Check (>= 7s)
   checkResetBaseline(): void {
     this.resetBaselineInProgress = true;
     this.resetStatus?.showWorking();
@@ -276,7 +295,7 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
             if (res.success && res.uptimeSufficient) {
               this.resetBaselineCaptured = true;
               this.initialUptimeMs = Number(res.currentUptimeMs);
-              this.resetMessage = `Baseline uptime: ${this.initialUptimeMs} ms (>= 10s). Operator: Press RESET button now!`;
+              this.resetMessage = `Baseline uptime: ${this.initialUptimeMs} ms (>= 7s). Operator: Press RESET button now!`;
               setTimeout(
                 () => this.resetVerifyBtn?.nativeElement?.focus(),
                 400,
@@ -286,7 +305,7 @@ export class MauiHostTestingComponent implements OnInit, OnDestroy {
               this.dialogService.openFailure(
                 'RESET Baseline Check Failed',
                 res.message ||
-                  `Current uptime was only ${res.currentUptimeMs} ms (< 10s required).`,
+                  `Current uptime was only ${res.currentUptimeMs} ms (< 7s required).`,
                 () => this.checkResetBaseline(),
                 () => {
                   this.resetBaselineCaptured = true;

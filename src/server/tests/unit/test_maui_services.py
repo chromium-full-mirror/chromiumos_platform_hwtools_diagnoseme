@@ -573,6 +573,22 @@ maui$ """
   @mock.patch("time.sleep")
   @mock.patch("server.maui_common.write_device_log")
   @mock.patch("server.maui_console_tester.MauiConsoleTester.read_kernel_uptime")
+  def test_reset_button_baseline_fails_below_7s(self, mock_uptime, mock_log, mock_sleep):
+    mock_uptime.return_value = (5000, "Kernel uptime: 5000 ms")
+    req = maui_manufacturing_pb2.MauiResetButtonTestRequest(
+        serial_number="TEST_MAUI_SERIAL_001",
+        device_port="/dev/ttyUSB0",
+        action="check_initial_uptime",
+    )
+    resp = self.servicer.test_reset_button(req, self.context)
+    self.assertFalse(resp.success)
+    self.assertFalse(resp.uptime_sufficient)
+    self.assertEqual(resp.current_uptime_ms, 5000)
+    self.assertIn("(< 7000 ms)", resp.message)
+
+  @mock.patch("time.sleep")
+  @mock.patch("server.maui_common.write_device_log")
+  @mock.patch("server.maui_console_tester.MauiConsoleTester.read_kernel_uptime")
   def test_reset_button_post_reset_verification(self, mock_uptime, mock_log, mock_sleep):
     mock_uptime.return_value = (1200, "Kernel uptime: 1200 ms")
     req = maui_manufacturing_pb2.MauiResetButtonTestRequest(
@@ -585,6 +601,47 @@ maui$ """
     self.assertTrue(resp.success)
     self.assertTrue(resp.reset_verified)
     self.assertEqual(resp.current_uptime_ms, 1200)
+
+  @mock.patch("time.sleep")
+  @mock.patch("server.maui_common.write_device_log")
+  @mock.patch("server.maui_console_tester.MauiConsoleTester.read_kernel_uptime")
+  def test_reset_button_post_reset_fails_immediately_when_uptime_exceeds_initial(
+      self, mock_uptime, mock_log, mock_sleep
+  ):
+    # If read uptime is longer than expected (>= initial), fail immediately without polling further
+    mock_uptime.return_value = (16000, "Kernel uptime: 16000 ms")
+    req = maui_manufacturing_pb2.MauiResetButtonTestRequest(
+        serial_number="TEST_MAUI_SERIAL_001",
+        device_port="/dev/ttyUSB0",
+        action="verify_post_reset_uptime",
+        initial_uptime_ms=15420,
+    )
+    resp = self.servicer.test_reset_button(req, self.context)
+    self.assertFalse(resp.success)
+    self.assertFalse(resp.reset_verified)
+    self.assertEqual(resp.current_uptime_ms, 16000)
+    self.assertIn("Board did not reboot", resp.message)
+    self.assertEqual(mock_uptime.call_count, 1)
+
+  @mock.patch("time.sleep")
+  @mock.patch("server.maui_common.write_device_log")
+  @mock.patch("server.maui_console_tester.MauiConsoleTester.read_kernel_uptime")
+  def test_reset_button_post_reset_polls_until_successful_read(
+      self, mock_uptime, mock_log, mock_sleep
+  ):
+    # Attempt 1 fails to read (-1), Attempt 2 successfully reads 1200ms -> stops polling
+    mock_uptime.side_effect = [(-1, "Read timeout"), (1200, "Kernel uptime: 1200 ms")]
+    req = maui_manufacturing_pb2.MauiResetButtonTestRequest(
+        serial_number="TEST_MAUI_SERIAL_001",
+        device_port="/dev/ttyUSB0",
+        action="verify_post_reset_uptime",
+        initial_uptime_ms=15420,
+    )
+    resp = self.servicer.test_reset_button(req, self.context)
+    self.assertTrue(resp.success)
+    self.assertTrue(resp.reset_verified)
+    self.assertEqual(resp.current_uptime_ms, 1200)
+    self.assertEqual(mock_uptime.call_count, 2)
 
   @mock.patch("server.maui_console_tester.open_serial_port")
   def test_read_adc_host_orientation(self, mock_open_serial):
