@@ -27,10 +27,10 @@
   </div>
 
   <div class="cards-column">
-    <!-- Card 1: Stage 1: Host + DUT + Charger Verification (PD & Data Path) -->
+    <!-- Card 1: Host + DUT + Charger Verification (PD & Data Path) -->
     <diagnoseme-rework-card
       id="dut-card-1"
-      title="1. Stage 1: Host + DUT + Charger Verification (PD & Data Path)"
+      title="1. Host + DUT + Charger Verification (PD & Data Path)"
       [progress]="stage1InProgress"
       [disabled]="false">
 
@@ -125,10 +125,10 @@
       </diagnoseme-rework-card-column>
     </diagnoseme-rework-card>
 
-    <!-- Card 2: Stage 2: 180° DUT Cable Flip Polarity Verification (With Charger) -->
+    <!-- Card 2: 180° DUT Cable Flip Polarity Verification (With Charger) -->
     <diagnoseme-rework-card
       id="dut-card-2"
-      title="2. Stage 2: 180° DUT Cable Flip Polarity Verification (With Charger)"
+      title="2. 180° DUT Cable Flip Polarity Verification (With Charger)"
       [progress]="stage2InProgress"
       [disabled]="!stage1Passed">
 
@@ -191,10 +191,10 @@
       </diagnoseme-rework-card-column>
     </diagnoseme-rework-card>
 
-    <!-- Card 3: Stage 3: Charger Disconnect Verification (No Charger) -->
+    <!-- Card 3: Charger Disconnect Verification (No Charger) -->
     <diagnoseme-rework-card
       id="dut-card-3"
-      title="3. Stage 3: Charger Disconnect Verification (No Charger)"
+      title="3. Charger Disconnect Verification (No Charger)"
       [progress]="stage3InProgress"
       [disabled]="!stage2Passed">
 
@@ -255,10 +255,10 @@
       </diagnoseme-rework-card-column>
     </diagnoseme-rework-card>
 
-    <!-- Card 4: Stage 4: Complete DUT Verification & Save Logs -->
+    <!-- Card 4: Complete DUT Verification & Save Logs -->
     <diagnoseme-rework-card
       id="dut-card-4"
-      title="4. Stage 4: Complete DUT Verification & Save Logs"
+      title="4. Complete DUT Verification & Save Logs"
       [progress]="savingLogs"
       [disabled]="!stage3Passed">
 

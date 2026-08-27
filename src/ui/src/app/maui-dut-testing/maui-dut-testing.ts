@@ -189,7 +189,7 @@ export class MauiDutTestingComponent implements OnInit, OnDestroy {
               this.stage1StatusValue = 'FAILED';
               this.stage1Status?.showFailed();
               this.dialogService.openFailure(
-                'Stage 1: Host + DUT + Charger Verification Failed',
+                'Host + DUT + Charger Verification Failed',
                 res.summary ||
                   'H2H link, CCD consoles, or PD charger contract verification failed.',
                 () => this.runStage1WithCharger(),
@@ -203,7 +203,7 @@ export class MauiDutTestingComponent implements OnInit, OnDestroy {
             this.stage1StatusValue = 'FAILED';
             this.stage1Status?.showFailed();
             this.dialogService.openFailure(
-              'Stage 1: Host + DUT + Charger Error',
+              'Host + DUT + Charger Error',
               err,
               () => this.runStage1WithCharger(),
               () => this.bypassStage1(),
@@ -248,7 +248,7 @@ export class MauiDutTestingComponent implements OnInit, OnDestroy {
               this.stage2StatusValue = 'FAILED';
               this.stage2Status?.showFailed();
               this.dialogService.openFailure(
-                'Stage 2: 180° Cable Flip Verification Failed',
+                '180° Cable Flip Verification Failed',
                 res.summary ||
                   `SBU orientation or link recovery failed. Orientation: ${res.dutOrientation}.`,
                 () => this.runStage2SbuFlip(),
@@ -262,7 +262,7 @@ export class MauiDutTestingComponent implements OnInit, OnDestroy {
             this.stage2StatusValue = 'FAILED';
             this.stage2Status?.showFailed();
             this.dialogService.openFailure(
-              'Stage 2: 180° Cable Flip Error',
+              '180° Cable Flip Error',
               err,
               () => this.runStage2SbuFlip(),
               () => this.bypassStage2(),
@@ -307,7 +307,7 @@ export class MauiDutTestingComponent implements OnInit, OnDestroy {
               this.stage3StatusValue = 'FAILED';
               this.stage3Status?.showFailed();
               this.dialogService.openFailure(
-                'Stage 3: Charger Disconnect Verification Failed',
+                'Charger Disconnect Verification Failed',
                 res.summary ||
                   'Charger disconnection check failed (Plug still detected).',
                 () => this.runStage3NoCharger(),
@@ -321,7 +321,7 @@ export class MauiDutTestingComponent implements OnInit, OnDestroy {
             this.stage3StatusValue = 'FAILED';
             this.stage3Status?.showFailed();
             this.dialogService.openFailure(
-              'Stage 3: Charger Disconnect Error',
+              'Charger Disconnect Error',
               err,
               () => this.runStage3NoCharger(),
               () => this.bypassStage3(),
