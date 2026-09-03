@@ -1,0 +1,181 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<div class="maui-container">
+  <div class="header-section">
+    <h2>Maui SMT Step 1: MCU & FTDI Provisioning + PDC Flashing</h2>
+    <p class="subtitle">
+      Automated connection detection: MCU firmware flashing, console verification, parallel TPS66994 PDC updates, and FTDI EEPROM programming.
+    </p>
+  </div>
+
+  <div class="cards-column">
+    <!-- Card 1: Automated 4-Slot Provisioning Pipeline -->
+    <diagnoseme-rework-card
+      id="step1-card-1"
+      title="1. Automated Provisioning Pipeline: MCU -> PDC -> FTDI"
+      [progress]="isAnyFlashing"
+      [disabled]="false">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text">Connect unprogrammed Maui boards (BSL or PID <code>0x6001</code>) to the host USB ports.</span>
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text">Flashing starts automatically on connection: <strong>MCU Flash -> PDC Flash -> FTDI EEPROM</strong>.</span>
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 3</span>
+            <span class="step-text">Confirm that each slot transitions to <strong>PROVISIONED</strong> (PID <code>0x6002</code>).</span>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          <div class="slots-grid">
+            @for (slot of slots; track slot.slotIndex) {
+              <div
+                class="slot-card"
+                [class.slot-active]="slot.stage === 'MCU_FLASHING' || slot.stage === 'PDC_FLASHING' || slot.stage === 'FTDI_PROGRAMMING'"
+                [class.slot-pass]="slot.stage === 'PROVISIONED'"
+                [class.slot-fail]="slot.stage === 'FAILED'">
+                <div class="slot-header">
+                  <span class="slot-title">Slot {{ slot.slotIndex }}{{ slot.devicePort ? ' (' + slot.devicePort + ')' : '' }}</span>
+                  <span
+                    class="slot-badge"
+                    [class.badge-active]="slot.stage === 'PROVISIONED' && !slot.isPhysicallyDisconnected"
+                    [class.badge-neutral]="slot.stage === 'PROVISIONED' && slot.isPhysicallyDisconnected"
+                    [class.badge-fail]="slot.stage === 'FAILED'"
+                    [class.badge-busy]="slot.stage === 'MCU_FLASHING' || slot.stage === 'PDC_FLASHING' || slot.stage === 'FTDI_PROGRAMMING'">
+                    {{ slot.stage === 'PROVISIONED' ? (slot.isPhysicallyDisconnected ? 'DISCONNECTED' : 'PROVISIONED') : (slot.stage === 'FAILED' ? (slot.isPhysicallyDisconnected ? 'FAILED (DISCONNECTED)' : 'FAILED') : (slot.stage === 'MCU_FLASHING' ? '1/3 MCU' : (slot.stage === 'PDC_FLASHING' ? '2/3 PDC' : (slot.stage === 'FTDI_PROGRAMMING' ? '3/3 FTDI' : (slot.isDetected ? 'DETECTED' : 'READY'))))) }}
+                  </span>
+                </div>
+                <div class="slot-body">
+                  @if (slot.serialNumber) {
+                    <div class="info-row">
+                      <span class="label">Serial:</span>
+                      <span class="value code">{{ slot.serialNumber }}</span>
+                    </div>
+                  }
+                  @if (slot.stage === 'PDC_FLASHING' || slot.pdcProgressPercent > 0) {
+                    <mat-progress-bar
+                      mode="determinate"
+                      [value]="slot.pdcProgressPercent"
+                      color="primary"
+                      style="margin: 6px 0;">
+                    </mat-progress-bar>
+                  }
+                  <div class="info-row">
+                    <span class="label">Status:</span>
+                    <span class="value">
+                      {{ slot.stage === 'PROVISIONED' && slot.isPhysicallyDisconnected ? 'Board unplugged (Ready for next batch)' : slot.statusMessage }}
+                    </span>
+                  </div>
+                  @if (slot.stage === 'FAILED') {
+                    <div class="slot-actions" style="margin-top: 6px; display: flex; gap: 6px;">
+                      <button
+                        mat-stroked-button
+                        color="primary"
+                        class="slot-mini-btn"
+                        [disabled]="isAnyFlashing"
+                        (click)="startPipelineForSlot(slot)">
+                        <mat-icon>refresh</mat-icon>
+                        Retry Slot
+                      </button>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #pipelineStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+
+    <!-- Card 2: Disconnect Verification & Batch Log Archival -->
+    <diagnoseme-rework-card
+      id="step1-card-2"
+      title="2. Disconnect Verification & Batch Log Archival"
+      [progress]="savingLogs"
+      [disabled]="!hasCompletedSlots || isAnyFlashing">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text">Disconnect all <strong>provisioned Maui boards</strong> from the host USB ports.</span>
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text">Once <strong>0 connected devices</strong> are detected, click <strong>Save Logs & Finalize Step 1</strong>.</span>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          @if (hasCompletedSlots && !isAnyFlashing && !allDisconnected) {
+            <div class="operator-warning-banner">
+              <mat-icon>warning</mat-icon>
+              <span><strong>Operator Action Required:</strong> Please unplug ALL Maui boards from host USB ports to enable log archival and complete the batch ({{ connectedDevicesCount }} unit(s) still detected).</span>
+            </div>
+          }
+          @if (hasCompletedSlots && !isAnyFlashing && allDisconnected && !logsSaved) {
+            <div class="operator-ready-banner">
+              <mat-icon>check_circle</mat-icon>
+              <span><strong>Ready to Finalize:</strong> All Maui boards disconnected. Click <strong>Save Logs & Finalize Step 1</strong> to archive results.</span>
+            </div>
+          }
+          @if (logsSaved) {
+            <div class="station-completion-hero">
+              <mat-icon class="hero-icon">verified</mat-icon>
+              <div class="hero-content">
+                <div class="hero-title">Step 1 Batch Completed Successfully!</div>
+                <div class="hero-sub">Batch logs saved to ~/diagnoseme_results/. Station resetting for next batch in 2.5s...</div>
+              </div>
+            </div>
+          }
+          <div class="info-row">
+            <span class="label">Connected Devices:</span>
+            <span
+              class="badge"
+              [class.badge-active]="connectedDevicesCount === 0"
+              [class.badge-fail]="connectedDevicesCount > 0">
+              {{ connectedDevicesCount === 0 ? '0 Units Connected (Safe to Save Logs)' : connectedDevicesCount + ' Unit(s) Still Connected (Unplug to proceed)' }}
+            </span>
+          </div>
+          <div class="info-row">
+            <span class="label">Batch Logs Status:</span>
+            <span class="badge" [class.badge-active]="logsSaved">
+              {{ logsSaved ? 'Step 1 Logs Archived (Refreshing page...)' : (canSaveLogs ? 'Ready for Archival' : 'Awaiting Task Completion') }}
+            </span>
+          </div>
+          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+            <button
+              #saveLogsBtn
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="!canSaveLogs"
+              (click)="saveBatchLogsAndFinalize()">
+              <mat-icon>save</mat-icon>
+              Save Logs & Finalize Step 1
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #disconnectStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+  </div>
+</div>

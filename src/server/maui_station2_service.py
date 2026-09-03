@@ -18,7 +18,12 @@ from server import util
 from server.generated import maui_manufacturing_pb2
 from server.generated import maui_manufacturing_pb2_grpc
 from server.maui_common import write_device_log
-from server.maui_console_tester import MauiConsoleTester, open_serial_port, verify_host_adc_voltages
+from server.maui_console_tester import (
+    EXPECTED_HOST_GPIOS,
+    MauiConsoleTester,
+    open_serial_port,
+    verify_host_adc_voltages,
+)
 
 
 def is_sbu_flipped(orig: str, curr: str) -> bool:
@@ -160,7 +165,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     host_vbus_mv = adc_status.get("host_vbus_mv", 0)
     chg_adc_vbus_mv = adc_status.get("chg_vbus_mv", 0)
 
-    gpio_details = "; ".join(gpio_mismatches) if gpio_mismatches else "All 21 GPIOs verified"
+    gpio_details = "; ".join(gpio_mismatches) if gpio_mismatches else f"All {len(EXPECTED_HOST_GPIOS)} GPIOs verified"
     voltage_details = (
         "; ".join(voltage_mismatches)
         if voltage_mismatches
@@ -275,7 +280,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
 
     tester = MauiConsoleTester(port_node=dev_port, timeout=0.5)
 
-    if action == "check_initial_uptime":
+    if action in ("check_initial_uptime", "baseline", "capture_baseline"):
       logging.info("Step A: Querying baseline kernel uptime on %s...", dev_port)
       uptime_ms, raw_out = tester.read_kernel_uptime()
       uptime_sufficient = (uptime_ms >= 7000)
@@ -305,7 +310,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
           raw_output=raw_out,
       )
 
-    elif action == "verify_post_reset_uptime":
+    elif action in ("verify_post_reset_uptime", "verify_reboot", "verify"):
       logging.info("Step B: Verifying post-reset reboot (baseline was %d ms)...", initial_uptime_ms)
       time.sleep(1.0)
 
@@ -526,7 +531,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     pp5000_mv = adc_status.get("pp5000_mv", 0)
     host_vbus_mv = adc_status.get("host_vbus_mv", 0)
 
-    gpio_details = "; ".join(gpio_mismatches) if gpio_mismatches else "All 21 GPIOs verified"
+    gpio_details = "; ".join(gpio_mismatches) if gpio_mismatches else f"All {len(EXPECTED_HOST_GPIOS)} GPIOs verified"
     voltage_details = (
         "; ".join(voltage_mismatches)
         if voltage_mismatches

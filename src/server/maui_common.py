@@ -167,6 +167,110 @@ def scan_usb_devices() -> List[UsbDeviceInfo]:
   return devices
 
 
+def scan_connected_maui_units() -> List[Dict[str, Any]]:
+  """Authoritatively scans for all connected physical Maui boards via ADB, Prolific, or FTDI endpoints."""
+  units: List[Dict[str, Any]] = []
+  seen_keys = set()
+
+  # Map real sysfs device links to /dev/ttyUSB*
+  tty_map = {}
+  for tty_dir in glob.glob("/sys/class/tty/ttyUSB*"):
+    device_link = os.path.join(tty_dir, "device")
+    if os.path.exists(device_link):
+      try:
+        real_dev = os.path.realpath(device_link)
+        tty_map[real_dev] = f"/dev/{os.path.basename(tty_dir)}"
+      except Exception:
+        pass
+
+  for dev_dir in sorted(glob.glob("/sys/bus/usb/devices/*")):
+    vid_str = _read_sysfs_file(os.path.join(dev_dir, "idVendor")).lower()
+    pid_str = _read_sysfs_file(os.path.join(dev_dir, "idProduct")).lower()
+    if not vid_str or not pid_str:
+      continue
+
+    try:
+      vid = int(vid_str, 16)
+      pid = int(pid_str, 16)
+    except ValueError:
+      continue
+
+    serial = _read_sysfs_file(os.path.join(dev_dir, "serial"))
+    product = _read_sysfs_file(os.path.join(dev_dir, "product"))
+    container_id = _read_sysfs_file(os.path.join(dev_dir, "container_id"))
+
+    # Check for Maui ADB / Prolific chip
+    is_adb = (
+        (vid == 0x18D1 and pid in (0x506D, 0x5084, 0x5085))
+        or (vid == 0x067B and pid == 0x27A1)
+        or ("adb" in product.lower() or "maui" in product.lower())
+    )
+    # Check for Maui FTDI UART chip
+    is_ftdi = (vid == 0x0403 and pid in (0x6001, 0x6002))
+
+    if is_adb or is_ftdi:
+      real_dev_dir = os.path.realpath(dev_dir)
+      dev_node = tty_map.get(real_dev_dir, "")
+      if not dev_node and is_ftdi:
+        for iface_dir in glob.glob(f"{dev_dir}/*:1.*"):
+          ttys = glob.glob(f"{iface_dir}/ttyUSB*") + glob.glob(f"{iface_dir}/tty/ttyUSB*")
+          if ttys:
+            dev_node = f"/dev/{os.path.basename(ttys[0])}"
+            break
+
+      # Deduplicate by container_id or serial if both ADB and FTDI are detected on the same board
+      dedup_key = container_id if container_id else (serial if serial else dev_dir)
+      if dedup_key not in seen_keys:
+        seen_keys.add(dedup_key)
+        units.append({
+            "sys_path": dev_dir,
+            "dev_node": dev_node,
+            "vid": vid,
+            "pid": pid,
+            "serial": serial,
+            "product": product or ("Maui ADB" if is_adb else "Maui FTDI"),
+            "container_id": container_id,
+            "is_adb": is_adb,
+            "is_ftdi": is_ftdi,
+        })
+
+  # Also query adb devices -l fallback to catch any active ADB endpoints
+  try:
+    import subprocess
+    proc = subprocess.run(
+        ["adb", "devices", "-l"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=1.0,
+    )
+    if proc.returncode == 0 and proc.stdout:
+      for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line or line.startswith("List of devices"):
+          continue
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] in ("device", "recovery", "sideload", "unauthorized"):
+          adb_ser = parts[0]
+          if adb_ser not in seen_keys and adb_ser.lower() not in ("0", "none", "unknown"):
+            seen_keys.add(adb_ser)
+            units.append({
+                "sys_path": "/sys/bus/usb/devices",
+                "dev_node": "",
+                "vid": 0x18D1,
+                "pid": 0x506D,
+                "serial": adb_ser,
+                "product": "Maui ADB (adb server)",
+                "container_id": "",
+                "is_adb": True,
+                "is_ftdi": False,
+            })
+  except Exception:
+    pass
+
+  return units
+
+
 def find_device_container_id(sys_path: str) -> str:
   """Walks up sysfs tree to locate container_id or USB root hub port."""
   curr = sys_path
@@ -244,3 +348,48 @@ def get_maui_env() -> Dict[str, str]:
   env = os.environ.copy()
   env["PYTHONPATH"] = f"/usr/local/maui/tools:/usr/local/maui:{env.get('PYTHONPATH', '')}"
   return env
+
+
+def ensure_zephyr_shell_awake(port_node: str, timeout: float = 3.0) -> bool:
+  """Sends CRLF pulses at 115200 baud to ensure the Zephyr interactive UART shell is responsive."""
+  if not port_node or not os.path.exists(port_node):
+    return False
+  try:
+    import serial
+    with serial.Serial(
+        port=port_node,
+        baudrate=115200,
+        timeout=0.4,
+        write_timeout=0.3,
+        rtscts=False,
+        dsrdtr=False,
+        xonxoff=False,
+    ) as s:
+      # Clear any boot noise
+      if s.in_waiting > 0:
+        s.read(s.in_waiting)
+      s.reset_input_buffer()
+      s.reset_output_buffer()
+
+      start = time.time()
+      for _ in range(4):
+        s.write(b"\r\n")
+        s.flush()
+        time.sleep(0.08)
+        resp = bytearray()
+        read_start = time.time()
+        while (time.time() - read_start) < 0.4:
+          if s.in_waiting > 0:
+            resp.extend(s.read(s.in_waiting))
+            if any(p in resp for p in (b"maui$", b"maui:~$", b"uart:~$", b"$ ")):
+              logging.info("Zephyr shell on %s responded to wakeup ping: %r", port_node, bytes(resp))
+              return True
+          time.sleep(0.02)
+        if (time.time() - start) > timeout:
+          break
+      logging.info("Sent wakeup pulses to %s (last read: %r)", port_node, bytes(resp))
+      return True
+  except Exception as e:
+    logging.warning("Failed to ping Zephyr shell on %s: %s", port_node, e)
+    return False
+

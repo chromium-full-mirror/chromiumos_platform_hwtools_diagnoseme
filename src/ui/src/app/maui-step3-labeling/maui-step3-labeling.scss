@@ -1,0 +1,141 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+@import '../../styles/maui-shared';
+
+.serial-hero-container {
+  background: linear-gradient(135deg, #1a73e8 0%, #0d47a1 100%);
+  color: #ffffff;
+  padding: 16px 20px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+
+  .serial-hero-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    opacity: 0.9;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+
+  .serial-hero-value {
+    font-size: 28px;
+    font-weight: 700;
+    font-family: 'Roboto Mono', monospace;
+    letter-spacing: 2px;
+  }
+}
+
+.barcode-card-wrapper {
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  padding: 16px;
+  background-color: #ffffff;
+  text-align: center;
+  margin-bottom: 14px;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.08);
+
+  .barcode-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #5f6368;
+    letter-spacing: 1px;
+    margin-bottom: 12px;
+
+    .barcode-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+    }
+  }
+
+  .barcode-svg-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #ffffff;
+    padding: 8px 12px;
+    border-radius: 4px;
+
+    .barcode-svg {
+      max-width: 100%;
+      height: 90px;
+      display: block;
+    }
+  }
+
+  .barcode-card-hint {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #5f6368;
+  }
+}
+
+.endpoints-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.no-device-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  text-align: center;
+  border: 2px dashed #dadce0;
+  border-radius: 8px;
+  background-color: #f8f9fa;
+  margin-bottom: 12px;
+
+  .placeholder-icon {
+    font-size: 48px;
+    width: 48px;
+    height: 48px;
+    color: #9aa0a6;
+    margin-bottom: 8px;
+  }
+
+  .placeholder-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #3c4043;
+    margin-bottom: 4px;
+  }
+
+  .placeholder-desc {
+    font-size: 13px;
+    color: #5f6368;
+    max-width: 420px;
+    margin: 0;
+    line-height: 1.4;
+  }
+}
+
+.copy-success-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #e6f4ea;
+  color: #137333;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.badge-warn {
+  background-color: #fef7e0;
+  color: #b06000;
+}

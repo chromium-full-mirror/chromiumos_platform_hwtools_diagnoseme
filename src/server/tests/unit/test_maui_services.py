@@ -95,12 +95,37 @@ from server.maui_station2_service import (
 )
 
 
-class TestMauiStation1Servicer(unittest.TestCase):
+class TestMauiStation1Servicer(unittest.IsolatedAsyncioTestCase):
   """Tests for MauiStation1Servicer."""
 
   def setUp(self):
     self.servicer = MauiStation1Servicer()
     self.context = mock.MagicMock()
+    self.context.done.return_value = False
+
+  @mock.patch.object(MauiStation1Servicer, "_scan_ftdi_devices")
+  async def test_stream_bsl_auto_discovery_multiple_devices(self, mock_scan):
+    mock_scan.return_value = [
+        {"port": "/dev/ttyUSB0", "vid": 0x0403, "pid": 0x6001, "serial": "DEV0", "container_id": "c1"},
+        {"port": "/dev/ttyUSB1", "vid": 0x0403, "pid": 0x6001, "serial": "DEV1", "container_id": "c2"},
+    ]
+    # Simulate context.done after 1 iteration
+    self.context.done.side_effect = [False, False, True]
+
+    responses = []
+    async for resp in self.servicer.stream_bsl_auto_discovery(mock.MagicMock(), self.context):
+      responses.append(resp)
+      if len(responses) >= 2:
+        break
+
+    self.assertEqual(len(responses), 2)
+    self.assertEqual(responses[0].device_port, "/dev/ttyUSB0")
+    self.assertEqual(responses[0].pid, 0x6001)
+    self.assertTrue(responses[0].auto_flash_eligible)
+
+    self.assertEqual(responses[1].device_port, "/dev/ttyUSB1")
+    self.assertEqual(responses[1].pid, 0x6001)
+    self.assertTrue(responses[1].auto_flash_eligible)
 
   @mock.patch("server.maui_station1_service.write_device_log")
   @mock.patch("subprocess.run")
@@ -177,6 +202,165 @@ class TestMauiStation1Servicer(unittest.TestCase):
     resp = self.servicer.program_ftdi_eeprom(req, self.context)
     self.assertTrue(resp.success)
     self.assertIn("0x6002", resp.message)
+
+  @mock.patch("server.maui_station1_service.write_device_log")
+  @mock.patch("subprocess.run")
+  def test_program_ftdi_eeprom_with_old_serial(self, mock_run, mock_log):
+    mock_run.return_value = mock.Mock(
+        stdout="Programming successful! New PID: 0x6002\n",
+        returncode=0,
+    )
+    req = maui_manufacturing_pb2.MauiProgramFtdiRequest(
+        serial_number="TEST_MAUI_SERIAL_001",
+        ftdi_dev_node="/dev/ttyUSB0",
+        old_serial_number="A50285BI",
+    )
+    resp = self.servicer.program_ftdi_eeprom(req, self.context)
+    self.assertTrue(resp.success)
+    called_cmd = mock_run.call_args[0][0]
+    self.assertIn("--old-serial-number", called_cmd)
+    self.assertIn("A50285BI", called_cmd)
+    self.assertIn("--new-pid", called_cmd)
+    self.assertIn("0x6002", called_cmd)
+    self.assertIn("--new-serial-number", called_cmd)
+    self.assertIn("TEST_MAUI_SERIAL_001", called_cmd)
+
+  @mock.patch.object(MauiStation1Servicer, "_find_ftdi_info_for_port", return_value=("A50285BI", 0x6001, "cont1", "MAUI_ADB_123"))
+  def test_discover_topology_and_serial_targeted_port(self, mock_info):
+    req = maui_manufacturing_pb2.MauiTopologyDiscoveryRequest(
+        device_port="/dev/ttyUSB0",
+    )
+    resp = self.servicer.discover_topology_and_serial(req, self.context)
+    self.assertEqual(resp.read_serial_number, "MAUI_ADB_123")
+    self.assertEqual(resp.ftdi_dev_node, "/dev/ttyUSB0")
+    self.assertEqual(resp.ftdi_current_serial, "A50285BI")
+    self.assertEqual(resp.ftdi_current_pid, 0x6001)
+
+  def test_match_ftdi_to_adb_superspeed_split_bus(self):
+    # Simulates real topology from local test setup with 3 connected Maui boards
+    adb_candidates = [
+        {"dir": "/sys/devices/pci/usb4/4-2/4-2.1/4-2.1.3", "name": "4-2.1.3", "serial": "MAUIV11G26060059", "devpath": "2.1.3", "container_id": ""},
+        {"dir": "/sys/devices/pci/usb4/4-2/4-2.2/4-2.2.3", "name": "4-2.2.3", "serial": "MAUIV11G26060068", "devpath": "2.2.3", "container_id": ""},
+        {"dir": "/sys/devices/pci/usb3/3-6/3-6.4/3-6.4.3", "name": "3-6.4.3", "serial": "MAUIV11G26060056", "devpath": "6.4.3", "container_id": ""},
+    ]
+
+    # Slot 1: FTDI at 3-6.1.2 (devpath 6.1.2) -> matches MAUIV11G26060059 (4-2.1.3)
+    match1 = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="/sys/devices/pci/usb3/3-6/3-6.1/3-6.1.2",
+        ftdi_name="3-6.1.2",
+        ftdi_devpath="6.1.2",
+        ftdi_container_id="",
+        adb_candidates=adb_candidates,
+    )
+    self.assertEqual(match1, "MAUIV11G26060059")
+
+    # Slot 2: FTDI at 3-6.2.2 (devpath 6.2.2) -> matches MAUIV11G26060068 (4-2.2.3)
+    match2 = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="/sys/devices/pci/usb3/3-6/3-6.2/3-6.2.2",
+        ftdi_name="3-6.2.2",
+        ftdi_devpath="6.2.2",
+        ftdi_container_id="",
+        adb_candidates=adb_candidates,
+    )
+    self.assertEqual(match2, "MAUIV11G26060068")
+
+    # Slot 3 (external port 4): FTDI at 3-6.4.2 (devpath 6.4.2) -> matches MAUIV11G26060056 (3-6.4.3)
+    match3 = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="/sys/devices/pci/usb3/3-6/3-6.4/3-6.4.2",
+        ftdi_name="3-6.4.2",
+        ftdi_devpath="6.4.2",
+        ftdi_container_id="",
+        adb_candidates=adb_candidates,
+    )
+    self.assertEqual(match3, "MAUIV11G26060056")
+
+  def test_match_ftdi_to_adb_arbitrary_host_buses_and_chained_hubs(self):
+    # Host setup with Bus 1 (USB 2.0) and Bus 2 (USB 3.0), through chained multi-tier hubs:
+    # Host -> Hub Tier 1 (Port 4) -> Hub Tier 2 (Port 1) -> Maui Board
+    adb_candidates = [
+        {"dir": "/sys/devices/pci/usb2/2-1/2-1.4.1/2-1.4.1.3", "name": "2-1.4.1.3", "serial": "MAUI_CHAINED_001", "devpath": "1.4.1.3", "container_id": ""},
+        {"dir": "/sys/devices/pci/usb2/2-1/2-1.4.2/2-1.4.2.3", "name": "2-1.4.2.3", "serial": "MAUI_CHAINED_002", "devpath": "1.4.2.3", "container_id": ""},
+    ]
+
+    # Slot 1 on chained hub: FTDI at 1-3.4.1.2 (devpath 3.4.1.2)
+    match1 = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="/sys/devices/pci/usb1/1-3/1-3.4.1/1-3.4.1.2",
+        ftdi_name="1-3.4.1.2",
+        ftdi_devpath="3.4.1.2",
+        ftdi_container_id="",
+        adb_candidates=adb_candidates,
+    )
+    self.assertEqual(match1, "MAUI_CHAINED_001")
+
+    # Slot 2 on chained hub: FTDI at 1-3.4.2.2 (devpath 3.4.2.2)
+    match2 = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="/sys/devices/pci/usb1/1-3/1-3.4.2/1-3.4.2.2",
+        ftdi_name="1-3.4.2.2",
+        ftdi_devpath="3.4.2.2",
+        ftdi_container_id="",
+        adb_candidates=adb_candidates,
+    )
+    self.assertEqual(match2, "MAUI_CHAINED_002")
+
+  def test_match_ftdi_to_adb_multiple_separate_external_hubs(self):
+    # Two separate external hubs plugged into two distinct host ports:
+    # Hub A on Host Port 1 -> Maui board on Hub A Port 2
+    # Hub B on Host Port 2 -> Maui board on Hub B Port 2
+    adb_candidates = [
+        {"dir": "/sys/devices/pci/usb2/2-1/2-1.2/2-1.2.3", "name": "2-1.2.3", "serial": "MAUI_HUB_A", "devpath": "1.2.3", "container_id": ""},
+        {"dir": "/sys/devices/pci/usb2/2-2/2-2.2/2-2.2.3", "name": "2-2.2.3", "serial": "MAUI_HUB_B", "devpath": "2.2.3", "container_id": ""},
+    ]
+
+    # FTDI on Hub A (Port 2): 1-1.2.2 (devpath 1.2.2)
+    match_a = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="/sys/devices/pci/usb1/1-1/1-1.2/1-1.2.2",
+        ftdi_name="1-1.2.2",
+        ftdi_devpath="1.2.2",
+        ftdi_container_id="",
+        adb_candidates=adb_candidates,
+    )
+    self.assertEqual(match_a, "MAUI_HUB_A")
+
+    # FTDI on Hub B (Port 2): 1-2.2.2 (devpath 2.2.2)
+    match_b = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="/sys/devices/pci/usb1/1-2/1-2.2/1-2.2.2",
+        ftdi_name="1-2.2.2",
+        ftdi_devpath="2.2.2",
+        ftdi_container_id="",
+        adb_candidates=adb_candidates,
+    )
+    self.assertEqual(match_b, "MAUI_HUB_B")
+
+  def test_match_ftdi_to_adb_direct_connection(self):
+    # Directly plugged into host USB-C port (no intermediate external hub)
+    adb_candidates = [
+        {"dir": "/sys/devices/pci/usb2/2-1/2-1.3", "name": "2-1.3", "serial": "MAUI_DIRECT_001", "devpath": "1.3", "container_id": ""},
+    ]
+    match = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="/sys/devices/pci/usb1/1-1/1-1.2",
+        ftdi_name="1-1.2",
+        ftdi_devpath="1.2",
+        ftdi_container_id="",
+        adb_candidates=adb_candidates,
+    )
+    self.assertEqual(match, "MAUI_DIRECT_001")
+
+  def test_match_ftdi_to_adb_via_adb_devices_locations(self):
+    # Matching using location dictionary parsed from 'adb devices -l'
+    adb_loc_map = {
+        "4-2.1.3": "MAUI_LOC_001",
+        "4-2.2.3": "MAUI_LOC_002",
+    }
+    match = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="",
+        ftdi_name="3-6.1.2",
+        ftdi_devpath="6.1.2",
+        ftdi_container_id="",
+        adb_candidates=[],
+        adb_devices_locations=adb_loc_map,
+    )
+    self.assertEqual(match, "MAUI_LOC_001")
+
 
 
 class TestMauiPdcServicer(unittest.IsolatedAsyncioTestCase):
@@ -323,10 +507,31 @@ class TestMauiDeviceManagementServicer(unittest.TestCase):
             "host_dut_verification": "PASSED",
             "label_verified": "PASSED",
         }
-        req = maui_manufacturing_pb2.MauiFinalSubmissionRequest(
+        req_smt = maui_manufacturing_pb2.MauiFinalSubmissionRequest(
             serial_number="TEST_MAUI_SERIAL_001",
             operator_id="OP_TEST",
-            station_id="STATION_TEST",
+            station_id="STATION_SMT_FUNCTIONAL",
+            mcu_flashed=True,
+            ftdi_programmed=True,
+            pdc_flashed=True,
+            host_only_passed=True,
+            host_dut_passed=True,
+            label_verified=False,
+            stage_statuses=stage_statuses,
+            adb_serial="TEST_MAUI_SERIAL_001",
+            ftdi_serial="TEST_MAUI_SERIAL_001",
+        )
+        resp_smt = self.servicer.submit_final_manufacturing_results(req_smt, self.context)
+        self.assertTrue(resp_smt.success)
+        self.assertIn("_SMT_PASS", resp_smt.mes_tracking_id)
+        with open(resp_smt.summary_file_path, "r", encoding="utf-8") as f:
+          data_smt = json.load(f)
+        self.assertEqual(data_smt["phase"], "SMT")
+
+        req_fatp = maui_manufacturing_pb2.MauiFinalSubmissionRequest(
+            serial_number="TEST_MAUI_SERIAL_001",
+            operator_id="OP_TEST",
+            station_id="STATION_FATP_QT0",
             mcu_flashed=True,
             ftdi_programmed=True,
             pdc_flashed=True,
@@ -338,16 +543,12 @@ class TestMauiDeviceManagementServicer(unittest.TestCase):
             ftdi_serial="TEST_MAUI_SERIAL_001",
             scanned_barcode="TEST_MAUI_SERIAL_001",
         )
-        resp = self.servicer.submit_final_manufacturing_results(req, self.context)
-        self.assertTrue(resp.success)
-        summary_path = os.path.join(tmpdir, "final_results.json")
-        self.assertTrue(os.path.exists(summary_path))
-        with open(summary_path, "r", encoding="utf-8") as f:
-          data = json.load(f)
-        self.assertEqual(data["overall_status"], "PASS")
-        self.assertEqual(data["stage_statuses"]["mcu_bsl_flashing"], "PASSED")
-        self.assertEqual(data["endpoints"]["adb_serial"], "TEST_MAUI_SERIAL_001")
-        self.assertTrue(resp.mes_tracking_id.startswith("MES-TEST_MAUI_SERIAL_001_"))
+        resp_fatp = self.servicer.submit_final_manufacturing_results(req_fatp, self.context)
+        self.assertTrue(resp_fatp.success)
+        self.assertIn("_FATP_PASS", resp_fatp.mes_tracking_id)
+        with open(resp_fatp.summary_file_path, "r", encoding="utf-8") as f:
+          data_fatp = json.load(f)
+        self.assertEqual(data_fatp["phase"], "FATP")
 
   def test_analyze_device_manufacturing_logs_failed_bsl(self):
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -674,6 +875,22 @@ maui$ """
     self.assertTrue(resp.success)
     self.assertTrue(resp.reset_verified)
     self.assertEqual(resp.current_uptime_ms, 1200)
+
+  @mock.patch("time.sleep")
+  @mock.patch("server.maui_common.write_device_log")
+  @mock.patch("server.maui_console_tester.MauiConsoleTester.read_kernel_uptime")
+  def test_reset_button_verify_reboot_action(self, mock_uptime, mock_log, mock_sleep):
+    mock_uptime.return_value = (1150, "Kernel uptime: 1150 ms")
+    req = maui_manufacturing_pb2.MauiResetButtonTestRequest(
+        serial_number="TEST_MAUI_SERIAL_001",
+        device_port="/dev/ttyUSB0",
+        action="verify_reboot",
+        initial_uptime_ms=15420,
+    )
+    resp = self.servicer.test_reset_button(req, self.context)
+    self.assertTrue(resp.success)
+    self.assertTrue(resp.reset_verified)
+    self.assertEqual(resp.current_uptime_ms, 1150)
 
   @mock.patch("time.sleep")
   @mock.patch("server.maui_common.write_device_log")

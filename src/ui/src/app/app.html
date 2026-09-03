@@ -1,7 +1,7 @@
 <!-- Copyright 2025 The ChromiumOS Authors
      Use of this source code is governed by a BSD-style license that can be
      found in the LICENSE file.
- -->
+-->
 
 <mat-toolbar color="primary" class="diagnoseme-toolbar">
   <button [matMenuTriggerFor]="menu" mat-icon-button class="example-icon" aria-label="Example icon-button with menu icon">
@@ -14,11 +14,11 @@
     <button mat-menu-item routerLink="/servo-micro-manufacturing">Servo Micro Manufacturing</button>
     <mat-divider></mat-divider>
     -->
-    <button mat-menu-item routerLink="/maui-initial-flashing">Maui Stage 1: Initial Flashing (MCU & FTDI)</button>
-    <button mat-menu-item routerLink="/maui-pdc-flashing">Maui Stage 1.5: Multi-Device PDC Flashing</button>
-    <button mat-menu-item routerLink="/maui-host-testing">Maui Stage 2: Host-Only Verification</button>
-    <button mat-menu-item routerLink="/maui-dut-testing">Maui Stage 3: Host + DUT Verification</button>
-    <button mat-menu-item routerLink="/maui-labeling">Maui Final: Labeling & Results</button>
+    <button mat-menu-item routerLink="/maui-step1">SMT Step 1: MCU & FTDI Provisioning + PDC Flashing</button>
+    <button mat-menu-item routerLink="/maui-step2">SMT Step 2: SMT Functional Verification</button>
+    <mat-divider></mat-divider>
+    <button mat-menu-item routerLink="/maui-step3">FATP Step 3: Final Provisioning & Label Printing</button>
+    <button mat-menu-item routerLink="/maui-step4">FATP Step 4: Full-Unit Quick Test (QT0)</button>
   </mat-menu>
   <span>HW Tools Diagnose Me</span>
   <span class="spacer"></span>
@@ -32,6 +32,6 @@
   </button>
 </mat-toolbar>
 
-<div class=top-level>
-<router-outlet></router-outlet>
+<div class="top-level">
+  <router-outlet></router-outlet>
 </div>

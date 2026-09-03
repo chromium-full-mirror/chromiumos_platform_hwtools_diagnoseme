@@ -1,0 +1,171 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+@import '../../../styles/maui-shared';
+
+.barcode-input-container {
+  margin-top: 8px;
+  max-width: 400px;
+
+  .barcode-field {
+    width: 100%;
+  }
+}
+
+.badge-fail {
+  background-color: #fce8e6;
+  color: #c5221f;
+}
+
+.led-checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.logs-checklist-container {
+  margin: 12px 0;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: #fafafa;
+
+  .logs-checklist-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background-color: #f1f3f4;
+    font-weight: 600;
+    font-size: 12px;
+    color: #3c4043;
+    border-bottom: 1px solid #dadce0;
+
+    mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+      color: #5f6368;
+    }
+  }
+
+  .logs-checklist-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .log-item-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid #f1f3f4;
+    font-size: 13px;
+
+    &:last-child {
+      border-bottom: none;
+    }
+
+    &.log-missing {
+      opacity: 0.7;
+    }
+
+    .log-item-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      .log-status-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+
+        &.icon-pass {
+          color: #1e8e3e;
+        }
+        &.icon-fail {
+          color: #d93025;
+        }
+        &.icon-bypass {
+          color: #e37400;
+        }
+        &.icon-missing {
+          color: #80868b;
+        }
+      }
+
+      .log-filename {
+        font-family: monospace;
+        font-weight: 600;
+        color: #202124;
+      }
+    }
+
+    .log-item-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+
+      .log-details {
+        font-size: 12px;
+        color: #5f6368;
+      }
+
+      .log-size {
+        font-size: 11px;
+        color: #80868b;
+        font-family: monospace;
+      }
+
+      .verdict-badge {
+        font-size: 11px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: 600;
+      }
+    }
+  }
+}
+
+.final-report-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background-color: #e6f4ea;
+  border: 1px solid #ceead6;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 12px 0;
+
+  mat-icon {
+    color: #137333;
+    font-size: 28px;
+    width: 28px;
+    height: 28px;
+  }
+
+  .banner-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+
+    .banner-title {
+      font-weight: 700;
+      color: #137333;
+      font-size: 14px;
+    }
+
+    .banner-tracking {
+      font-size: 13px;
+      font-weight: 600;
+      color: #202124;
+    }
+
+    .banner-sub {
+      font-size: 11px;
+      color: #5f6368;
+    }
+  }
+}

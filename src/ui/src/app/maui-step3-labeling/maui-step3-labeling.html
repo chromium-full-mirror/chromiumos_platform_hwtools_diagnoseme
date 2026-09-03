@@ -1,0 +1,180 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<div class="maui-container">
+  <div class="header-section">
+    <h2>Maui FATP Step 3: Serial Number Readout & Label Printing Assistant</h2>
+    <p class="subtitle">
+      Automatic electronic serial number readout and optical barcode display for Windows PC label-printing tool.
+    </p>
+    <div
+      class="device-status-badge"
+      [class.connected]="deviceConnected && electronicSerial"
+      [class.disconnected]="!deviceConnected || !electronicSerial">
+      <mat-icon>{{
+        deviceConnected && electronicSerial ? 'check_circle' : 'usb_off'
+      }}</mat-icon>
+      <span class="device-status-text">
+        <strong>{{ serialDetectionMessage }}</strong>
+      </span>
+      <button
+        mat-icon-button
+        (click)="pollElectronicSerial()"
+        title="Refresh Detection">
+        <mat-icon>refresh</mat-icon>
+      </button>
+    </div>
+  </div>
+
+  <div class="cards-column">
+    <!-- Single Card: Electronic Serial Number Readout & Barcode Display -->
+    <diagnoseme-rework-card
+      id="step3-card-1"
+      title="1. Electronic Serial Number & Barcode Display"
+      [progress]="readingSerial"
+      [disabled]="false">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text"
+              >Connect the assembled Maui unit <strong>Host USB-C port</strong> to the test station.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text"
+              >Read or optically scan the <strong>Serial Number Barcode</strong> below directly off the screen using your handheld scanner / label printer.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 3</span>
+            <span class="step-text"
+              >Click <strong>Copy Serial Number</strong> if you need to paste the serial string manually.</span
+            >
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          @if (electronicSerial) {
+            <!-- Hero Serial Display -->
+            <div class="serial-hero-container">
+              <div class="serial-hero-label">ELECTRONIC SERIAL NUMBER</div>
+              <div class="serial-hero-value">{{ electronicSerial }}</div>
+            </div>
+
+            <!-- Optical Barcode Card -->
+            <div class="barcode-card-wrapper">
+              <div class="barcode-card-header">
+                <mat-icon class="barcode-icon">qr_code_2</mat-icon>
+                <span>OPTICAL 1D BARCODE (CODE 128)</span>
+              </div>
+              <div class="barcode-svg-container">
+                <svg
+                  [attr.viewBox]="'0 0 ' + barcodeTotalWidth + ' ' + barcodeHeight"
+                  class="barcode-svg"
+                  shape-rendering="crispEdges">
+                  <rect
+                    x="0"
+                    y="0"
+                    [attr.width]="barcodeTotalWidth"
+                    [attr.height]="barcodeHeight"
+                    fill="#FFFFFF" />
+                  @for (bar of svgBarcodeBars; track $index) {
+                    <rect
+                      [attr.x]="bar.x"
+                      y="10"
+                      [attr.width]="bar.width"
+                      height="50"
+                      fill="#000000" />
+                  }
+                  <text
+                    [attr.x]="barcodeTotalWidth / 2"
+                    y="76"
+                    text-anchor="middle"
+                    font-family="monospace"
+                    font-size="14"
+                    font-weight="bold"
+                    fill="#000000">
+                    {{ electronicSerial }}
+                  </text>
+                </svg>
+              </div>
+              <div class="barcode-card-hint">
+                Scan this barcode directly from your monitor with a USB handheld scanner.
+              </div>
+            </div>
+
+            <!-- Hardware Endpoint Metadata -->
+            <div class="endpoints-grid">
+              @if (adbSerial) {
+                <div class="info-row">
+                  <span class="label">ADB Serial:</span>
+                  <span class="value code">{{ adbSerial }} ({{ adbConnected ? 'Connected' : 'Offline' }})</span>
+                </div>
+              }
+              @if (ftdiSerial) {
+                <div class="info-row">
+                  <span class="label">FTDI Serial:</span>
+                  <span class="value code">{{ ftdiSerial }} (PID: {{ ftdiIsProgrammed ? '0x6002' : '0x6001' }})</span>
+                </div>
+              }
+              <div class="info-row">
+                <span class="label">Endpoint Sync:</span>
+                <span
+                  class="badge"
+                  [class.badge-active]="dualEndpointsMatch"
+                  [class.badge-warn]="!dualEndpointsMatch">
+                  {{ dualEndpointsMatch ? 'Dual Endpoints Matched' : 'Single/Unsynced Endpoint' }}
+                </span>
+              </div>
+            </div>
+          } @else {
+            <div class="no-device-placeholder">
+              <mat-icon class="placeholder-icon">usb</mat-icon>
+              <div class="placeholder-title">Waiting for Maui Connection</div>
+              <p class="placeholder-desc">
+                Please plug the Maui Host USB-C cable into this computer. The electronic serial number and barcode will display automatically once detected.
+              </p>
+            </div>
+          }
+
+          @if (copySuccessMessage) {
+            <div class="copy-success-badge">
+              <mat-icon>check_circle</mat-icon>
+              <span>{{ copySuccessMessage }}</span>
+            </div>
+          }
+
+          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+            <button
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="!electronicSerial"
+              (click)="copySerialToClipboard()">
+              <mat-icon>content_copy</mat-icon>
+              Copy Serial Number
+            </button>
+            <button
+              mat-stroked-button
+              color="accent"
+              [disabled]="readingSerial"
+              (click)="pollElectronicSerial()">
+              <mat-icon>refresh</mat-icon>
+              Refresh Detection
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #readoutStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+  </div>
+</div>

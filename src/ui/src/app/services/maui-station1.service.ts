@@ -9,6 +9,7 @@ import {
   MauiBslDiscoveryResponse,
   MauiAutoProgramMcuRequest,
   MauiProgramMcuResponse,
+  MauiTopologyDiscoveryRequest,
   MauiTopologyDiscoveryResponse,
   MauiProgramFtdiRequest,
   MauiProgramFtdiResponse,
@@ -28,15 +29,23 @@ export class MauiStation1Service {
   autoProgramMcuBsl(
     devicePort = '/dev/ttyUSB0',
     fwChannel = 'stable',
+    serialNumber = '',
   ): Observable<MauiProgramMcuResponse> {
     const request = new MauiAutoProgramMcuRequest();
     request.devicePort = devicePort;
     request.fwChannel = fwChannel;
+    request.serialNumber = serialNumber;
     return this.client.autoProgramMcuBsl(request);
   }
 
-  discoverTopologyAndSerial(): Observable<MauiTopologyDiscoveryResponse> {
-    return this.client.discoverTopologyAndSerial(new Empty());
+  discoverTopologyAndSerial(
+    devicePort = '',
+    containerId = '',
+  ): Observable<MauiTopologyDiscoveryResponse> {
+    const request = new MauiTopologyDiscoveryRequest();
+    request.devicePort = devicePort;
+    request.containerId = containerId;
+    return this.client.discoverTopologyAndSerial(request);
   }
 
   programFtdiEeprom(
@@ -45,6 +54,8 @@ export class MauiStation1Service {
     vid = 0x0403,
     pid = 0x6002,
     productName = 'Maui Serial Console',
+    oldSerialNumber = '',
+    oldPid = 0,
   ): Observable<MauiProgramFtdiResponse> {
     const request = new MauiProgramFtdiRequest();
     request.serialNumber = serialNumber;
@@ -52,6 +63,8 @@ export class MauiStation1Service {
     request.vid = vid;
     request.pid = pid;
     request.productName = productName;
+    request.oldSerialNumber = oldSerialNumber;
+    request.oldPid = oldPid;
     return this.client.programFtdiEeprom(request);
   }
 }

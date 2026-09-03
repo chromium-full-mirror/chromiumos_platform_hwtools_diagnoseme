@@ -19,7 +19,7 @@ service MauiStation1InitialFlashing {
   rpc auto_program_mcu_bsl(MauiAutoProgramMcuRequest) returns (MauiProgramMcuResponse) {}
 
   // Read Pre-flashed Serial & Discover FTDI Topology via Container ID
-  rpc discover_topology_and_serial(google.protobuf.Empty) returns (MauiTopologyDiscoveryResponse) {}
+  rpc discover_topology_and_serial(MauiTopologyDiscoveryRequest) returns (MauiTopologyDiscoveryResponse) {}
 
   // FTDI EEPROM Programming via ft232r_prog (--new-pid 0x6002 --new-serial-number)
   rpc program_ftdi_eeprom(MauiProgramFtdiRequest) returns (MauiProgramFtdiResponse) {}
@@ -118,6 +118,11 @@ message MauiProgramMcuResponse {
   string logs = 5;
 }
 
+message MauiTopologyDiscoveryRequest {
+  string device_port = 1;       // e.g. /dev/ttyUSB0 (optional target port)
+  string container_id = 2;      // optional USB container ID
+}
+
 message MauiTopologyDiscoveryResponse {
   bool success = 1;
   string read_serial_number = 2; // e.g. <SERIAL> read from Prolific 18d1:506d/5084
@@ -125,6 +130,8 @@ message MauiTopologyDiscoveryResponse {
   string ftdi_dev_node = 4;      // e.g. /dev/ttyUSB0
   string container_id = 5;
   string error_message = 6;
+  string ftdi_current_serial = 7; // Current serial of the FTDI chip (e.g. A50285BI or FTxxxxxx)
+  uint32 ftdi_current_pid = 8;    // e.g. 0x6001 or 0x6002
 }
 
 message MauiProgramFtdiRequest {
@@ -133,6 +140,8 @@ message MauiProgramFtdiRequest {
   uint32 pid = 3;               // 0x6002
   string product_name = 4;      // "Maui Serial Console"
   string ftdi_dev_node = 5;
+  string old_serial_number = 6; // Current FTDI serial for targeted ft232r_prog --old-serial-number
+  uint32 old_pid = 7;           // Current FTDI PID (e.g. 0x6001 or 0x6002)
 }
 
 message MauiProgramFtdiResponse {

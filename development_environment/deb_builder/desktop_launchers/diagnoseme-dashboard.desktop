@@ -3,7 +3,7 @@ Version=1.0
 Type=Application
 Name=Maui Manufacturing Dashboard
 Comment=Display Maui device programming statistics, yields and pass rates
-Exec=xfce4-terminal --title="Maui Manufacturing Dashboard" --hold -e "diagnoseme-dashboard"
+Exec=xfce4-terminal --title="Maui Manufacturing Dashboard" --hold -e "diagnoseme-dashboard --watch"
 Icon=utilities-system-monitor
 Terminal=false
 Categories=System;Utility;

@@ -96,6 +96,15 @@ if [ "$SKIP_DOCKER" = false ]; then
         popd > /dev/null
     fi
 
+    # Determine fast compression utility (multi-threaded pigz if available, else gzip)
+    if command -v pigz > /dev/null 2>&1; then
+        GZIP_CMD="pigz -p $(nproc 2>/dev/null || echo 4)"
+        echo "  Using parallel compression: pigz ($(nproc 2>/dev/null || echo 4) cores)"
+    else
+        GZIP_CMD="gzip"
+        echo "  Using standard compression: gzip"
+    fi
+
     IMAGES=("ui" "server" "envoy")
     for IMG in "${IMAGES[@]}"; do
         REG_IMG="us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/${IMG}:${DOCKER_TAG}"
@@ -129,7 +138,7 @@ if [ "$SKIP_DOCKER" = false ]; then
         IMG_DATE=$(docker image inspect --format '{{.Created}}' "${LOCAL_IMG}" 2>/dev/null | cut -d. -f1 || echo "unknown")
         TAR_FILE="${BUNDLE_DIR}/images/${IMG}_${DOCKER_TAG}.tar.gz"
         echo "  -> Packaging ${LOCAL_IMG} (ID: ${IMG_ID}, Created: ${IMG_DATE}) -> ${TAR_FILE}..."
-        docker save "${REG_IMG}" "${LOCAL_IMG}" | gzip > "${TAR_FILE}"
+        docker save "${REG_IMG}" "${LOCAL_IMG}" | ${GZIP_CMD} > "${TAR_FILE}"
     done
 else
     echo "[1/4] Skipping Docker image export."
