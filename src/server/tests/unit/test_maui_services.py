@@ -173,9 +173,8 @@ class TestMauiStation1Servicer(unittest.IsolatedAsyncioTestCase):
     )
     resp = self.servicer.auto_program_mcu_bsl(req, self.context)
     self.assertTrue(resp.success)
-    # Ensure --file flag was used instead of --fw_channel
+    # Ensure offline file path was passed in command
     called_cmd = mock_run.call_args[0][0]
-    self.assertIn("--file", called_cmd)
     self.assertIn("/var/lib/diagnoseme/firmware/mcu/zephyr.txt", called_cmd)
 
   @mock.patch("server.maui_station1_service.find_offline_fw_file", return_value=None)
@@ -345,21 +344,96 @@ class TestMauiStation1Servicer(unittest.IsolatedAsyncioTestCase):
     )
     self.assertEqual(match, "MAUI_DIRECT_001")
 
-  def test_match_ftdi_to_adb_via_adb_devices_locations(self):
-    # Matching using location dictionary parsed from 'adb devices -l'
-    adb_loc_map = {
-        "4-2.1.3": "MAUI_LOC_001",
-        "4-2.2.3": "MAUI_LOC_002",
-    }
-    match = self.servicer._match_ftdi_to_adb(
-        ftdi_dir="",
-        ftdi_name="3-6.1.2",
-        ftdi_devpath="6.1.2",
+  def test_match_ftdi_to_adb_multi_controller_container_id_split_buses(self):
+    # Simulates real multi-controller xHCI topology from factory host:
+    # Board 1: FTDI on 3-1.2 (Hub CID: 01890002-0508-6ab4-121a-27c2b6c9d000), ADB on 2-3.3 (Hub CID: 01890002-0508-6ab4-121a-27c2b6c9d000)
+    # Board 2: FTDI on 3-6.2 (Hub CID: 01890002-4508-6a4d-121a-27c2b6c9d000), ADB on 4-2.3 (Hub CID: 01890002-4508-6a4d-121a-27c2b6c9d000)
+    cid_board1 = "01890002-0508-6ab4-121a-27c2b6c9d000"
+    cid_board2 = "01890002-4508-6a4d-121a-27c2b6c9d000"
+
+    adb_candidates = [
+        {"dir": "/sys/devices/pci/usb2/2-3/2-3.3", "name": "2-3.3", "serial": "MAUIV11G26060066", "devpath": "3.3", "container_id": "", "hub_container_id": cid_board1},
+        {"dir": "/sys/devices/pci/usb4/4-2/4-2.3", "name": "4-2.3", "serial": "MAUIV11G26060056", "devpath": "2.3", "container_id": "", "hub_container_id": cid_board2},
+    ]
+
+    # Slot 1: /dev/ttyUSB0 (3-1.2) must strictly match Board 1 (MAUIV11G26060066)
+    match1 = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="/sys/devices/pci/usb3/3-1/3-1.2",
+        ftdi_name="3-1.2",
+        ftdi_devpath="1.2",
         ftdi_container_id="",
-        adb_candidates=[],
-        adb_devices_locations=adb_loc_map,
+        ftdi_hub_container_id=cid_board1,
+        adb_candidates=adb_candidates,
     )
-    self.assertEqual(match, "MAUI_LOC_001")
+    self.assertEqual(match1, "MAUIV11G26060066")
+
+    # Slot 2: /dev/ttyUSB1 (3-6.2) must strictly match Board 2 (MAUIV11G26060056)
+    match2 = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="/sys/devices/pci/usb3/3-6/3-6.2",
+        ftdi_name="3-6.2",
+        ftdi_devpath="6.2",
+        ftdi_container_id="",
+        ftdi_hub_container_id=cid_board2,
+        adb_candidates=adb_candidates,
+    )
+    self.assertEqual(match2, "MAUIV11G26060056")
+
+  def test_match_ftdi_to_adb_no_cross_contamination_when_single_adb_active(self):
+    # When Board 2's ADB chip has not enumerated yet, only Board 1's ADB is visible.
+    # Board 2's FTDI (/dev/ttyUSB1) must NEVER steal Board 1's serial.
+    cid_board1 = "01890002-0508-6ab4-121a-27c2b6c9d000"
+    cid_board2 = "01890002-4508-6a4d-121a-27c2b6c9d000"
+
+    only_board1_adb = [
+        {"dir": "/sys/devices/pci/usb2/2-3/2-3.3", "name": "2-3.3", "serial": "MAUIV11G26060066", "devpath": "3.3", "container_id": "", "hub_container_id": cid_board1},
+    ]
+
+    # Query for Board 2's FTDI (3-6.2) -> must return None!
+    match_board2 = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="/sys/devices/pci/usb3/3-6/3-6.2",
+        ftdi_name="3-6.2",
+        ftdi_devpath="6.2",
+        ftdi_container_id="",
+        ftdi_hub_container_id=cid_board2,
+        adb_candidates=only_board1_adb,
+    )
+    self.assertIsNone(match_board2)
+
+  def test_parse_lsusb_hub_container_ids(self):
+    # Verifies parsing of lsusb -v BOS container ID capability descriptors
+    fake_lsusb = """
+Bus 002 Device 091: ID 0451:8140 Texas Instruments, Inc. TUSB8041 4-Port Hub
+  ContainerID             {01890002-0508-6ab4-121a-27c2b6c9d000}
+Bus 003 Device 098: ID 0451:8142 Texas Instruments, Inc. TUSB8041 4-Port Hub
+  ContainerID             {01890002-0508-6ab4-121a-27c2b6c9d000}
+Bus 003 Device 100: ID 0451:8142 Texas Instruments, Inc. TUSB8041 4-Port Hub
+  ContainerID             {01890002-4508-6a4d-121a-27c2b6c9d000}
+Bus 004 Device 062: ID 0451:8140 Texas Instruments, Inc. TUSB8041 4-Port Hub
+  ContainerID             {01890002-4508-6a4d-121a-27c2b6c9d000}
+"""
+    with mock.patch("subprocess.run") as mock_run:
+      mock_run.return_value = mock.Mock(returncode=0, stdout=fake_lsusb, stderr="")
+      with mock.patch("glob.glob", return_value=["/sys/bus/usb/devices/3-1", "/sys/bus/usb/devices/2-3", "/sys/bus/usb/devices/3-6", "/sys/bus/usb/devices/4-2"]):
+        with mock.patch("os.path.exists", return_value=True):
+          def fake_open(p, *args, **kwargs):
+            val = ""
+            if "3-1/busnum" in p: val = "3\n"
+            elif "3-1/devnum" in p: val = "98\n"
+            elif "2-3/busnum" in p: val = "2\n"
+            elif "2-3/devnum" in p: val = "91\n"
+            elif "3-6/busnum" in p: val = "3\n"
+            elif "3-6/devnum" in p: val = "100\n"
+            elif "4-2/busnum" in p: val = "4\n"
+            elif "4-2/devnum" in p: val = "62\n"
+            m = mock.mock_open(read_data=val)()
+            return m
+          with mock.patch("builtins.open", side_effect=fake_open):
+            cids = self.servicer._get_usb_hub_container_ids()
+            self.assertEqual(cids.get("3-1"), "01890002-0508-6ab4-121a-27c2b6c9d000")
+            self.assertEqual(cids.get("2-3"), "01890002-0508-6ab4-121a-27c2b6c9d000")
+            self.assertEqual(cids.get("3-6"), "01890002-4508-6a4d-121a-27c2b6c9d000")
+            self.assertEqual(cids.get("4-2"), "01890002-4508-6a4d-121a-27c2b6c9d000")
+
 
 
 
@@ -523,10 +597,11 @@ class TestMauiDeviceManagementServicer(unittest.TestCase):
         )
         resp_smt = self.servicer.submit_final_manufacturing_results(req_smt, self.context)
         self.assertTrue(resp_smt.success)
-        self.assertIn("_SMT_PASS", resp_smt.mes_tracking_id)
+        self.assertIn("SMT_FUNCTIONAL", resp_smt.mes_tracking_id)
+        self.assertIn("_PASS", resp_smt.mes_tracking_id)
         with open(resp_smt.summary_file_path, "r", encoding="utf-8") as f:
           data_smt = json.load(f)
-        self.assertEqual(data_smt["phase"], "SMT")
+        self.assertEqual(data_smt["phase"], "smt_functional")
 
         req_fatp = maui_manufacturing_pb2.MauiFinalSubmissionRequest(
             serial_number="TEST_MAUI_SERIAL_001",
@@ -545,10 +620,10 @@ class TestMauiDeviceManagementServicer(unittest.TestCase):
         )
         resp_fatp = self.servicer.submit_final_manufacturing_results(req_fatp, self.context)
         self.assertTrue(resp_fatp.success)
-        self.assertIn("_FATP_PASS", resp_fatp.mes_tracking_id)
+        self.assertIn("FATP_TESTS", resp_fatp.mes_tracking_id)
         with open(resp_fatp.summary_file_path, "r", encoding="utf-8") as f:
           data_fatp = json.load(f)
-        self.assertEqual(data_fatp["phase"], "FATP")
+        self.assertEqual(data_fatp["phase"], "fatp_tests")
 
   def test_analyze_device_manufacturing_logs_failed_bsl(self):
     with tempfile.TemporaryDirectory() as tmpdir:

@@ -327,47 +327,101 @@ class MauiStation1Servicer(
       pass
     return loc_map
 
+  def _get_usb_hub_container_ids(self) -> Dict[str, str]:
+    """Maps USB hub device name (e.g. '3-1', '2-3', '3-6', '4-2') to its 128-bit hardware ContainerID.
+
+    Combines sysfs attributes with direct USB BOS descriptor queries (via lsusb -v) to guarantee
+    reliable ContainerID resolution on all Linux kernel versions and host USB controllers.
+    """
+    cids: Dict[str, str] = {}
+
+    # 1. Read sysfs container_id files if exposed by kernel
+    for d in glob.glob("/sys/bus/usb/devices/[0-9]*"):
+      cid_file = os.path.join(d, "container_id")
+      if os.path.exists(cid_file):
+        try:
+          with open(cid_file, "r") as f:
+            c_val = f.read().strip().lower().strip("{}")
+            if c_val and c_val not in ("0", "none", "unknown", ""):
+              cids[os.path.basename(d)] = c_val
+        except Exception:
+          pass
+
+    # 2. Query lsusb -v for TI TUSB8041 (0451:8140/8142) and Realtek (0bda) hubs to extract BOS ContainerID
+    try:
+      proc = subprocess.run(
+          ["lsusb", "-v", "-d", "0451:,0bda:"],
+          stdout=subprocess.PIPE,
+          stderr=subprocess.PIPE,
+          text=True,
+          timeout=1.5,
+      )
+      if proc.returncode == 0 and proc.stdout:
+        bus_dev_cids: Dict[Tuple[int, int], str] = {}
+        curr_bus_dev = None
+        for line in proc.stdout.splitlines():
+          m_dev = re.match(r"Bus\s+(\d+)\s+Device\s+(\d+):", line)
+          if m_dev:
+            curr_bus_dev = (int(m_dev.group(1)), int(m_dev.group(2)))
+          m_cid = re.search(r"ContainerID\s+\{?([0-9a-fA-F-]+)\}?", line)
+          if m_cid and curr_bus_dev:
+            bus_dev_cids[curr_bus_dev] = m_cid.group(1).lower().strip("{}")
+
+        # Map sysfs device names by matching (busnum, devnum)
+        for d in glob.glob("/sys/bus/usb/devices/[0-9]*"):
+          b_file = os.path.join(d, "busnum")
+          dn_file = os.path.join(d, "devnum")
+          if os.path.exists(b_file) and os.path.exists(dn_file):
+            try:
+              with open(b_file) as f:
+                b_val = int(f.read().strip())
+              with open(dn_file) as f:
+                dn_val = int(f.read().strip())
+              if (b_val, dn_val) in bus_dev_cids:
+                cids[os.path.basename(d)] = bus_dev_cids[(b_val, dn_val)]
+            except Exception:
+              pass
+    except Exception as e:
+      logging.debug("Error querying hub container IDs via lsusb: %s", e)
+
+    return cids
+
   def _match_ftdi_to_adb(
       self,
       ftdi_dir: Optional[str],
       ftdi_name: str,
       ftdi_devpath: str,
       ftdi_container_id: str,
-      ftdi_hub_container_id: str,
-      adb_candidates: List[Dict[str, str]],
+      ftdi_hub_container_id: str = "",
+      adb_candidates: Optional[List[Dict[str, str]]] = None,
       adb_devices_locations: Optional[Dict[str, str]] = None,
       excluded_serials: Optional[set] = None,
   ) -> Optional[str]:
     """Matches an FTDI device to its sibling ADB chip on the same Maui board across arbitrary host buses & intermediate hubs.
 
     Hardware Invariants & Matching Hierarchy:
-      Tier 1: Physical Maui On-Board Hub container_id Match
-              The TI TUSB8041 hub IC contains both USB 2.0 (0451:8142) and USB 3.0 (0451:8140) controllers,
-              sharing the EXACT same container_id. FTDI is on port .2 of USB2 hub, ADB is on port .3 of USB3 hub.
-      Tier 2: Direct Parent Hub Directory Match
-              When ADB enumerates in USB 2.0 fallback mode, FTDI (.2) and ADB (.3) share the exact same USB2 parent hub directory.
-      Tier 3: Device container_id Match
-      Tier 4: Depth-Preserving External Hub Sibling Port Matching
-      Tier 5: Unambiguous single remaining candidate fallback
+      Tier 1: Physical Maui On-Board Hub ContainerID Match (TI TUSB8041 USB2 0451:8142 <-> USB3 0451:8140)
+      Tier 2: Direct Parent Hub Directory Match (when ADB is in USB 2.0 fallback mode)
+      Tier 3: Device ContainerID Match
     """
     excluded = excluded_serials or set()
-    available_candidates = [c for c in adb_candidates if c.get("serial") not in excluded]
+    available_candidates = [c for c in (adb_candidates or []) if c.get("serial") not in excluded]
 
-    if not available_candidates and not adb_devices_locations:
+    if not available_candidates:
       return None
 
-    # Strategy 1 (PRIMARY): Physical Maui On-Board Hub Container ID Match
+    # Tier 1 (PRIMARY & AUTHORITATIVE): Physical Maui On-Board Hub Container ID Match
     if ftdi_hub_container_id:
       for cand in available_candidates:
         cand_hub_cid = cand.get("hub_container_id")
-        if cand_hub_cid and cand_hub_cid == ftdi_hub_container_id:
+        if cand_hub_cid and cand_hub_cid.lower() == ftdi_hub_container_id.lower():
           logging.info(
               "Matched FTDI port (%s) to ADB serial '%s' via Maui On-Board Hub container_id '%s'",
               ftdi_devpath or ftdi_name, cand["serial"], ftdi_hub_container_id
           )
           return cand["serial"]
 
-    # Strategy 2: Direct Parent Hub Directory Match (when ADB is in USB 2.0 fallback mode)
+    # Tier 2: Direct Parent Hub Directory Match (when ADB is in USB 2.0 fallback mode)
     if ftdi_dir:
       parent_hub = os.path.dirname(ftdi_dir)
       if parent_hub and parent_hub not in ("/sys", "/sys/bus/usb/devices", "/"):
@@ -379,59 +433,55 @@ class MauiStation1Servicer(
             )
             return cand["serial"]
 
-    # Strategy 3: Direct Device Container ID Match
+    # Tier 3: Direct Device Container ID Match
     if ftdi_container_id:
       for cand in available_candidates:
-        if cand.get("container_id") and cand.get("container_id") == ftdi_container_id:
+        if cand.get("container_id") and cand.get("container_id").lower() == ftdi_container_id.lower():
           return cand["serial"]
 
-    # Strategy 4: Depth-Preserving External Hub Port Matching
+    # Tier 4: External Hub / Root Port Path Matching (Ranked Best-Match Scoring)
     ftdi_raw = ftdi_devpath or ftdi_name
     ftdi_clean = re.sub(r"^\d+-", "", ftdi_raw)
     ftdi_tokens = [t for t in re.split(r"[.\-_/]", ftdi_clean) if t.isdigit()]
 
-    best_cand_serial = None
-    best_score = -1
+    if len(ftdi_tokens) >= 2:
+      best_cand = None
+      best_score = 0
+      score_counts: Dict[int, int] = {}
 
-    for cand in available_candidates:
-      c_ser = cand.get("serial", "")
-      if not c_ser:
-        continue
-
-      cand_raw = cand.get("devpath") or cand.get("name") or ""
-      cand_clean = re.sub(r"^\d+-", "", cand_raw)
-      cand_tokens = [t for t in re.split(r"[.\-_/]", cand_clean) if t.isdigit()]
-
-      # Only match if hierarchy depth is consistent:
-      # e.g., both are depth >= 3 (under external hub) or both are depth 2 (direct connection)
-      score = 0
-      if len(ftdi_tokens) >= 3 and len(cand_tokens) >= 3:
-        if ftdi_tokens[1:-1] == cand_tokens[1:-1]:
-          score = 100
-      elif len(ftdi_tokens) == 2 and len(cand_tokens) == 2:
-        score = 50
-
-      if score > best_score and score > 0:
-        best_score = score
-        best_cand_serial = c_ser
-
-    # Check 'adb devices -l' locations if still unresolved
-    if not best_cand_serial and adb_devices_locations:
-      for usb_loc, ser in adb_devices_locations.items():
-        if ser in excluded:
+      for cand in available_candidates:
+        c_ser = cand.get("serial", "")
+        if not c_ser:
           continue
-        loc_clean = re.sub(r"^\d+-", "", usb_loc)
-        loc_tokens = [t for t in re.split(r"[.\-_/]", loc_clean) if t.isdigit()]
-        if len(ftdi_tokens) >= 3 and len(loc_tokens) >= 3 and ftdi_tokens[1:-1] == loc_tokens[1:-1]:
-          best_cand_serial = ser
-          break
+        cand_raw = cand.get("devpath") or cand.get("name") or ""
+        cand_clean = re.sub(r"^\d+-", "", cand_raw)
+        cand_tokens = [t for t in re.split(r"[.\-_/]", cand_clean) if t.isdigit()]
 
-    if best_cand_serial:
-      return best_cand_serial
+        score = 0
+        if len(ftdi_tokens) == len(cand_tokens) and len(ftdi_tokens) >= 2:
+          if ftdi_tokens[:-1] == cand_tokens[:-1]:
+            # Exact full path match except final endpoint port (e.g. 1.2.2 vs 1.2.3)
+            score = 100
+          elif len(ftdi_tokens) >= 3 and ftdi_tokens[1:-1] == cand_tokens[1:-1]:
+            # Intermediate hub ports match on different root ports (e.g. 6.1.2 vs 2.1.3)
+            score = 50
+        elif len(ftdi_tokens) >= 3 and len(cand_tokens) >= 3:
+          if ftdi_tokens[1:-1] == cand_tokens[1:-1]:
+            score = 50
 
-    # Strategy 5: Unambiguous single remaining candidate fallback
-    if len(available_candidates) == 1 and available_candidates[0].get("serial"):
-      return available_candidates[0]["serial"]
+        if score > 0:
+          score_counts[score] = score_counts.get(score, 0) + 1
+          if score > best_score:
+            best_score = score
+            best_cand = c_ser
+
+      # Only accept match if best_score >= 50 and unambiguous at highest score tier
+      if best_score >= 50 and score_counts.get(best_score, 0) == 1 and best_cand:
+        logging.info(
+            "Matched FTDI port (%s) to ADB serial '%s' via topology score %d",
+            ftdi_devpath or ftdi_name, best_cand, best_score
+        )
+        return best_cand
 
     return None
 
@@ -456,6 +506,8 @@ class MauiStation1Servicer(
     ftdi_hub_container_id = ""
     devpath = ""
 
+    hub_cids = self._get_usb_hub_container_ids()
+
     # 1. Walk up from tty interface to find the FTDI USB device node (idVendor == 0403)
     curr = real_path
     while curr and curr not in ("/sys", "/sys/bus/usb/devices", "/"):
@@ -479,7 +531,9 @@ class MauiStation1Servicer(
                 current_serial = f.read().strip()
             if os.path.exists(c_file):
               with open(c_file, "r") as f:
-                container_id = f.read().strip()
+                container_id = f.read().strip().lower().strip("{}")
+            if not container_id and os.path.basename(curr) in hub_cids:
+              container_id = hub_cids[os.path.basename(curr)]
             if os.path.exists(dp_file):
               with open(dp_file, "r") as f:
                 devpath = f.read().strip()
@@ -488,10 +542,14 @@ class MauiStation1Servicer(
             parent_candidate = os.path.dirname(curr)
             if parent_candidate and parent_candidate not in ("/sys", "/sys/bus/usb/devices", "/"):
               ftdi_parent_hub = parent_candidate
-              hub_cid_file = os.path.join(parent_candidate, "container_id")
-              if os.path.exists(hub_cid_file):
-                with open(hub_cid_file, "r") as f:
-                  ftdi_hub_container_id = f.read().strip()
+              hub_name = os.path.basename(parent_candidate)
+              if hub_name in hub_cids:
+                ftdi_hub_container_id = hub_cids[hub_name]
+              else:
+                hub_cid_file = os.path.join(parent_candidate, "container_id")
+                if os.path.exists(hub_cid_file):
+                  with open(hub_cid_file, "r") as f:
+                    ftdi_hub_container_id = f.read().strip().lower().strip("{}")
             break
         except Exception:
           pass
@@ -512,13 +570,17 @@ class MauiStation1Servicer(
           parent_candidate = os.path.dirname(curr)
           if parent_candidate and parent_candidate not in ("/sys", "/sys/bus/usb/devices", "/"):
             ftdi_parent_hub = parent_candidate
-            hub_cid_file = os.path.join(parent_candidate, "container_id")
-            if os.path.exists(hub_cid_file):
-              try:
-                with open(hub_cid_file, "r") as f:
-                  ftdi_hub_container_id = f.read().strip()
-              except Exception:
-                pass
+            hub_name = os.path.basename(parent_candidate)
+            if hub_name in hub_cids:
+              ftdi_hub_container_id = hub_cids[hub_name]
+            else:
+              hub_cid_file = os.path.join(parent_candidate, "container_id")
+              if os.path.exists(hub_cid_file):
+                try:
+                  with open(hub_cid_file, "r") as f:
+                    ftdi_hub_container_id = f.read().strip().lower().strip("{}")
+                except Exception:
+                  pass
           break
         curr = os.path.dirname(curr)
 
@@ -551,16 +613,22 @@ class MauiStation1Servicer(
             cand_cid = ""
             if os.path.exists(c_file):
               with open(c_file, "r") as f:
-                cand_cid = f.read().strip()
+                cand_cid = f.read().strip().lower().strip("{}")
+            if not cand_cid and os.path.basename(d) in hub_cids:
+              cand_cid = hub_cids[os.path.basename(d)]
 
             # Find candidate's parent hub and read parent hub's container_id
             cand_parent_hub = os.path.dirname(cand_real)
             cand_hub_cid = ""
             if cand_parent_hub and cand_parent_hub not in ("/sys", "/sys/bus/usb/devices", "/"):
-              cand_hub_cid_file = os.path.join(cand_parent_hub, "container_id")
-              if os.path.exists(cand_hub_cid_file):
-                with open(cand_hub_cid_file, "r") as f:
-                  cand_hub_cid = f.read().strip()
+              hub_name = os.path.basename(cand_parent_hub)
+              if hub_name in hub_cids:
+                cand_hub_cid = hub_cids[hub_name]
+              else:
+                cand_hub_cid_file = os.path.join(cand_parent_hub, "container_id")
+                if os.path.exists(cand_hub_cid_file):
+                  with open(cand_hub_cid_file, "r") as f:
+                    cand_hub_cid = f.read().strip().lower().strip("{}")
 
             adb_candidates.append({
                 "dir": cand_real,
