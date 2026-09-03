@@ -275,29 +275,11 @@ export class MauiStep1ProvisioningComponent implements OnInit, OnDestroy {
           }
 
           slot.statusMessage =
-            'MCU Flashed. Waiting for USB 3.0 MUX settling (2.5s)...';
+            'MCU Flashed. Starting Step 2/3: TPS66994 PDC Flashing...';
           this.cdr.detectChanges();
 
-          // Wait 2.5s for MCU firmware to MUX USB 3.0 lines and USB bus to re-enumerate
-          this.subs.add(
-            timer(2500).subscribe(() => {
-              this.station1Service
-                .discoverTopologyAndSerial(slot.devicePort)
-                .subscribe({
-                  next: topoRes => {
-                    if (topoRes.success && topoRes.readSerialNumber) {
-                      slot.serialNumber = topoRes.readSerialNumber.trim();
-                    }
-                    // Step 2: PDC TPS66994 Firmware Flashing (Parallel stream)
-                    this.runPdcFlashingForSlot(slot);
-                  },
-                  error: () => {
-                    // Fallback to existing serial and proceed
-                    this.runPdcFlashingForSlot(slot);
-                  },
-                });
-            }),
-          );
+          // Step 2: PDC TPS66994 Firmware Flashing (Parallel stream)
+          this.runPdcFlashingForSlot(slot);
         },
         error: err => {
           slot.stage = 'FAILED';

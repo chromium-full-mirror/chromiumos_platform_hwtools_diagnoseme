@@ -181,8 +181,7 @@ class MauiStation1Servicer(
     dev_port = request.device_port or "/dev/ttyUSB0"
     serial_no = (getattr(request, "serial_number", None) or "").strip()
     if not serial_no:
-      _, _, _, adb_ser = self._find_ftdi_info_for_port(dev_port)
-      serial_no = adb_ser or f"PORT_{os.path.basename(dev_port)}"
+      serial_no = f"PORT_{os.path.basename(dev_port)}"
     logging.info("Starting MCU BSL flashing on port %s (channel: %s, serial: %s)...", dev_port, fw_channel, serial_no)
 
     port_lock = _get_port_flashing_lock(dev_port)
@@ -773,7 +772,18 @@ class MauiStation1Servicer(
         write_device_log(serial_no, "ftdi_programming", f"COMMAND: {' '.join(cmd)}\nSUCCESS:\n{proc.stdout}")
         # Consolidate any earlier logs into target serial log directory
         target_dir = get_device_log_dir(serial_no)
-        for unk_dir in glob.glob("/tmp/*UNKNOWN*_diagnoseme_logs") + glob.glob("/tmp/*unknown*_diagnoseme_logs"):
+        port_name = os.path.basename(dev_node) if dev_node else ""
+        candidate_dirs = (
+            glob.glob("/tmp/*UNKNOWN*_diagnoseme_logs")
+            + glob.glob("/tmp/*unknown*_diagnoseme_logs")
+            + glob.glob("/tmp/*PORT_*_diagnoseme_logs")
+            + glob.glob("/tmp/*port_*_diagnoseme_logs")
+            + glob.glob("/tmp/*SLOT*_diagnoseme_logs")
+            + glob.glob("/tmp/*slot*_diagnoseme_logs")
+        )
+        if port_name:
+          candidate_dirs += glob.glob(f"/tmp/*{port_name}*_diagnoseme_logs")
+        for unk_dir in set(candidate_dirs):
           if os.path.isdir(unk_dir) and os.path.abspath(unk_dir) != os.path.abspath(target_dir):
             for fname in os.listdir(unk_dir):
               src_f = os.path.join(unk_dir, fname)
