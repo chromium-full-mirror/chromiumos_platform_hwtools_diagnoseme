@@ -38,6 +38,7 @@ export interface MauiSlotPipeline {
   slotIndex: number;
   devicePort: string;
   serialNumber: string;
+  ftdiInitialSerial?: string;
   detectedPid: number;
   isDetected: boolean;
   stage: ProvisioningStage;
@@ -133,6 +134,7 @@ export class MauiStep1ProvisioningComponent implements OnInit, OnDestroy {
       slotIndex,
       devicePort: defaultPort,
       serialNumber: '',
+      ftdiInitialSerial: '',
       detectedPid: 0x6001,
       isDetected: false,
       stage: 'IDLE',
@@ -170,6 +172,11 @@ export class MauiStep1ProvisioningComponent implements OnInit, OnDestroy {
               slot.isDetected = true;
               slot.devicePort = res.devicePort;
               slot.detectedPid = res.pid || 0x6001;
+              if (res.ftdiSerial) {
+                slot.ftdiInitialSerial = res.ftdiSerial;
+              } else if (res.detectedSerial && !slot.ftdiInitialSerial) {
+                slot.ftdiInitialSerial = res.detectedSerial;
+              }
               if (res.detectedSerial) {
                 slot.serialNumber = res.detectedSerial;
               }
@@ -274,12 +281,78 @@ export class MauiStep1ProvisioningComponent implements OnInit, OnDestroy {
             return;
           }
 
+          if (mcuRes.ftdiSerial) {
+            slot.ftdiInitialSerial = mcuRes.ftdiSerial;
+          }
+
           slot.statusMessage =
-            'MCU Flashed. Starting Step 2/3: TPS66994 PDC Flashing...';
+            'MCU Flashed. Waiting 6s for USB 3.0 MUX & console re-enumeration...';
           this.cdr.detectChanges();
 
-          // Step 2: PDC TPS66994 Firmware Flashing (Parallel stream)
-          this.runPdcFlashingForSlot(slot);
+          // Cancel any existing settling timer for this slot
+          if (this.slotSettlingTimers.has(slot.slotIndex)) {
+            this.slotSettlingTimers.get(slot.slotIndex)?.unsubscribe();
+            this.slotSettlingTimers.delete(slot.slotIndex);
+          }
+
+          // 6s settling delay for MCU firmware to boot and USB 3.0 MUX to settle
+          const settleSub = timer(6000).subscribe(() => {
+            this.slotSettlingTimers.delete(slot.slotIndex);
+
+            slot.statusMessage = `Verifying FTDI console re-enumeration (serial: ${slot.ftdiInitialSerial || 'any'})...`;
+            this.cdr.detectChanges();
+
+            this.station1Service
+              .discoverTopologyAndSerial(
+                slot.devicePort,
+                '',
+                slot.ftdiInitialSerial || '',
+              )
+              .subscribe({
+                next: topoRes => {
+                  if (topoRes.success && topoRes.ftdiDevNode) {
+                    if (topoRes.ftdiDevNode !== slot.devicePort) {
+                      slot.statusMessage = `Console re-enumerated from ${slot.devicePort} to ${topoRes.ftdiDevNode}. Starting Step 2/3: TPS66994 PDC Flashing...`;
+                      slot.devicePort = topoRes.ftdiDevNode;
+                    } else {
+                      slot.statusMessage = `Console confirmed on ${slot.devicePort}. Starting Step 2/3: TPS66994 PDC Flashing...`;
+                    }
+                    if (topoRes.readSerialNumber) {
+                      slot.serialNumber = topoRes.readSerialNumber.trim();
+                    }
+                    if (topoRes.ftdiCurrentSerial) {
+                      slot.ftdiInitialSerial = topoRes.ftdiCurrentSerial.trim();
+                    }
+                    this.cdr.detectChanges();
+                    this.runPdcFlashingForSlot(slot);
+                  } else {
+                    if (topoRes.ftdiDevNode) {
+                      slot.devicePort = topoRes.ftdiDevNode;
+                      slot.statusMessage = `Console found on ${slot.devicePort}. Starting Step 2/3: TPS66994 PDC Flashing...`;
+                      this.cdr.detectChanges();
+                      this.runPdcFlashingForSlot(slot);
+                    } else {
+                      slot.stage = 'FAILED';
+                      slot.statusMessage = `Console Re-enumeration Failed: ${topoRes.errorMessage || 'Port lost'}`;
+                      slot.errorMessage =
+                        topoRes.errorMessage ||
+                        'FTDI console port disappeared after MCU boot';
+                      this.handleSlotFailure(
+                        slot,
+                        'Console Re-enumeration Failed',
+                      );
+                    }
+                  }
+                },
+                error: err => {
+                  slot.statusMessage = `Console check skipped (${err.message}). Starting Step 2/3: PDC Flashing...`;
+                  this.cdr.detectChanges();
+                  this.runPdcFlashingForSlot(slot);
+                },
+              });
+          });
+          this.slotSettlingTimers.set(slot.slotIndex, settleSub);
+          this.subs.add(settleSub);
         },
         error: err => {
           slot.stage = 'FAILED';
@@ -343,63 +416,78 @@ export class MauiStep1ProvisioningComponent implements OnInit, OnDestroy {
     slot.statusMessage = 'Step 3/3: Programming FTDI EEPROM (PID 0x6002)...';
     this.cdr.detectChanges();
 
-    this.station1Service.discoverTopologyAndSerial(slot.devicePort).subscribe({
-      next: topoRes => {
-        if (!topoRes.success || !topoRes.readSerialNumber) {
-          slot.stage = 'FAILED';
-          slot.statusMessage =
-            topoRes.errorMessage ||
-            `Could not read ADB electronic serial number on ${slot.devicePort}.`;
-          slot.errorMessage = slot.statusMessage;
-          this.handleSlotFailure(slot, 'ADB Serial Read Failed');
-          return;
-        }
+    this.station1Service
+      .discoverTopologyAndSerial(
+        slot.devicePort,
+        '',
+        slot.ftdiInitialSerial || '',
+      )
+      .subscribe({
+        next: topoRes => {
+          const targetSerial = (
+            topoRes.readSerialNumber ||
+            slot.serialNumber ||
+            ''
+          ).trim();
+          if (!targetSerial) {
+            slot.stage = 'FAILED';
+            slot.statusMessage =
+              topoRes.errorMessage ||
+              `Could not read ADB electronic serial number on ${slot.devicePort}.`;
+            slot.errorMessage = slot.statusMessage;
+            this.handleSlotFailure(slot, 'ADB Serial Read Failed');
+            return;
+          }
 
-        const serial = topoRes.readSerialNumber.trim();
-        slot.serialNumber = serial;
-        const oldSerial = topoRes.ftdiCurrentSerial || '';
-        const oldPid = topoRes.ftdiCurrentPid || 0;
+          slot.serialNumber = targetSerial;
+          const serial = targetSerial;
+          if (topoRes.ftdiDevNode && topoRes.ftdiDevNode !== slot.devicePort) {
+            slot.devicePort = topoRes.ftdiDevNode;
+          }
+          const oldSerial =
+            topoRes.ftdiCurrentSerial || slot.ftdiInitialSerial || '';
+          const oldPid = topoRes.ftdiCurrentPid || 0;
 
-        this.station1Service
-          .programFtdiEeprom(
-            serial,
-            slot.devicePort,
-            0x0403,
-            0x6002,
-            'Maui Serial Console',
-            oldSerial,
-            oldPid,
-          )
-          .subscribe({
-            next: ftdiRes => {
-              if (ftdiRes.success) {
-                slot.stage = 'PROVISIONED';
-                slot.detectedPid = 0x6002;
-                slot.statusMessage = `Fully Provisioned (${serial}) — Please unplug board`;
-                this.checkCard1Completion();
-              } else {
+          this.station1Service
+            .programFtdiEeprom(
+              serial,
+              slot.devicePort,
+              0x0403,
+              0x6002,
+              'Maui Serial Console',
+              oldSerial,
+              oldPid,
+            )
+            .subscribe({
+              next: ftdiRes => {
+                if (ftdiRes.success) {
+                  slot.stage = 'PROVISIONED';
+                  slot.detectedPid = 0x6002;
+                  slot.statusMessage = `Fully Provisioned (${serial}) — Please unplug board`;
+                  this.checkCard1Completion();
+                } else {
+                  slot.stage = 'FAILED';
+                  slot.statusMessage = `FTDI Programming Failed: ${ftdiRes.message}`;
+                  slot.errorMessage = ftdiRes.message;
+                  this.handleSlotFailure(slot, 'FTDI Programming Failed');
+                }
+                this.cdr.detectChanges();
+              },
+              error: err => {
                 slot.stage = 'FAILED';
-                slot.statusMessage = `FTDI Programming Failed: ${ftdiRes.message}`;
-                slot.errorMessage = ftdiRes.message;
-                this.handleSlotFailure(slot, 'FTDI Programming Failed');
-              }
-              this.cdr.detectChanges();
-            },
-            error: err => {
-              slot.stage = 'FAILED';
-              slot.statusMessage = 'FTDI Programming Error';
-              slot.errorMessage = err.message || 'gRPC communication failure';
-              this.handleSlotFailure(slot, 'FTDI Programming Error');
-            },
-          });
-      },
-      error: err => {
-        slot.stage = 'FAILED';
-        slot.statusMessage = 'Topology & ADB Discovery Error';
-        slot.errorMessage = err.message || 'gRPC communication failure';
-        this.handleSlotFailure(slot, 'Topology Discovery Error');
-      },
-    });
+                slot.statusMessage = 'FTDI Programming Error';
+                slot.errorMessage = err.message || 'gRPC communication failure';
+                this.handleSlotFailure(slot, 'FTDI Programming Error');
+              },
+            });
+        },
+        error: err => {
+          slot.stage = 'FAILED';
+          slot.statusMessage = 'Topology & ADB Discovery Error';
+          slot.errorMessage = err.message || 'gRPC communication failure';
+          this.handleSlotFailure(slot, 'Topology Discovery Error');
+        },
+      });
   }
 
   private handleSlotFailure(slot: MauiSlotPipeline, title: string): void {

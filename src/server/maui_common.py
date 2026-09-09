@@ -271,13 +271,44 @@ def scan_connected_maui_units() -> List[Dict[str, Any]]:
   return units
 
 
+def extract_container_id_from_bos_file(bos_path: str) -> Optional[str]:
+  """Extracts 128-bit hardware ContainerID UUID from raw USB 3.0 BOS binary descriptor in sysfs."""
+  try:
+    with open(bos_path, "rb") as f:
+      data = f.read()
+    # BOS descriptor header is 5 bytes: [bLength=5, bDescriptorType=15, wTotalLength (2 bytes), bNumDeviceCaps (1 byte)]
+    if len(data) < 5 or data[1] != 15:
+      return None
+    offset = 5
+    while offset + 3 <= len(data):
+      cap_len = data[offset]
+      if cap_len < 3 or offset + cap_len > len(data):
+        break
+      cap_type = data[offset + 1]
+      dev_cap_type = data[offset + 2]
+      # Device Capability (0x10) and Container ID (0x04) with minimum length 20 (0x14)
+      if cap_type == 16 and dev_cap_type == 4 and cap_len >= 20:
+        raw_uuid = data[offset + 4 : offset + 20]
+        # Standard UUID formatting: 8-4-4-4-12
+        return f"{raw_uuid[0:4].hex()}-{raw_uuid[4:6].hex()}-{raw_uuid[6:8].hex()}-{raw_uuid[8:10].hex()}-{raw_uuid[10:16].hex()}".lower()
+      offset += cap_len
+  except Exception:
+    pass
+  return None
+
+
 def find_device_container_id(sys_path: str) -> str:
   """Walks up sysfs tree to locate container_id or USB root hub port."""
   curr = sys_path
-  while curr and curr != "/sys" and curr != "/sys/bus/usb/devices":
-    cid = _read_sysfs_file(os.path.join(curr, "container_id"))
-    if cid:
+  while curr and curr not in ("/sys", "/sys/bus/usb/devices", "/"):
+    cid = _read_sysfs_file(os.path.join(curr, "container_id")).lower().strip("{}")
+    if cid and cid not in ("0", "none", "unknown", ""):
       return cid
+    bos_path = os.path.join(curr, "bos")
+    if os.path.exists(bos_path):
+      bos_cid = extract_container_id_from_bos_file(bos_path)
+      if bos_cid:
+        return bos_cid
     curr = os.path.dirname(curr)
   return ""
 

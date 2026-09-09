@@ -33,4 +33,5 @@ src/ui/src/assets/build_info.json
 dist/**
 *.iso
 test_server/iso_build/**
+iso_build/**
 offline_update_bundle/**

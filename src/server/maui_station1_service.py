@@ -25,6 +25,7 @@ from server.generated import maui_manufacturing_pb2
 from server.generated import maui_manufacturing_pb2_grpc
 from server.maui_common import (
     ensure_zephyr_shell_awake,
+    extract_container_id_from_bos_file,
     find_offline_fw_file,
     get_device_log_dir,
     get_maui_env,
@@ -109,6 +110,7 @@ class MauiStation1Servicer(
               pid=d["pid"],
               auto_flash_eligible=is_unprog,
               detected_serial=d.get("adb_serial") or d.get("serial") or "",
+              ftdi_serial=d.get("serial") or "",
           )
         await asyncio.sleep(1.0)
         continue
@@ -130,6 +132,7 @@ class MauiStation1Servicer(
             pid=self.MAUI_BSL_PID,
             auto_flash_eligible=True,
             detected_serial="",
+            ftdi_serial="",
         )
         await asyncio.sleep(1.0)
         continue
@@ -144,6 +147,7 @@ class MauiStation1Servicer(
           pid=0,
           auto_flash_eligible=False,
           detected_serial="",
+          ftdi_serial="",
       )
       await asyncio.sleep(0.5)
 
@@ -183,6 +187,8 @@ class MauiStation1Servicer(
     if not serial_no:
       serial_no = f"PORT_{os.path.basename(dev_port)}"
     logging.info("Starting MCU BSL flashing on port %s (channel: %s, serial: %s)...", dev_port, fw_channel, serial_no)
+
+    curr_ftdi_ser, _, _, _ = self._find_ftdi_info_for_port(dev_port)
 
     port_lock = _get_port_flashing_lock(dev_port)
     if not port_lock.acquire(blocking=False):
@@ -244,6 +250,7 @@ class MauiStation1Servicer(
             success=True,
             message="MCU firmware flashed successfully via BSL mode.",
             logs=str(proc.stdout or ""),
+            ftdi_serial=curr_ftdi_ser or "",
         )
       except subprocess.CalledProcessError as e:
         err_logs = str(e.output or "")
@@ -259,6 +266,7 @@ class MauiStation1Servicer(
                 success=True,
                 message="MCU firmware flashed successfully via BSL mode (retry 2).",
                 logs=str(retry_proc.stdout or ""),
+                ftdi_serial=curr_ftdi_ser or "",
             )
           except subprocess.CalledProcessError as re_e:
             err_logs = str(re_e.output or "")
@@ -329,59 +337,72 @@ class MauiStation1Servicer(
   def _get_usb_hub_container_ids(self) -> Dict[str, str]:
     """Maps USB hub device name (e.g. '3-1', '2-3', '3-6', '4-2') to its 128-bit hardware ContainerID.
 
-    Combines sysfs attributes with direct USB BOS descriptor queries (via lsusb -v) to guarantee
-    reliable ContainerID resolution on all Linux kernel versions and host USB controllers.
+    Combines direct sysfs BOS binary descriptor parsing, sysfs container_id attributes,
+    and targeted lsusb -v queries to guarantee reliable ContainerID resolution on all Linux kernels.
     """
     cids: Dict[str, str] = {}
 
-    # 1. Read sysfs container_id files if exposed by kernel
+    # 1. Read sysfs container_id files and raw BOS binary descriptors directly
     for d in glob.glob("/sys/bus/usb/devices/[0-9]*"):
+      hub_name = os.path.basename(d)
       cid_file = os.path.join(d, "container_id")
       if os.path.exists(cid_file):
         try:
           with open(cid_file, "r") as f:
             c_val = f.read().strip().lower().strip("{}")
             if c_val and c_val not in ("0", "none", "unknown", ""):
-              cids[os.path.basename(d)] = c_val
+              cids[hub_name] = c_val
         except Exception:
           pass
 
-    # 2. Query lsusb -v for TI TUSB8041 (0451:8140/8142) and Realtek (0bda) hubs to extract BOS ContainerID
-    try:
-      proc = subprocess.run(
-          ["lsusb", "-v", "-d", "0451:,0bda:"],
-          stdout=subprocess.PIPE,
-          stderr=subprocess.PIPE,
-          text=True,
-          timeout=1.5,
-      )
-      if proc.returncode == 0 and proc.stdout:
-        bus_dev_cids: Dict[Tuple[int, int], str] = {}
-        curr_bus_dev = None
-        for line in proc.stdout.splitlines():
-          m_dev = re.match(r"Bus\s+(\d+)\s+Device\s+(\d+):", line)
-          if m_dev:
-            curr_bus_dev = (int(m_dev.group(1)), int(m_dev.group(2)))
-          m_cid = re.search(r"ContainerID\s+\{?([0-9a-fA-F-]+)\}?", line)
-          if m_cid and curr_bus_dev:
-            bus_dev_cids[curr_bus_dev] = m_cid.group(1).lower().strip("{}")
+      # Parse raw BOS binary descriptor if available
+      if hub_name not in cids:
+        bos_file = os.path.join(d, "bos")
+        if os.path.exists(bos_file):
+          bos_cid = extract_container_id_from_bos_file(bos_file)
+          if bos_cid:
+            cids[hub_name] = bos_cid
 
-        # Map sysfs device names by matching (busnum, devnum)
-        for d in glob.glob("/sys/bus/usb/devices/[0-9]*"):
-          b_file = os.path.join(d, "busnum")
-          dn_file = os.path.join(d, "devnum")
-          if os.path.exists(b_file) and os.path.exists(dn_file):
-            try:
-              with open(b_file) as f:
-                b_val = int(f.read().strip())
-              with open(dn_file) as f:
-                dn_val = int(f.read().strip())
-              if (b_val, dn_val) in bus_dev_cids:
-                cids[os.path.basename(d)] = bus_dev_cids[(b_val, dn_val)]
-            except Exception:
-              pass
-    except Exception as e:
-      logging.debug("Error querying hub container IDs via lsusb: %s", e)
+    # 2. Query lsusb -v for TI TUSB8041 (0451:8140/8142) and Realtek (0bda) hubs as fallback
+    for vid in ("0451", "0bda"):
+      try:
+        proc = subprocess.run(
+            ["lsusb", "-v", "-d", f"{vid}:"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=2.0,
+        )
+        if proc.returncode == 0 and proc.stdout:
+          bus_dev_cids: Dict[Tuple[int, int], str] = {}
+          curr_bus_dev = None
+          for line in proc.stdout.splitlines():
+            m_dev = re.match(r"Bus\s+(\d+)\s+Device\s+(\d+):", line)
+            if m_dev:
+              curr_bus_dev = (int(m_dev.group(1)), int(m_dev.group(2)))
+            m_cid = re.search(r"ContainerID\s+\{?([0-9a-fA-F-]+)\}?", line)
+            if m_cid and curr_bus_dev:
+              bus_dev_cids[curr_bus_dev] = m_cid.group(1).lower().strip("{}")
+
+          # Map sysfs device names by matching (busnum, devnum)
+          for d in glob.glob("/sys/bus/usb/devices/[0-9]*"):
+            hub_name = os.path.basename(d)
+            if hub_name in cids:
+              continue
+            b_file = os.path.join(d, "busnum")
+            dn_file = os.path.join(d, "devnum")
+            if os.path.exists(b_file) and os.path.exists(dn_file):
+              try:
+                with open(b_file) as f:
+                  b_val = int(f.read().strip())
+                with open(dn_file) as f:
+                  dn_val = int(f.read().strip())
+                if (b_val, dn_val) in bus_dev_cids:
+                  cids[hub_name] = bus_dev_cids[(b_val, dn_val)]
+              except Exception:
+                pass
+      except Exception as e:
+        logging.debug("Error querying hub container IDs for VID %s via lsusb: %s", vid, e)
 
     return cids
 
@@ -402,12 +423,23 @@ class MauiStation1Servicer(
       Tier 1: Physical Maui On-Board Hub ContainerID Match (TI TUSB8041 USB2 0451:8142 <-> USB3 0451:8140)
       Tier 2: Direct Parent Hub Directory Match (when ADB is in USB 2.0 fallback mode)
       Tier 3: Device ContainerID Match
+      Tier 4: External Hub / Root Port Topology Scoring
+      Tier 5: Single Available ADB Candidate Fallback (authoritative for 1-board test setups)
     """
     excluded = excluded_serials or set()
     available_candidates = [c for c in (adb_candidates or []) if c.get("serial") not in excluded]
 
     if not available_candidates:
       return None
+
+    # If FTDI has a known hub container ID, prune any candidate whose hub container ID is known and different
+    if ftdi_hub_container_id:
+      available_candidates = [
+          c for c in available_candidates
+          if not c.get("hub_container_id") or c.get("hub_container_id").lower() == ftdi_hub_container_id.lower()
+      ]
+      if not available_candidates:
+        return None
 
     # Tier 1 (PRIMARY & AUTHORITATIVE): Physical Maui On-Board Hub Container ID Match
     if ftdi_hub_container_id:
@@ -464,9 +496,14 @@ class MauiStation1Servicer(
           elif len(ftdi_tokens) >= 3 and ftdi_tokens[1:-1] == cand_tokens[1:-1]:
             # Intermediate hub ports match on different root ports (e.g. 6.1.2 vs 2.1.3)
             score = 50
+          elif ftdi_tokens[-1] == "2" and cand_tokens[-1] == "3":
+            # Direct PC connection where root hub port numbers differ (e.g. 3.2 on usb3 vs 1.3 on usb2)
+            score = 30
         elif len(ftdi_tokens) >= 3 and len(cand_tokens) >= 3:
           if ftdi_tokens[1:-1] == cand_tokens[1:-1]:
             score = 50
+        elif ftdi_tokens and cand_tokens and ftdi_tokens[-1] == "2" and cand_tokens[-1] == "3":
+          score = 25
 
         if score > 0:
           score_counts[score] = score_counts.get(score, 0) + 1
@@ -474,13 +511,21 @@ class MauiStation1Servicer(
             best_score = score
             best_cand = c_ser
 
-      # Only accept match if best_score >= 50 and unambiguous at highest score tier
-      if best_score >= 50 and score_counts.get(best_score, 0) == 1 and best_cand:
+      # Only accept match if best_score >= 25 and unambiguous at highest score tier
+      if best_score >= 25 and score_counts.get(best_score, 0) == 1 and best_cand:
         logging.info(
             "Matched FTDI port (%s) to ADB serial '%s' via topology score %d",
             ftdi_devpath or ftdi_name, best_cand, best_score
         )
         return best_cand
+
+    # Tier 5: Single available ADB candidate fallback (authoritative for 1-board test setups)
+    if len(available_candidates) == 1:
+      logging.info(
+          "Matched FTDI port (%s) to single connected ADB serial '%s'",
+          ftdi_devpath or ftdi_name, available_candidates[0]["serial"]
+      )
+      return available_candidates[0]["serial"]
 
     return None
 
@@ -545,10 +590,17 @@ class MauiStation1Servicer(
               if hub_name in hub_cids:
                 ftdi_hub_container_id = hub_cids[hub_name]
               else:
-                hub_cid_file = os.path.join(parent_candidate, "container_id")
-                if os.path.exists(hub_cid_file):
-                  with open(hub_cid_file, "r") as f:
-                    ftdi_hub_container_id = f.read().strip().lower().strip("{}")
+                bos_f = os.path.join(parent_candidate, "bos")
+                if os.path.exists(bos_f):
+                  ftdi_hub_container_id = extract_container_id_from_bos_file(bos_f) or ""
+                if not ftdi_hub_container_id:
+                  hub_cid_file = os.path.join(parent_candidate, "container_id")
+                  if os.path.exists(hub_cid_file):
+                    try:
+                      with open(hub_cid_file, "r") as f:
+                        ftdi_hub_container_id = f.read().strip().lower().strip("{}")
+                    except Exception:
+                      pass
             break
         except Exception:
           pass
@@ -573,13 +625,17 @@ class MauiStation1Servicer(
             if hub_name in hub_cids:
               ftdi_hub_container_id = hub_cids[hub_name]
             else:
-              hub_cid_file = os.path.join(parent_candidate, "container_id")
-              if os.path.exists(hub_cid_file):
-                try:
-                  with open(hub_cid_file, "r") as f:
-                    ftdi_hub_container_id = f.read().strip().lower().strip("{}")
-                except Exception:
-                  pass
+              bos_f = os.path.join(parent_candidate, "bos")
+              if os.path.exists(bos_f):
+                ftdi_hub_container_id = extract_container_id_from_bos_file(bos_f) or ""
+              if not ftdi_hub_container_id:
+                hub_cid_file = os.path.join(parent_candidate, "container_id")
+                if os.path.exists(hub_cid_file):
+                  try:
+                    with open(hub_cid_file, "r") as f:
+                      ftdi_hub_container_id = f.read().strip().lower().strip("{}")
+                  except Exception:
+                    pass
           break
         curr = os.path.dirname(curr)
 
@@ -624,10 +680,17 @@ class MauiStation1Servicer(
               if hub_name in hub_cids:
                 cand_hub_cid = hub_cids[hub_name]
               else:
-                cand_hub_cid_file = os.path.join(cand_parent_hub, "container_id")
-                if os.path.exists(cand_hub_cid_file):
-                  with open(cand_hub_cid_file, "r") as f:
-                    cand_hub_cid = f.read().strip().lower().strip("{}")
+                bos_f = os.path.join(cand_parent_hub, "bos")
+                if os.path.exists(bos_f):
+                  cand_hub_cid = extract_container_id_from_bos_file(bos_f) or ""
+                if not cand_hub_cid:
+                  cand_hub_cid_file = os.path.join(cand_parent_hub, "container_id")
+                  if os.path.exists(cand_hub_cid_file):
+                    try:
+                      with open(cand_hub_cid_file, "r") as f:
+                        cand_hub_cid = f.read().strip().lower().strip("{}")
+                    except Exception:
+                      pass
 
             adb_candidates.append({
                 "dir": cand_real,
@@ -668,43 +731,88 @@ class MauiStation1Servicer(
       request: Any,
       unused_context: grpc.ServicerContext,
   ) -> maui_manufacturing_pb2.MauiTopologyDiscoveryResponse:
-    """Discovers pre-flashed serial from Prolific/ADB chip and reads current FTDI serial for targeted programming."""
+    """Discovers pre-flashed serial from Prolific/ADB chip and verifies FTDI console serial for targeted programming."""
     target_port = getattr(request, "device_port", None) or ""
-    logging.info("Starting USB topology discovery (target port: %s, 5s settling window)...", target_port or "any")
+    expected_ftdi_serial = (getattr(request, "ftdi_serial", None) or "").strip()
+    logging.info(
+        "Starting USB topology discovery (target port: %s, expected FTDI: %s, 5s settling window)...",
+        target_port or "any", expected_ftdi_serial or "any"
+    )
 
-    # If specific target port provided: probe target port specifically
-    if target_port:
+    # If specific target FTDI serial provided, rescan ports to locate where it re-enumerated
+    if expected_ftdi_serial:
+      for dev_node in sorted(glob.glob("/dev/ttyUSB*")):
+        c_ser, _, _, _ = self._find_ftdi_info_for_port(dev_node)
+        if c_ser and c_ser.strip() == expected_ftdi_serial:
+          if target_port and target_port != dev_node:
+            logging.info(
+                "FTDI console %s re-enumerated from %s to %s after USB 3.0 MUX",
+                expected_ftdi_serial, target_port, dev_node
+            )
+          target_port = dev_node
+          break
+
+    # If target_port or expected_ftdi_serial is provided: probe specifically
+    if target_port or expected_ftdi_serial:
       for attempt in range(1, 11):
+        # If expected FTDI serial provided, verify target_port or relocate if needed
+        if expected_ftdi_serial:
+          curr_ser = None
+          if target_port:
+            curr_ser, curr_pid, c_id, adb_ser = self._find_ftdi_info_for_port(target_port)
+          if not curr_ser or curr_ser.strip() != expected_ftdi_serial:
+            for dev_node in sorted(glob.glob("/dev/ttyUSB*")):
+              c_ser, _, _, _ = self._find_ftdi_info_for_port(dev_node)
+              if c_ser and c_ser.strip() == expected_ftdi_serial:
+                if target_port and target_port != dev_node:
+                  logging.info(
+                      "FTDI console %s re-enumerated from %s to %s after USB 3.0 MUX",
+                      expected_ftdi_serial, target_port, dev_node
+                  )
+                target_port = dev_node
+                break
+
+        if target_port:
+          curr_ser, curr_pid, c_id, adb_ser = self._find_ftdi_info_for_port(target_port)
+          if curr_ser:
+            if not expected_ftdi_serial or curr_ser.strip() == expected_ftdi_serial:
+              if adb_ser:
+                logging.info(
+                    "Discovered topology on attempt %d for %s: ADB Serial=%s, FTDI Current Serial=%s, PID=0x%04x",
+                    attempt, target_port, adb_ser, curr_ser, curr_pid
+                )
+                return maui_manufacturing_pb2.MauiTopologyDiscoveryResponse(
+                    success=True,
+                    read_serial_number=adb_ser,
+                    usb2_hub_serial="",
+                    ftdi_dev_node=target_port,
+                    container_id=c_id or "",
+                    ftdi_current_serial=curr_ser or "",
+                    ftdi_current_pid=curr_pid,
+                )
+        time.sleep(0.5)
+
+      # If port was found and FTDI is confirmed, return FTDI info
+      if target_port:
         curr_ser, curr_pid, c_id, adb_ser = self._find_ftdi_info_for_port(target_port)
-        if adb_ser:
-          logging.info("Discovered topology on attempt %d for %s: ADB Serial=%s, FTDI Current Serial=%s, PID=0x%04x",
-                       attempt, target_port, adb_ser, curr_ser, curr_pid)
+        if curr_ser:
+          if expected_ftdi_serial and curr_ser.strip() != expected_ftdi_serial:
+            return maui_manufacturing_pb2.MauiTopologyDiscoveryResponse(
+                success=False,
+                error_message=f"Port {target_port} has FTDI serial {curr_ser}, but expected {expected_ftdi_serial}.",
+            )
           return maui_manufacturing_pb2.MauiTopologyDiscoveryResponse(
               success=True,
-              read_serial_number=adb_ser,
-              usb2_hub_serial="",
+              read_serial_number=adb_ser or "",
               ftdi_dev_node=target_port,
               container_id=c_id or "",
               ftdi_current_serial=curr_ser or "",
               ftdi_current_pid=curr_pid,
+              error_message="" if adb_ser else f"FTDI node {target_port} confirmed (serial: {curr_ser}), awaiting ADB sibling enumeration.",
           )
-        time.sleep(0.5)
-
-      # If port was found but ADB not yet ready, return FTDI info if available
-      curr_ser, curr_pid, c_id, _ = self._find_ftdi_info_for_port(target_port)
-      if curr_ser:
-        return maui_manufacturing_pb2.MauiTopologyDiscoveryResponse(
-            success=False,
-            read_serial_number="",
-            ftdi_dev_node=target_port,
-            container_id=c_id or "",
-            ftdi_current_serial=curr_ser or "",
-            ftdi_current_pid=curr_pid,
-            error_message=f"FTDI node {target_port} found (serial: {curr_ser}), but sibling ADB chip did not enumerate after 5s.",
-        )
       return maui_manufacturing_pb2.MauiTopologyDiscoveryResponse(
           success=False,
-          error_message=f"Could not locate USB topology for port {target_port}.",
+          error_message=f"Could not locate FTDI console (expected serial: {expected_ftdi_serial or 'any'}, port: {target_port or 'any'}).",
       )
 
     # Legacy/single device fallback (only when no target port is specified)

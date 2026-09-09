@@ -12,6 +12,7 @@ from unittest import mock
 from server.generated import maui_manufacturing_pb2
 from server.maui_common import (
     UsbDeviceInfo,
+    extract_container_id_from_bos_file,
     find_offline_fw_file,
     get_device_log_dir,
     write_device_log,
@@ -235,6 +236,40 @@ class TestMauiStation1Servicer(unittest.IsolatedAsyncioTestCase):
     self.assertEqual(resp.ftdi_current_serial, "A50285BI")
     self.assertEqual(resp.ftdi_current_pid, 0x6001)
 
+  @mock.patch("glob.glob", return_value=["/dev/ttyUSB0", "/dev/ttyUSB1"])
+  def test_discover_topology_and_serial_ftdi_relocation(self, mock_glob):
+    def side_effect(port, **kwargs):
+      if port == "/dev/ttyUSB0":
+        return ("OTHER_SERIAL", 0x6001, "cont0", None)
+      if port == "/dev/ttyUSB1":
+        return ("A50285BI", 0x6001, "cont1", "MAUI_ADB_123")
+      return (None, 0, None, None)
+
+    with mock.patch.object(self.servicer, "_find_ftdi_info_for_port", side_effect=side_effect):
+      req = maui_manufacturing_pb2.MauiTopologyDiscoveryRequest(
+          device_port="/dev/ttyUSB0",
+          ftdi_serial="A50285BI",
+      )
+      resp = self.servicer.discover_topology_and_serial(req, self.context)
+      self.assertTrue(resp.success)
+      self.assertEqual(resp.ftdi_dev_node, "/dev/ttyUSB1")
+      self.assertEqual(resp.read_serial_number, "MAUI_ADB_123")
+      self.assertEqual(resp.ftdi_current_serial, "A50285BI")
+
+  @mock.patch.object(MauiStation1Servicer, "_find_ftdi_info_for_port", return_value=("A50285BI", 0x6001, "cont1", None))
+  def test_discover_topology_and_serial_settling_without_adb(self, mock_info):
+    req = maui_manufacturing_pb2.MauiTopologyDiscoveryRequest(
+        device_port="/dev/ttyUSB0",
+        ftdi_serial="A50285BI",
+    )
+    with mock.patch("time.sleep"):
+      resp = self.servicer.discover_topology_and_serial(req, self.context)
+    self.assertTrue(resp.success)
+    self.assertEqual(resp.ftdi_dev_node, "/dev/ttyUSB0")
+    self.assertEqual(resp.ftdi_current_serial, "A50285BI")
+    self.assertEqual(resp.read_serial_number, "")
+    self.assertIn("awaiting ADB sibling enumeration", resp.error_message)
+
   def test_match_ftdi_to_adb_superspeed_split_bus(self):
     # Simulates real topology from local test setup with 3 connected Maui boards
     adb_candidates = [
@@ -398,6 +433,75 @@ class TestMauiStation1Servicer(unittest.IsolatedAsyncioTestCase):
         adb_candidates=only_board1_adb,
     )
     self.assertIsNone(match_board2)
+
+  def test_extract_container_id_from_bos_file(self):
+    # Synthetic 25-byte BOS descriptor: 5-byte header + 20-byte ContainerID capability
+    uuid_bytes = bytes.fromhex("0189000205086ab4121a27c2b6c9d000")
+    bos_header = bytes([5, 15, 25, 0, 1])
+    cap_header = bytes([20, 16, 4, 0])
+    bos_data = bos_header + cap_header + uuid_bytes
+
+    with tempfile.NamedTemporaryFile() as tmp:
+      tmp.write(bos_data)
+      tmp.flush()
+      cid = extract_container_id_from_bos_file(tmp.name)
+      self.assertEqual(cid, "01890002-0508-6ab4-121a-27c2b6c9d000")
+
+    # Invalid / corrupt BOS data
+    with tempfile.NamedTemporaryFile() as tmp:
+      tmp.write(b"\x00\x01\x02")
+      tmp.flush()
+      self.assertIsNone(extract_container_id_from_bos_file(tmp.name))
+
+    # Nonexistent file
+    self.assertIsNone(extract_container_id_from_bos_file("/nonexistent/path/bos"))
+
+  def test_match_ftdi_to_adb_direct_pc_differing_root_ports_via_hub_cid(self):
+    # Simulates direct PC connection where root hub port numbers differ (3-3.2 vs 2-1.3)
+    # but the physical on-board TUSB8041 hub shares the same BOS ContainerID.
+    cid_board = "01890002-0508-6ab4-121a-27c2b6c9d000"
+    adb_candidates = [
+        {
+            "dir": "/sys/devices/pci/usb2/2-1/2-1.3",
+            "name": "2-1.3",
+            "serial": "MAUIV11G26060068",
+            "devpath": "1.3",
+            "container_id": "",
+            "hub_container_id": cid_board,
+        },
+    ]
+    matched = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="/sys/devices/pci/usb3/3-3/3-3.2",
+        ftdi_name="3-3.2",
+        ftdi_devpath="3.2",
+        ftdi_container_id="",
+        ftdi_hub_container_id=cid_board,
+        adb_candidates=adb_candidates,
+    )
+    self.assertEqual(matched, "MAUIV11G26060068")
+
+  def test_match_ftdi_to_adb_direct_pc_differing_root_ports_without_cid(self):
+    # Simulates direct PC connection where root hub port numbers differ (3-3.2 vs 2-1.3)
+    # and ContainerID is absent, falling back to endpoint topology scoring / single candidate.
+    adb_candidates = [
+        {
+            "dir": "/sys/devices/pci/usb2/2-1/2-1.3",
+            "name": "2-1.3",
+            "serial": "MAUIV11G26060068",
+            "devpath": "1.3",
+            "container_id": "",
+            "hub_container_id": "",
+        },
+    ]
+    matched = self.servicer._match_ftdi_to_adb(
+        ftdi_dir="/sys/devices/pci/usb3/3-3/3-3.2",
+        ftdi_name="3-3.2",
+        ftdi_devpath="3.2",
+        ftdi_container_id="",
+        ftdi_hub_container_id="",
+        adb_candidates=adb_candidates,
+    )
+    self.assertEqual(matched, "MAUIV11G26060068")
 
   def test_parse_lsusb_hub_container_ids(self):
     # Verifies parsing of lsusb -v BOS container ID capability descriptors

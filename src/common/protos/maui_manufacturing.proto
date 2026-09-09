@@ -102,6 +102,7 @@ message MauiBslDiscoveryResponse {
   uint32 pid = 6;               // e.g. 0x6001 or 0x6002
   bool auto_flash_eligible = 7;  // True if 0x6001, False if 0x6002
   string detected_serial = 8;
+  string ftdi_serial = 9;
 }
 
 message MauiAutoProgramMcuRequest {
@@ -116,11 +117,13 @@ message MauiProgramMcuResponse {
   string detected_hwrev = 3;
   string message = 4;
   string logs = 5;
+  string ftdi_serial = 6;
 }
 
 message MauiTopologyDiscoveryRequest {
   string device_port = 1;       // e.g. /dev/ttyUSB0 (optional target port)
   string container_id = 2;      // optional USB container ID
+  string ftdi_serial = 3;       // optional: search for this FTDI serial if port changed
 }
 
 message MauiTopologyDiscoveryResponse {

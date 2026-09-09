@@ -41,10 +41,12 @@ export class MauiStation1Service {
   discoverTopologyAndSerial(
     devicePort = '',
     containerId = '',
+    ftdiSerial = '',
   ): Observable<MauiTopologyDiscoveryResponse> {
     const request = new MauiTopologyDiscoveryRequest();
     request.devicePort = devicePort;
     request.containerId = containerId;
+    request.ftdiSerial = ftdiSerial;
     return this.client.discoverTopologyAndSerial(request);
   }
 
