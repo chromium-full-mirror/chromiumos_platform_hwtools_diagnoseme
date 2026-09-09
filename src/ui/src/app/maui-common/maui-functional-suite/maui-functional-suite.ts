@@ -1111,7 +1111,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
       `Card 3 (RESET Button): ${this.resetStatusValue}\n` +
       `Card 4 (BSL Button ADC): ${this.bslStatusValue} (Peak BSL: ${this.peakBslMv} mV)\n` +
       `Card 5 (Visual LEDs): ${this.ledStatusValue} (Amber=${this.ledAmberChecked}, Green_1Hz=${this.ledGreenChecked})\n` +
-      `Card 6 (Host+DUT+Charger): ${this.stage1StatusValue} (H2H=${this.h2hLinkSpeed}, PD=${this.negotiatedVoltage}V/${this.calculatedPowerW}W, CCD AP/EC/GSC=${this.apUartOk && this.ecUartOk && this.gscUartOk})\n` +
+      `Card 6 (Host+DUT+Charger): ${this.stage1StatusValue} (H2H=${this.h2hLinkSpeed}, PD=${this.negotiatedVoltage}V/${this.calculatedPowerW}W, CCD EC/GSC=${this.ecUartOk && this.gscUartOk})\n` +
       `Card 7 (180° SBU Flip): ${this.stage2StatusValue} (DUT SBU Orientation=${this.dutOrientation})\n` +
       `Card 8 (Charger Disconnected): ${this.stage3StatusValue} (Disconnected=${this.chargerDisconnected})\n` +
       `OVERALL RESULT: ${allPassed ? 'PASS' : 'FAIL'}\n`;

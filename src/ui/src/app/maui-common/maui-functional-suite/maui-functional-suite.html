@@ -667,14 +667,13 @@
               <span class="value code">{{ adbDutSpeed }}</span>
             </div>
           }
-          @if (apVersionStr || ecVersionStr || gscVersionStr) {
+          @if (ecVersionStr || gscVersionStr) {
             <div class="info-row">
               <span class="label">CCD Consoles:</span>
               <span
                 class="badge"
-                [class.badge-active]="apUartOk && ecUartOk && gscUartOk">
-                AP: {{ apUartOk ? 'OK' : 'FAIL' }} | EC:
-                {{ ecUartOk ? 'OK' : 'FAIL' }} | GSC:
+                [class.badge-active]="ecUartOk && gscUartOk">
+                EC: {{ ecUartOk ? 'OK' : 'FAIL' }} | GSC:
                 {{ gscUartOk ? 'OK' : 'FAIL' }}
               </span>
             </div>

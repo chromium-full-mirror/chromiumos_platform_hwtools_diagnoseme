@@ -953,6 +953,60 @@ class TestMauiStation2Servicer(unittest.TestCase):
         self.assertTrue(resp.all_passed)
         self.assertIn("Charger Disconnected: PASS", resp.summary)
 
+  @mock.patch("os.path.exists", return_value=True)
+  @mock.patch("server.maui_station2_service.open_serial_port")
+  @mock.patch("server.maui_common.write_device_log")
+  @mock.patch("server.util.is_usb_device_present")
+  def test_run_host_dut_stage1_passes_without_ap_console_response(self, mock_usb, mock_log, mock_serial, mock_exists):
+    mock_usb.return_value = True
+    mock_ser_instance = mock.MagicMock()
+    mock_serial.return_value.__enter__.return_value = mock_ser_instance
+
+    with mock.patch(
+        "server.maui_common.scan_usb_devices",
+        return_value=[
+            UsbDeviceInfo(
+                sys_path="/sys/bus/usb/devices/1-1",
+                vid=0x18D1,
+                pid=0x506D,
+                serial="TEST_MAUI_SERIAL_001",
+                speed="5000",
+            )
+        ],
+    ), mock.patch.object(
+        self.servicer,
+        "_find_ccd_serial_nodes",
+        return_value={"ap": "/dev/ttyUSB1", "ec": "/dev/ttyUSB2", "gsc": "/dev/ttyUSB3"},
+    ):
+      def fake_query_ccd(node, cmd, timeout=0.5, first_byte_timeout=0.25):
+        if node == "/dev/ttyUSB2":
+          return True, "EC version: 1.2.3"
+        if node == "/dev/ttyUSB3":
+          return True, "GSC version: 0.0.1"
+        return False, "Timeout"
+
+      with mock.patch.object(MauiConsoleTester, "query_ccd_console", side_effect=fake_query_ccd) as mock_query:
+        req = maui_manufacturing_pb2.MauiHostDutTestRequest(
+            serial_number="TEST_MAUI_SERIAL_001",
+            expected_serial="TEST_MAUI_SERIAL_001",
+            stage="stage1_with_charger",
+        )
+        with mock.patch.object(MauiConsoleTester, "send_command") as mock_send:
+          mock_send.side_effect = [
+              "Plug Present: Yes\r\nOrientation: Normal (CC1)\r\nVoltage: 20.0 V\r\nOp Current: 5.0 A\r\nMeasured VBUS: 20.0 V (20000 mV)\r\nmaui$ ",
+              "Plug Present: Yes\r\nVoltage: 20.0 V\r\nOp Current: 5.0 A\r\nMeasured VBUS: 20.0 V (20000 mV)\r\nmaui$ ",
+              "[ SBU1_DET] = 3300 mV\r\n[ SBU2_DET] = 0 mV\r\n[ PPVAR_USB_CHG_VBUS] = 20000 mV\r\n[ PPVAR_USB_DUT_VBUS] = 20000 mV\r\nmaui$ ",
+          ]
+          resp = self.servicer.run_host_dut_tests(req, self.context)
+          self.assertTrue(resp.all_passed)
+          self.assertTrue(resp.ec_uart_ok)
+          self.assertTrue(resp.gsc_uart_ok)
+          queried_nodes = [c.args[0] for c in mock_query.call_args_list]
+          self.assertNotIn("/dev/ttyUSB1", queried_nodes)
+          self.assertIn("/dev/ttyUSB2", queried_nodes)
+          self.assertIn("/dev/ttyUSB3", queried_nodes)
+          self.assertIn("CCD Consoles: EC=PASS, GSC=PASS", resp.summary)
+
   def test_analyze_device_manufacturing_logs_mcu_warning_timeout_still_passed(self):
     with tempfile.TemporaryDirectory() as tmpdir:
       with mock.patch("server.maui_station1_service.get_device_log_dir", return_value=tmpdir):

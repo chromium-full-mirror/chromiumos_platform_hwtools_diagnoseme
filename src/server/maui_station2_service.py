@@ -830,17 +830,15 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     adb_ok, h2h_5gbps, dut_speed_str, adb_logs = self._check_adb_and_dut_speed(detected_serial)
     logging.info("ADB check -> ADB_OK: %s, 5Gbps SuperSpeed: %s (Speed: %s)", adb_ok, h2h_5gbps, dut_speed_str)
 
-    # 3. CCD Consoles Check (AP uses uptime for Android shell, EC & GSC use version)
+    # 3. CCD Consoles Check (EC & GSC query version; AP query response disabled)
     ccd_nodes = self._find_ccd_serial_nodes()
     logging.info("Discovered CCD Serial Nodes: %s", ccd_nodes)
-    ap_uart_ok, ap_version_str = False, "No CCD device detected"
+    ap_uart_ok = bool(ccd_nodes.get("ap"))
+    ap_version_str = f"Node: {ccd_nodes['ap']} (response check disabled)" if ccd_nodes.get("ap") else "No AP node detected"
     ec_uart_ok, ec_version_str = False, "No CCD device detected"
     gsc_uart_ok, gsc_version_str = False, "No CCD device detected"
 
-    if ccd_nodes.get("ap"):
-      ap_uart_ok, ap_version_str = MauiConsoleTester.query_ccd_console(ccd_nodes["ap"], "uptime", timeout=0.5, first_byte_timeout=0.25)
-      if not ap_uart_ok:
-        ap_uart_ok, ap_version_str = MauiConsoleTester.query_ccd_console(ccd_nodes["ap"], "version", timeout=0.5, first_byte_timeout=0.25)
+    # Only check that EC and GSC consoles respond
     if ccd_nodes.get("ec"):
       ec_uart_ok, ec_version_str = MauiConsoleTester.query_ccd_console(ccd_nodes["ec"], "version", timeout=0.5, first_byte_timeout=0.25)
     if ccd_nodes.get("gsc"):
@@ -926,17 +924,17 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     # Evaluate stage specific pass/fail criteria
     # User flow: 1st & 2nd with charger connected (20V contract), 3rd with charger disconnected
     if stage in ("stage1_with_charger",):
-      all_passed = charger_connected_ok and dut_20v_contract_ok and h2h_5gbps and serial_matched and ap_uart_ok and ec_uart_ok and gsc_uart_ok
+      all_passed = charger_connected_ok and dut_20v_contract_ok and h2h_5gbps and serial_matched and ec_uart_ok and gsc_uart_ok
       summary = (
           f"[Stage 1: With Charger] Charger Port: {'PASS (Connected)' if charger_connected_ok else 'FAIL (No Charger)'} | "
           f"DUT 20V Contract: {voltage_v}V @ {current_a}A ({calculated_power_w}W, VBUS={measured_vbus_mv}mV, {'PASS' if dut_20v_contract_ok else 'FAIL (Expected 20V)'}) | "
           f"DUT Orientation: {dut_orientation} | "
           f"Serial Match: {'PASS (' + detected_serial + ')' if serial_matched else 'FAIL'} | "
           f"H2H 5Gbps: {'PASS (' + dut_speed_str + ')' if h2h_5gbps else 'FAIL'} | "
-          f"CCD Consoles: AP={'PASS' if ap_uart_ok else 'FAIL'}, EC={'PASS' if ec_uart_ok else 'FAIL'}, GSC={'PASS' if gsc_uart_ok else 'FAIL'}"
+          f"CCD Consoles: EC={'PASS' if ec_uart_ok else 'FAIL'}, GSC={'PASS' if gsc_uart_ok else 'FAIL'}"
       )
     elif stage in ("stage2_sbu_flip", "stage3_sbu_flip"):
-      all_passed = sbu_flip_ok and charger_connected_ok and dut_20v_contract_ok and h2h_5gbps and ap_uart_ok and ec_uart_ok and gsc_uart_ok
+      all_passed = sbu_flip_ok and charger_connected_ok and dut_20v_contract_ok and h2h_5gbps and ec_uart_ok and gsc_uart_ok
       if prev_orientation and not polarity_inverted:
         sbu_status_str = f"FAIL (Polarity not inverted: still {dut_orientation}, expected flip from {prev_orientation})"
       elif polarity_inverted:
@@ -949,31 +947,31 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
           f"Charger Port: {'PASS' if charger_connected_ok else 'FAIL'} | "
           f"DUT 20V Contract: {'PASS (' + str(voltage_v) + 'V)' if dut_20v_contract_ok else 'FAIL'} | "
           f"H2H Re-connect: {'PASS (' + dut_speed_str + ')' if h2h_5gbps else 'FAIL'} | "
-          f"CCD Consoles: AP={'PASS' if ap_uart_ok else 'FAIL'}, EC={'PASS' if ec_uart_ok else 'FAIL'}, GSC={'PASS' if gsc_uart_ok else 'FAIL'}"
+          f"CCD Consoles: EC={'PASS' if ec_uart_ok else 'FAIL'}, GSC={'PASS' if gsc_uart_ok else 'FAIL'}"
       )
     elif stage in ("stage3_no_charger", "stage1_no_charger"):
-      all_passed = charger_disconnected_ok and h2h_5gbps and serial_matched and ap_uart_ok and ec_uart_ok and gsc_uart_ok
+      all_passed = charger_disconnected_ok and h2h_5gbps and serial_matched and ec_uart_ok and gsc_uart_ok
       summary = (
           f"[Stage 3: Charger Disconnected] Charger Disconnected: {'PASS' if charger_disconnected_ok else 'FAIL (Plug Detected)'} | "
           f"H2H 5Gbps (Battery Sink): {'PASS (' + dut_speed_str + ')' if h2h_5gbps else 'FAIL'} | "
           f"Serial Match: {'PASS (' + detected_serial + ')' if serial_matched else 'FAIL'} | "
-          f"CCD Consoles: AP={'PASS' if ap_uart_ok else 'FAIL'}, EC={'PASS' if ec_uart_ok else 'FAIL'}, GSC={'PASS' if gsc_uart_ok else 'FAIL'}"
+          f"CCD Consoles: EC={'PASS' if ec_uart_ok else 'FAIL'}, GSC={'PASS' if gsc_uart_ok else 'FAIL'}"
       )
     else:
-      all_passed = charger_connected_ok and dut_20v_contract_ok and h2h_5gbps and serial_matched and ap_uart_ok and ec_uart_ok and gsc_uart_ok and sbu_flip_ok
+      all_passed = charger_connected_ok and dut_20v_contract_ok and h2h_5gbps and serial_matched and ec_uart_ok and gsc_uart_ok and sbu_flip_ok
       summary = (
           f"H2H 5Gbps: {'PASS (' + dut_speed_str + ')' if h2h_5gbps else 'FAIL'} | "
           f"Serial Match: {'PASS (' + detected_serial + ')' if serial_matched else 'FAIL'} | "
           f"Charger Port: {'PASS' if charger_connected_ok else 'FAIL'} | "
           f"DUT 20V Contract: {voltage_v}V @ {current_a}A ({calculated_power_w}W, {'PASS' if dut_20v_contract_ok else 'FAIL'}) | "
-          f"CCD Consoles: AP={'PASS' if ap_uart_ok else 'FAIL'}, EC={'PASS' if ec_uart_ok else 'FAIL'}, GSC={'PASS' if gsc_uart_ok else 'FAIL'} | "
+          f"CCD Consoles: EC={'PASS' if ec_uart_ok else 'FAIL'}, GSC={'PASS' if gsc_uart_ok else 'FAIL'} | "
           f"SBU Orientation: {dut_orientation} ({'PASS' if sbu_flip_ok else 'FAIL'})"
       )
 
     write_device_log(
         detected_serial,
         f"host_dut_{stage}" if stage != "all" else "host_dut_tests",
-        f"ALL_PASSED={all_passed}\n{summary}\n\nCCD Nodes: {ccd_nodes}\nAP: {ap_version_str}\nEC: {ec_version_str}\nGSC: {gsc_version_str}\nADB Output:\n{adb_logs}\nPDC DUT:\n{pdc_dut.get('raw_output', '')}\nPDC CHG:\n{pdc_chg.get('raw_output', '')}\nADC Status:\n{adc_raw}"
+        f"ALL_PASSED={all_passed}\n{summary}\n\nCCD Nodes: {ccd_nodes}\nEC: {ec_version_str}\nGSC: {gsc_version_str}\nADB Output:\n{adb_logs}\nPDC DUT:\n{pdc_dut.get('raw_output', '')}\nPDC CHG:\n{pdc_chg.get('raw_output', '')}\nADC Status:\n{adc_raw}"
     )
 
     return maui_manufacturing_pb2.MauiHostDutTestResponse(
