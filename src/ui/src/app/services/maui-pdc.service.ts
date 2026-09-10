@@ -26,7 +26,7 @@ export class MauiPdcService {
     slotIndex: number,
     serialNumber: string,
     devicePort: string,
-    fwChannel = 'stable',
+    fwChannel = 'v20_0325_100W',
   ): Observable<MauiProgramPdcProgressResponse> {
     const request = new MauiProgramSinglePdcRequest();
     request.slotIndex = slotIndex;

@@ -374,7 +374,7 @@ export class MauiStep1ProvisioningComponent implements OnInit, OnDestroy {
         slot.slotIndex,
         slot.serialNumber || `MAUI-SLOT${slot.slotIndex}`,
         slot.devicePort,
-        'stable',
+        'v20_0325_100W',
       )
       .subscribe({
         next: progress => {

@@ -613,6 +613,39 @@ class TestMauiPdcServicer(unittest.IsolatedAsyncioTestCase):
     self.assertIn("--file", call_args)
     self.assertIn("/var/lib/diagnoseme/firmware/pdc/v20_0325.bin", call_args)
 
+  @mock.patch("server.maui_station1_service.find_offline_fw_file", return_value="/var/lib/diagnoseme/firmware/pdc/v20_0325_100W.bin")
+  @mock.patch("asyncio.create_subprocess_exec")
+  async def test_program_single_pdc_100w_channel_success(self, mock_exec, mock_find):
+    mock_proc = mock.AsyncMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout.readline.side_effect = [
+        b"Block 1: Progress: 500/1000 bytes transferred (50.0%)\n",
+        b"",
+    ]
+    mock_proc.stdout.read.return_value = b"Flashing complete."
+    mock_proc.wait.return_value = 0
+    mock_exec.return_value = mock_proc
+
+    req = maui_manufacturing_pb2.MauiProgramSinglePdcRequest(
+        slot_index=1,
+        serial_number="TEST_MAUI_SERIAL_001",
+        device_port="/dev/ttyUSB0",
+        fw_channel="v20_0325_100W",
+    )
+    responses = []
+    async for resp in self.servicer.program_single_pdc(req, self.context):
+      responses.append(resp)
+
+    self.assertTrue(len(responses) >= 1)
+    final_resp = responses[-1]
+    self.assertTrue(final_resp.is_complete)
+    self.assertEqual(final_resp.current_block, "Complete")
+
+    # Verify that --file was passed with v20_0325_100W.bin
+    call_args = mock_exec.call_args[0]
+    self.assertIn("--file", call_args)
+    self.assertIn("/var/lib/diagnoseme/firmware/pdc/v20_0325_100W.bin", call_args)
+
 
 class TestMauiDeviceManagementServicer(unittest.TestCase):
   """Tests for MauiDeviceManagementServicer and log formatting."""

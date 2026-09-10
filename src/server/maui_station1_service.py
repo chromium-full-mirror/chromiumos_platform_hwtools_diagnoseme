@@ -970,7 +970,7 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
     slot_index = request.slot_index or 1
     serial_no = (request.serial_number or "").strip()
     dev_port = request.device_port or "/dev/ttyUSB0"
-    fw_channel = request.fw_channel or "stable"
+    fw_channel = request.fw_channel or "v20_0325_100W"
 
     station1_servicer = MauiStation1Servicer()
     if not serial_no or serial_no.startswith("MAUI-SLOT") or "UNKNOWN" in serial_no:
@@ -990,8 +990,8 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
     elif serial_no:
       common_args.extend(["--serial", serial_no])
 
-    offline_fw = find_offline_fw_file("pdc")
-    if offline_fw and (fw_channel in ("offline", "stable") or not fw_channel):
+    offline_fw = find_offline_fw_file("pdc", fw_channel)
+    if offline_fw and (fw_channel in ("offline", "stable", "v20_0325_100W") or not fw_channel):
       logging.info("Found local offline PDC firmware: %s. Using --file.", offline_fw)
       pdc_flash_args = ["pdc", "--file", offline_fw]
     elif fw_channel == "offline":
@@ -1208,7 +1208,7 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
         slot_index=1,
         serial_number="",
         device_port="",
-        fw_channel=request.fw_channel or "stable",
+        fw_channel=request.fw_channel or "v20_0325_100W",
     )
     async for resp in self.program_single_pdc(single_req, context):
       yield resp

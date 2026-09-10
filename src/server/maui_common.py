@@ -347,7 +347,9 @@ def write_device_log(
     return ""
 
 
-def find_offline_fw_file(component: str) -> Optional[str]:
+def find_offline_fw_file(
+    component: str, channel_or_version: Optional[str] = None
+) -> Optional[str]:
   """Checks for local offline firmware files in standard firmware directories."""
   candidates = [
       f"/var/lib/diagnoseme/firmware/{component}",
@@ -360,6 +362,23 @@ def find_offline_fw_file(component: str) -> Optional[str]:
       "/usr/local/server/firmware",
   ]
   exts = [".txt", ".bin", ".hex"] if component == "mcu" else [".bin", ".hex", ".txt"]
+
+  # If a specific version/channel tag was requested, prioritize matching files
+  if channel_or_version and channel_or_version not in ("offline", "stable", ""):
+    tag = channel_or_version.strip()
+    for d in candidates:
+      if os.path.isdir(d):
+        for ext in exts:
+          tag_matches = glob.glob(os.path.join(d, f"*{tag}*{ext}"))
+          if tag_matches:
+            return sorted(tag_matches)[-1]
+        sub_d = os.path.join(d, tag)
+        if os.path.isdir(sub_d):
+          for ext in exts:
+            sub_matches = glob.glob(os.path.join(sub_d, f"*{ext}"))
+            if sub_matches:
+              return sorted(sub_matches)[-1]
+
   for d in candidates:
     if os.path.isdir(d):
       for ext in exts:
