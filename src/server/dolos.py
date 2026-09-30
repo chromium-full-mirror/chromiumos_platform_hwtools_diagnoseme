@@ -200,6 +200,18 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
 
         return response
 
+    @staticmethod
+    def _extract_model_from_hwid(hwid: str) -> str:
+        """Extracts the plain model name (first word) from an HWID string."""
+        parts = hwid.replace("-", " ").split()
+        return parts[0].lower() if parts else hwid
+
+    @staticmethod
+    def _is_hwid_validation_error(error: Exception) -> bool:
+        """Checks whether a DolosConsoleError is caused by HWIDv3 validation."""
+        msg = str(error).lower()
+        return any(marker in msg for marker in ("hwid", "hardware id", "revision id"))
+
     def program_cable(
         self, request: Any, unused_context: Any
     ) -> diagnoseme_dolos_pb2.ProgramCableResponse:  # pylint: disable=no-member
@@ -234,12 +246,40 @@ class DolosRpcService(diagnoseme_dolos_pb2_grpc.DolosRpcServiceServicer):
             if request.new_serial_number:
                 new_serial_number = request.new_serial_number
 
-            try:
-                dolos.program_cable(
-                    request.hwid,
-                    file=eeprom_data_filename,
-                    new_serial=new_serial_number,
+            hwid = request.hwid
+            if hwid and "TEST" in hwid.upper().split():
+                fallback_model = self._extract_model_from_hwid(hwid)
+                logger.info(
+                    "Detected test HWID %r; using model name %r for cable programming.",
+                    hwid,
+                    fallback_model,
                 )
+                hwid = fallback_model
+
+            try:
+                try:
+                    dolos.program_cable(
+                        hwid,
+                        file=eeprom_data_filename,
+                        new_serial=new_serial_number,
+                    )
+                except DolosConsoleError as e:
+                    if len(hwid.split()) > 1 and self._is_hwid_validation_error(e):
+                        fallback_model = self._extract_model_from_hwid(hwid)
+                        logger.warning(
+                            "HWID validation failed for %r (%s); "
+                            "falling back to model %r.",
+                            hwid,
+                            e,
+                            fallback_model,
+                        )
+                        dolos.program_cable(
+                            fallback_model,
+                            file=eeprom_data_filename,
+                            new_serial=new_serial_number,
+                        )
+                    else:
+                        raise
             except DolosConsoleError as e:
                 response.error_message = str(e)
                 logger.exception("Failed to program cable.")
