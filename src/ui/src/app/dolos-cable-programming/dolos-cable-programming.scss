@@ -1,0 +1,19 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+mat-form-field {
+  width: 100%;
+}
+
+.file-upload-container,
+.program-action-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-name {
+  font-size: 14px;
+  word-break: break-all;
+}

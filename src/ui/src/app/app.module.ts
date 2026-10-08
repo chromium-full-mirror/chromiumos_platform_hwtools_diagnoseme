@@ -24,6 +24,7 @@ import {MatInputModule} from '@angular/material/input';
 import {MatSelectModule} from '@angular/material/select';
 import {MatFormFieldModule} from '@angular/material/form-field';
 import {DolosProvisionComponent} from './dolos-provision/dolos-provision';
+import {DolosCableProgrammingComponent} from './dolos-cable-programming/dolos-cable-programming';
 
 import {MatProgressBarModule} from '@angular/material/progress-bar';
 
@@ -45,6 +46,7 @@ import {ServoMicroManufacturingComponent} from './servo-micro-manufacturing/serv
     RouterModule, // Add RouterModule here
     MatSlideToggleModule,
     DolosProvisionComponent,
+    DolosCableProgrammingComponent,
     MatToolbarModule,
     MatIconModule,
     MatMenuModule,

@@ -5,11 +5,16 @@
 import {NgModule} from '@angular/core';
 import {RouterModule, Routes} from '@angular/router';
 import {DolosProvisionComponent} from './dolos-provision/dolos-provision';
+import {DolosCableProgrammingComponent} from './dolos-cable-programming/dolos-cable-programming';
 import {ServoV4p1ManufacturingComponent} from './servo-v4p1-manufacturing/servo-v4p1-manufacturing';
 import {ServoMicroManufacturingComponent} from './servo-micro-manufacturing/servo-micro-manufacturing';
 
 const routes: Routes = [
   {path: 'dolos-rework', component: DolosProvisionComponent},
+  {
+    path: 'dolos-cable-programming',
+    component: DolosCableProgrammingComponent,
+  },
   {
     path: 'servo-v4p1-manufacturing',
     component: ServoV4p1ManufacturingComponent,

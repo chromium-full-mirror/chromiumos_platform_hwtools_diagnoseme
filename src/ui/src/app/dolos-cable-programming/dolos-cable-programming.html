@@ -1,0 +1,92 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<mat-toolbar color="primary">
+  <span>Dolos Cable Programming</span>
+</mat-toolbar>
+
+<diagnoseme-rework-card [progress]="cableProgramProgress" title="1. Cable Configuration & Programming">
+
+  <diagnoseme-rework-card-column column="1">
+    Connect the Dolos pink box host port to the host machine (the machine running this web
+    app) and attach the battery cable to the Dolos box.
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2"></diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3">
+    <help-dialog-button image="dolos-host-connect.jpg"></help-dialog-button>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">
+    Select Chromebook model (from cloud bucket):
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <mat-form-field subscriptSizing="dynamic">
+      <mat-select [(value)]="selectedModel" (selectionChange)="onChangeModel($event.value)" placeholder="Select model">
+        <mat-option>
+          <ngx-mat-select-search ngModel (ngModelChange)="filterModels($event)" placeholderLabel="Search:"
+            noEntriesFoundLabel="No matching model found."></ngx-mat-select-search>
+        </mat-option>
+        @for (model of filteredModels; track model) {
+        <mat-option [value]="model">{{
+          model | titlecase
+          }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">
+    (Optional) Upload custom cable configuration file:
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <div class="file-upload-container">
+      <input type="file" #fileInput style="display: none;" (change)="onEepromDataFileSelected($event)">
+      <button mat-raised-button color="primary" (click)="fileInput.click()">
+        <mat-icon>cloud_upload</mat-icon> Upload File
+      </button>
+      @if (selectedFileName) {
+      <span class="file-name">{{ selectedFileName }}</span>
+      <button mat-icon-button aria-label="Clear uploaded file" (click)="clearEepromDataFile(fileInput)">
+        <mat-icon>close</mat-icon>
+      </button>
+      }
+    </div>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">
+    (Optional) Enter specific HWID manually:
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2and3">
+    <mat-form-field subscriptSizing="dynamic">
+      <input [(ngModel)]="manualHwid" (input)="onManualHwidChange()" matInput placeholder="e.g. MODEL-ABCD D2B-A2A-A3B" />
+    </mat-form-field>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="1">
+    Program the cable:
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="2">
+    <div class="program-action-container">
+      <button (click)="onCableProgram()" [disabled]="!canProgramCable()" mat-raised-button color="primary">
+        Program Cable
+      </button>
+      <test-pass-fail-button #programCableStatus></test-pass-fail-button>
+    </div>
+  </diagnoseme-rework-card-column>
+  <diagnoseme-rework-card-column column="3"></diagnoseme-rework-card-column>
+
+</diagnoseme-rework-card>
+
+<diagnoseme-rework-card title="2. Start Next Cable">
+
+  <diagnoseme-rework-card-column column="1">
+    <button (click)="onReload()" mat-raised-button color="primary">
+      Reset Page
+    </button>
+  </diagnoseme-rework-card-column>
+
+</diagnoseme-rework-card>
