@@ -44,6 +44,20 @@
       ],
       "deb_package": "diagnoseme"
     },
+    "maui-v1.2": {
+      "title": "Maui v1.2",
+      "landing": "/maui/v1.2/testing",
+      "shipped": true,
+      "maui_utils": true,
+      "maui_device": "maui_v12",
+      "firmware": [
+        "mcu_app",
+        "mcu_full",
+        "pdc"
+      ],
+      "station_id": "MAUI_V1_2_STATION",
+      "deb_package": "diagnoseme-maui-v1.2"
+    },
     "all": {
       "title": "All (development)",
       "landing": "/maui/v1.1/provisioning",

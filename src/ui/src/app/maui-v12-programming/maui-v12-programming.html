@@ -1,0 +1,148 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<div class="maui-container">
+  <div class="header-section">
+    <h2>Maui v1.2: Programming &amp; Recovery</h2>
+    <p class="subtitle">
+      Help page for re-programming Maui v1.2 boards (ITE IT82002); this is not
+      part of the guided test flow. The MCU can be programmed in two ways:
+    </p>
+    <ul class="options">
+      <li>
+        <strong>MCU App update over USB (RW bootloader)</strong>: replaces only
+        the App; bootloaders and the serial number stay.
+      </li>
+      <li>
+        <strong>Full MCU image (1 MiB) over USB-UART with itecomdbgr</strong>:
+        rewrites the whole flash, also on a blank board; the serial number has
+        to be provisioned again.
+      </li>
+    </ul>
+  </div>
+
+  <mat-accordion multi="true" class="programming-panels">
+    <!-- MCU App (RW bootloader) -->
+    <mat-expansion-panel expanded="true">
+      <mat-expansion-panel-header>
+        <mat-panel-title>
+          <mat-icon>system_update_alt</mat-icon>&nbsp;MCU App update over USB (RW
+          bootloader)
+        </mat-panel-title>
+        <mat-panel-description>
+          maui-flash mcu --target app, App images only
+        </mat-panel-description>
+      </mat-expansion-panel-header>
+
+      <div class="panel-body">
+        <div class="form-row">
+          <mat-form-field appearance="outline">
+            <mat-label>Maui MCU</mat-label>
+            <mat-select
+              [(ngModel)]="selectedPort"
+              [disabled]="appUpdateInProgress">
+              @for (c of consoles; track c.devicePort) {
+                <mat-option [value]="c.devicePort">
+                  {{ c.devicePort }} — {{ c.serialNumber || 'no serial' }}
+                  ({{ c.stage }})
+                </mat-option>
+              }
+            </mat-select>
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>MCU App image</mat-label>
+            <mat-select
+              [(ngModel)]="selectedFile"
+              [disabled]="appUpdateInProgress">
+              @for (f of firmwareFiles; track f.path) {
+                <mat-option [value]="f.fileName">
+                  {{ f.fileName }}
+                  @if (f.isStable) {
+                    (stable {{ f.version }})
+                  } @else if (f.version) {
+                    ({{ f.version }})
+                  }
+                </mat-option>
+              }
+            </mat-select>
+          </mat-form-field>
+          <button
+            mat-stroked-button
+            [disabled]="appUpdateInProgress"
+            (click)="refresh()">
+            <mat-icon>refresh</mat-icon>
+            Refresh
+          </button>
+        </div>
+        @if (!consoles.length) {
+          <div class="hint">No Maui v1.2 MCU (18d1:5085) detected.</div>
+        }
+        @if (!firmwareFiles.length) {
+          <div class="hint">{{ firmwareMessage }}</div>
+        }
+        @if (fullImageBusy) {
+          <div class="hint">A full image flash is running.</div>
+        }
+        <button
+          mat-raised-button
+          color="primary"
+          [disabled]="
+            appUpdateInProgress || fullImageBusy || !selectedPort || !selectedFile
+          "
+          (click)="updateMcuApp()">
+          <mat-icon>bolt</mat-icon>
+          Update MCU App
+        </button>
+        @if (appUpdateInProgress || appResult !== 'NONE') {
+          <mat-progress-bar
+            mode="determinate"
+            [value]="appProgress"></mat-progress-bar>
+          <div
+            class="result"
+            [class.passed]="appResult === 'PASSED'"
+            [class.failed]="appResult === 'FAILED'">
+            {{ appStatus }}
+          </div>
+        }
+        @if (appLog.length) {
+          <pre class="tool-log">{{ appLog.join('\n') }}</pre>
+        }
+      </div>
+    </mat-expansion-panel>
+
+    <!-- MCU full image (itecomdbgr over a USB-UART bridge) -->
+    <mat-expansion-panel>
+      <mat-expansion-panel-header>
+        <mat-panel-title>
+          <mat-icon>memory</mat-icon>&nbsp;Full MCU image (1 MiB) over USB-UART
+          with itecomdbgr
+        </mat-panel-title>
+        <mat-panel-description>
+          Rewrites the whole flash, including the MCU serial
+        </mat-panel-description>
+      </mat-expansion-panel-header>
+      <div class="panel-body">
+        <app-maui-v12-full-image-panel
+          [locked]="appUpdateInProgress"
+          (busyChange)="fullImageBusy = $event"></app-maui-v12-full-image-panel>
+      </div>
+    </mat-expansion-panel>
+
+    <!-- PDC -->
+    <mat-expansion-panel expanded="true">
+      <mat-expansion-panel-header>
+        <mat-panel-title>
+          <mat-icon>power</mat-icon>&nbsp;PDC (TPS66994)
+        </mat-panel-title>
+        <mat-panel-description>
+          Over the MCU console, up to 5 boards in parallel
+        </mat-panel-description>
+      </mat-expansion-panel-header>
+      <div class="panel-body">
+        <app-maui-pdc-flash-panel [maxSlots]="5"></app-maui-pdc-flash-panel>
+      </div>
+    </mat-expansion-panel>
+  </mat-accordion>
+</div>

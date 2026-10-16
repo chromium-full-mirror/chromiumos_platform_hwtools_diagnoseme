@@ -4,11 +4,11 @@
 #
 # Release build of a single DiagnoseMe edition. Create one Cloud Build trigger
 # per shipped edition (see editions.json) and set the _EDITION substitution,
-# e.g. _EDITION=maui-v1.1. Images are tagged <edition>-<commit>; use
+# e.g. _EDITION=maui-v1.2. Images are tagged <edition>-<commit>; use
 # tools/promote.sh to move the :<edition> tag (and aliases such as :maui).
 # COMMIT_SHA is set by repository triggers; for a manual run use e.g.
 #   gcloud builds submit --config=dockerfiles/cloudbuild_release.yaml \
-#     --substitutions=_EDITION=maui-v1.1,COMMIT_SHA=$(git rev-parse HEAD) .
+#     --substitutions=_EDITION=maui-v1.2,COMMIT_SHA=$(git rev-parse HEAD) .
 
 substitutions:
   _EDITION: 'maui-v1.1'

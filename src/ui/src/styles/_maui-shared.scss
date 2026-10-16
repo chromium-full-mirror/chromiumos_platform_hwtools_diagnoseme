@@ -232,4 +232,26 @@
   }
 }
 
+// Status badges of the standalone Maui cards (serial provisioning, H2H SPI
+// check). Pages with their own badge styles do not include this.
+@mixin maui-status-badges {
+  .badge {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background-color: #f1f3f4;
+    color: #5f6368;
+    overflow-wrap: anywhere;
 
+    &.badge-active {
+      background-color: #e6f4ea;
+      color: #137333;
+    }
+
+    &.badge-fail {
+      background-color: #fce8e6;
+      color: #c5221f;
+    }
+  }
+}

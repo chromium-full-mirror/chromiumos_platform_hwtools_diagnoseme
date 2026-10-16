@@ -26,6 +26,7 @@ DOCKER_TAG="${DOCKER_TAG:-maui}"
 if [ -z "${FIRMWARE_COMPONENTS:-}" ]; then
     case "${DIAGNOSEME_EDITION:-maui-v1.1}" in
         maui-v1.1|all) FIRMWARE_COMPONENTS="mcu pdc" ;;
+        maui-v1.2) FIRMWARE_COMPONENTS="mcu_app mcu_full pdc" ;;
     esac
 fi
 FIRMWARE_COMPONENTS="${FIRMWARE_COMPONENTS:-}"
@@ -33,6 +34,7 @@ FIRMWARE_COMPONENTS="${FIRMWARE_COMPONENTS:-}"
 if [ -z "${MAUI_DEVICE:-}" ]; then
     case "${DIAGNOSEME_EDITION:-maui-v1.1}" in
         maui-v1.1|all) MAUI_DEVICE="maui_v11" ;;
+        maui-v1.2) MAUI_DEVICE="maui_v12" ;;
     esac
 fi
 MAUI_DEVICE="${MAUI_DEVICE:-}"
@@ -112,7 +114,9 @@ if [ -n "${MAUI_UTILS_IMAGE:-}" ]; then
 fi
 # Optional Maui test overrides of config.env (docker compose passes them to
 # the server only when they are exported).
-for VAR in MAUI_ADB_SIZE_MB MAUI_ADB_DEADLINE_S MAUI_ADB_MIN_RATE_MB_S; do
+for VAR in MAUI_V12_APPROVED_FW MAUI_V12_HWREVS \
+           MAUI_ITE_NO_OUTPUT_TIMEOUT_S \
+           MAUI_ADB_SIZE_MB MAUI_ADB_DEADLINE_S MAUI_ADB_MIN_RATE_MB_S; do
     if [ -n "${!VAR:-}" ]; then
         export "${VAR?}"
     fi

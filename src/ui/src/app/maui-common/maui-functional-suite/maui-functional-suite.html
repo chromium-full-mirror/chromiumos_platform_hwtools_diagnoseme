@@ -22,12 +22,12 @@
       <span class="device-status-text">
         @if (deviceConnected && deviceProgrammed) {
           <strong>Programmed Maui Device:</strong> {{ serialNumber }} (Port:
-          {{ devicePort || '/dev/ttyUSB0' }})
+          {{ devicePort || rev.defaultConsolePort }})
         } @else if (deviceConnected && !deviceProgrammed) {
           <strong>Unprogrammed Device Detected:</strong>
-          {{ serialNumber || 'Unknown' }} (FTDI PID:
-          {{ ftdiPid || '0x6001' }}) —
-          <em>Step 1 provisioning required before functional testing</em>
+          {{ serialNumber || 'Unknown' }} ({{ rev.consoleLabel }} PID:
+          {{ ftdiPid || rev.consolePidText(false) }}) —
+          <em>{{ rev.unprovisionedHint }}</em>
         } @else {
           <strong>No Maui Device Detected:</strong> Please connect Maui Host
           USB-C cable to this test station.
@@ -43,13 +43,36 @@
   </div>
 
   <div class="cards-column">
+    <!-- Serial Number Provisioning (Maui v1.2: H2H serial -> MCU) -->
+    @if (rev.requiresSerialProvisioning) {
+      <app-maui-serial-provision-card
+        cardId="func-card-serial"
+        [cardTitle]="serialCardTitle"
+        [locked]="anyTestInProgress && !serialProvisionInProgress"
+        (statusChange)="onSerialProvisionStatus($event)"
+        (runningChange)="serialProvisionInProgress = $event">
+      </app-maui-serial-provision-card>
+    }
+
+    <!-- H2H SPI Flash Access Check (Maui v1.2: serial in the H2H flash) -->
+    @if (rev.requiresH2hSpiCheck) {
+      <app-maui-h2h-spi-check-card
+        cardId="func-card-h2h-spi"
+        [cardTitle]="h2hSpiCardTitle"
+        [locked]="anyTestInProgress && !h2hSpiInProgress"
+        [serialNumber]="serialNumber"
+        [devicePort]="devicePort"
+        (statusChange)="onH2hSpiStatus($event)"
+        (runningChange)="h2hSpiInProgress = $event">
+      </app-maui-h2h-spi-check-card>
+    }
+
     <!-- Card 0: Outer Housing Barcode Verification (FATP QT0 Mode only) -->
     @if (isFatpMode) {
       <diagnoseme-rework-card
         id="func-card-0"
         title="0. Outer Housing Barcode Verification"
-        [progress]="barcodeCheckInProgress"
-        [disabled]="false">
+        [progress]="barcodeCheckInProgress">
         <diagnoseme-rework-card-column column="1">
           <div class="steps-vertical-container">
             <div class="instructions-box">
@@ -63,7 +86,7 @@
               <span class="step-num">Step 2</span>
               <span class="step-text"
                 >Verify that the scanned barcode matches the internal electronic
-                serial number (FTDI / ADB).</span
+                serial number ({{ rev.consoleLabel }} / ADB).</span
               >
             </div>
           </div>
@@ -83,7 +106,7 @@
             }
             @if (ftdiSerial) {
               <div class="info-row">
-                <span class="label">FTDI Serial:</span>
+                <span class="label">{{ rev.consoleLabel }} Serial:</span>
                 <span class="value code">{{ ftdiSerial }}</span>
               </div>
             }
@@ -142,9 +165,9 @@
     <!-- Card 1: Host USB & Console Check -->
     <diagnoseme-rework-card
       id="func-card-1"
-      title="1. Host USB & Console Verification"
+      [title]="cardNo(1) + '. Host USB & Console Verification'"
       [progress]="usbCheckInProgress"
-      [disabled]="isFatpMode && !barcodeMatches">
+      [disabled]="(isFatpMode && !barcodeMatches) || !serialCardsDone">
       <diagnoseme-rework-card-column column="1">
         <div class="steps-vertical-container">
           <div class="instructions-box">
@@ -191,7 +214,7 @@
               <span
                 class="value code"
                 [style.color]="card1HwrevOk ? '#137333' : '#c5221f'"
-                >{{ card1Hwrev }} (Expected: 2)</span
+                >{{ card1Hwrev }} (Expected: {{ card1ExpectedHwrev }})</span
               >
             </div>
           }
@@ -228,7 +251,7 @@
               <span
                 class="value code"
                 [style.color]="card1GpiosOk ? '#137333' : '#c5221f'">
-                {{ card1GpiosOk ? '19/19 Verified' : card1GpioDetails }}
+                {{ card1GpiosOk ? rev.gpioOkText(card1GpioDetails) : card1GpioDetails }}
               </span>
             </div>
           }
@@ -238,7 +261,11 @@
               mat-raised-button
               color="primary"
               class="action-btn-wide"
-              [disabled]="(isFatpMode && !barcodeMatches) || usbCheckInProgress"
+              [disabled]="
+                (isFatpMode && !barcodeMatches) ||
+                !serialCardsDone ||
+                usbCheckInProgress
+              "
               (click)="runUsbCheck()">
               <mat-icon>play_arrow</mat-icon>
               Run USB & Console Check
@@ -246,7 +273,11 @@
             <button
               mat-stroked-button
               color="warn"
-              [disabled]="(isFatpMode && !barcodeMatches) || usbCheckInProgress"
+              [disabled]="
+                (isFatpMode && !barcodeMatches) ||
+                !serialCardsDone ||
+                usbCheckInProgress
+              "
               (click)="bypassUsbCheck()">
               <mat-icon>skip_next</mat-icon>
               Bypass
@@ -263,7 +294,7 @@
     <!-- Card 2: Host Cable 180° Flip Test -->
     <diagnoseme-rework-card
       id="func-card-2"
-      title="2. Host Cable 180° Orientation Flip Test"
+      [title]="cardNo(2) + '. Host Cable 180° Orientation Flip Test'"
       [progress]="replugInProgress"
       [disabled]="!usbCheckPassed">
       <diagnoseme-rework-card-column column="1">
@@ -304,7 +335,7 @@
               <span
                 class="value code"
                 [style.color]="card2HwrevOk ? '#137333' : '#c5221f'"
-                >{{ card2Hwrev }} (Expected: 2)</span
+                >{{ card2Hwrev }} (Expected: {{ card2ExpectedHwrev }})</span
               >
             </div>
           }
@@ -335,7 +366,7 @@
               <span
                 class="value code"
                 [style.color]="card2GpiosOk ? '#137333' : '#c5221f'">
-                {{ card2GpiosOk ? '19/19 Verified' : card2GpioDetails }}
+                {{ card2GpiosOk ? rev.gpioOkText(card2GpioDetails) : card2GpioDetails }}
               </span>
             </div>
           }
@@ -378,7 +409,7 @@
     <!-- Card 3: RESET Button Test -->
     <diagnoseme-rework-card
       id="func-card-3"
-      title="3. Interactive RESET Button Test"
+      [title]="cardNo(3) + '. Interactive RESET Button Test'"
       [progress]="resetBaselineInProgress || resetVerifyInProgress"
       [disabled]="!replugPassed">
       <diagnoseme-rework-card-column column="1">
@@ -456,10 +487,10 @@
       </diagnoseme-rework-card-column>
     </diagnoseme-rework-card>
 
-    <!-- Card 4: BSL Button Test (ADC Status) -->
+    <!-- Card 4: BSL Button Test (v1.1: ADC Status, v1.2: GPIO) -->
     <diagnoseme-rework-card
       id="func-card-4"
-      title="4. Interactive BSL Button Test (ADC Status)"
+      [title]="bslCardTitle"
       [progress]="bslAdcInProgress"
       [disabled]="!resetPassed">
       <diagnoseme-rework-card-column column="1">
@@ -474,7 +505,7 @@
           <div class="instructions-box">
             <span class="step-num">Step 2</span>
             <span class="step-text"
-              >While holding, click <strong>Read BSL ADC</strong>.</span
+              >While holding, click <strong>{{ bslReadLabel }}</strong>.</span
             >
           </div>
           <div class="instructions-box">
@@ -488,10 +519,16 @@
 
       <diagnoseme-rework-card-column column="2">
         <div class="status-panel">
-          @if (peakBslMv > 0) {
+          <!-- v1.2 reads a GPIO: 0 (not pressed) is a valid reading. -->
+          @if (peakBslMv > 0 || (rev.bslMethod === 'gpio' && bslMessage)) {
             <div class="info-row">
-              <span class="label">ADC Voltage:</span>
-              <span class="value code">{{ peakBslMv }} mV (Expected &gt; 2500 mV)</span>
+              @if (rev.bslMethod === 'gpio') {
+                <span class="label">BSL GPIO:</span>
+                <span class="value code">{{ peakBslMv }} (Expected 1)</span>
+              } @else {
+                <span class="label">ADC Voltage:</span>
+                <span class="value code">{{ peakBslMv }} mV (Expected &gt; 2500 mV)</span>
+              }
             </div>
           }
           @if (bslMessage) {
@@ -511,7 +548,7 @@
               [disabled]="!resetPassed || bslAdcInProgress"
               (click)="readBslButton()">
               <mat-icon>touch_app</mat-icon>
-              Read BSL ADC
+              {{ bslReadLabel }}
             </button>
             <button
               mat-stroked-button
@@ -533,7 +570,7 @@
     <!-- Card 5: Visual LED Verification -->
     <diagnoseme-rework-card
       id="func-card-5"
-      title="5. Visual LED Verification"
+      [title]="cardNo(5) + '. Visual LED Verification'"
       [disabled]="!bslPassed">
       <diagnoseme-rework-card-column column="1">
         <div class="steps-vertical-container">
@@ -546,15 +583,15 @@
           <div class="instructions-box">
             <span class="step-num">LED 1</span>
             <span class="step-text"
-              ><strong>Amber LED (PD Contract)</strong> — Must be ON when
-              charger plugged.</span
+              ><strong>{{ rev.leds.amberName }}</strong> —
+              {{ rev.leds.amberInstruction }}</span
             >
           </div>
           <div class="instructions-box">
             <span class="step-num">LED 2</span>
             <span class="step-text"
-              ><strong>Green LED (Host Link)</strong> — Must be BLINKING at
-              1 Hz (500ms ON / 500ms OFF).</span
+              ><strong>{{ rev.leds.greenName }}</strong> —
+              {{ rev.leds.greenInstruction }}</span
             >
           </div>
           <div class="instructions-box">
@@ -571,10 +608,10 @@
         <div class="status-panel">
           <div class="led-checkbox-group">
             <mat-checkbox [(ngModel)]="ledAmberChecked" color="primary">
-              Amber LED (PD Contract) ON
+              {{ rev.leds.amberCheckLabel }}
             </mat-checkbox>
             <mat-checkbox [(ngModel)]="ledGreenChecked" color="primary">
-              Green LED (Host Link) Blinking at 1 Hz
+              {{ rev.leds.greenCheckLabel }}
             </mat-checkbox>
           </div>
           <div class="actions-wrapper" style="display: flex; gap: 8px;">
@@ -608,7 +645,7 @@
     <!-- Card 6: Host + DUT + Charger Verification (PD & Data Path) -->
     <diagnoseme-rework-card
       id="func-card-6"
-      title="6. Host + DUT + Charger Verification (PD & Data Path)"
+      [title]="cardNo(6) + '. Host + DUT + Charger Verification (PD & Data Path)'"
       [progress]="stage1InProgress"
       [disabled]="!ledPassed">
       <diagnoseme-rework-card-column column="1">
@@ -731,7 +768,7 @@
     <!-- Card 7: 180° DUT Cable Flip Polarity Verification (With Charger) -->
     <diagnoseme-rework-card
       id="func-card-7"
-      title="7. 180° DUT Cable Flip Polarity Verification (With Charger)"
+      [title]="cardNo(7) + '. 180° DUT Cable Flip Polarity Verification (With Charger)'"
       [progress]="stage2InProgress"
       [disabled]="!stage1Passed">
       <diagnoseme-rework-card-column column="1">
@@ -803,7 +840,7 @@
     <!-- Card 8: Charger Disconnect Verification (No Charger) -->
     <diagnoseme-rework-card
       id="func-card-8"
-      title="8. Charger Disconnect Verification (No Charger)"
+      [title]="cardNo(8) + '. Charger Disconnect Verification (No Charger)'"
       [progress]="stage3InProgress"
       [disabled]="!stage2Passed">
       <diagnoseme-rework-card-column column="1">
@@ -877,7 +914,7 @@
     <!-- Card 9: ADB Data Transfer Reliability -->
     <diagnoseme-rework-card
       id="func-card-adb"
-      title="9. ADB Data Transfer Reliability (DUT via H2H)"
+      [title]="cardNo(9) + '. ADB Data Transfer Reliability (DUT via H2H)'"
       [progress]="adbInProgress"
       [disabled]="!stage3Passed">
       <diagnoseme-rework-card-column column="1">
@@ -962,7 +999,7 @@
     <!-- Card 10: Log Compilation & Archival -->
     <diagnoseme-rework-card
       id="func-card-9"
-      [title]="isFatpMode ? '10. FATP QT0 Summary & Archival' : '10. SMT Log Completion & Archival'"
+      [title]="cardNo(10) + (isFatpMode ? '. FATP QT0 Summary & Archival' : '. SMT Log Completion & Archival')"
       [progress]="savingLogs || inspectingLogs"
       [disabled]="!adbPassed">
       <diagnoseme-rework-card-column column="1">

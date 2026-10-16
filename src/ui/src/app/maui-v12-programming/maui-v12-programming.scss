@@ -1,0 +1,70 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+@import '../../styles/maui-shared';
+
+.programming-panels {
+  display: block;
+  margin-top: 12px;
+}
+
+.options {
+  margin: 4px 0 0;
+  padding-left: 22px;
+  color: #3c4043;
+
+  li {
+    line-height: 1.6;
+  }
+}
+
+.panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+
+  mat-progress-bar {
+    width: 100%;
+  }
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+
+  mat-form-field {
+    min-width: 320px;
+  }
+}
+
+.hint {
+  color: #5f6368;
+  font-style: italic;
+}
+
+.result {
+  font-weight: 500;
+
+  &.passed {
+    color: #137333;
+  }
+
+  &.failed {
+    color: #c5221f;
+  }
+}
+
+.tool-log {
+  width: 100%;
+  max-height: 240px;
+  overflow: auto;
+  background: #202124;
+  color: #e8eaed;
+  font-size: 11px;
+  padding: 8px;
+  border-radius: 4px;
+}

@@ -189,7 +189,7 @@ fi
 # 2. Maui firmware: local dist/firmware, then the current versions from GCS
 echo "[2/4] Preparing Maui firmware (copying local dist/firmware)..."
 # The edition's firmware components (editions.json), e.g. mcu+pdc for
-# maui-v1.1.
+# v1.1 and mcu_app+mcu_full+pdc for v1.2.
 for COMP in ${FW_COMPONENTS}; do
     if [ -d "${PROJECT_ROOT}/dist/firmware/${COMP}" ]; then
         cp -r "${PROJECT_ROOT}/dist/firmware/${COMP}/"* "${BUNDLE_DIR}/firmware/${COMP}/" 2>/dev/null || true

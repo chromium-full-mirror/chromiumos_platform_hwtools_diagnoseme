@@ -1,0 +1,57 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<div class="pdc-panel">
+  <div class="pdc-toolbar">
+    <span class="pdc-discovery">{{
+      discovering ? 'Scanning for Maui boards...' : discoveryMessage
+    }}</span>
+    <button
+      mat-stroked-button
+      [disabled]="discovering || anyFlashing"
+      (click)="discover()">
+      <mat-icon>refresh</mat-icon>
+      Rescan
+    </button>
+    <button
+      mat-raised-button
+      color="primary"
+      [disabled]="!slots.length || anyFlashing"
+      (click)="flashAll()">
+      <mat-icon>bolt</mat-icon>
+      Flash All ({{ slots.length }})
+    </button>
+  </div>
+
+  @if (!slots.length && !discovering) {
+    <div class="pdc-empty">
+      No Maui board detected (up to {{ maxSlots }} boards are supported).
+    </div>
+  }
+
+  @for (slot of slots; track slot.slotIndex) {
+    <div
+      class="pdc-slot"
+      [class.passed]="slot.state === 'PASSED'"
+      [class.failed]="slot.state === 'FAILED'">
+      <div class="pdc-slot-header">
+        <strong>Slot {{ slot.slotIndex }}</strong>
+        <span class="code">{{ slot.serialNumber || 'Unknown serial' }}</span>
+        <span class="code">{{ slot.devicePort }}</span>
+        <button
+          mat-stroked-button
+          [disabled]="slot.state === 'FLASHING'"
+          (click)="flash(slot)">
+          <mat-icon>memory</mat-icon>
+          Flash
+        </button>
+      </div>
+      <mat-progress-bar
+        mode="determinate"
+        [value]="slot.progressPercent"></mat-progress-bar>
+      <div class="pdc-slot-status">{{ slot.statusMessage }}</div>
+    </div>
+  }
+</div>

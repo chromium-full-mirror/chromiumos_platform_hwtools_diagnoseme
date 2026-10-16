@@ -120,6 +120,7 @@ BUCKET_CONTENT = {
     "pdc-fw/v20_0325/stable.pdcfw": b"",
     "pdc-fw/v20_0325_100W/v20_0325_100W.bin": b"pdc v20 100W",
     "pdc-fw/v20_0325_100W/stable.maui_v11.pdcfw": b"",
+    "pdc-fw/v20_0325_100W/stable.maui_v12.pdcfw": b"",
 }
 
 
@@ -277,6 +278,31 @@ class TestMain(FetchTestCase):
         mode = os.stat(os.path.join(self.dest, "pdc", "STABLE.json")).st_mode
         self.assertEqual(mode & 0o777, 0o644)
 
+    def test_v12_components_share_one_version_directory(self):
+        v12 = "mcu-fw/maui_v12/0.69-89b053b/"
+        self.gcs.objects.update(
+            {
+                v12 + "maui_app_signed.bin": b"app",
+                v12 + "maui_full_flash_1mb.bin": b"F" * (1024 * 1024),
+                v12 + "maui_rw_bootloader_signed.bin": b"rw",
+                v12 + "stable.maui_v12.mcufw": b"",
+            }
+        )
+        status, _, _ = self.run_main("mcu_app", "mcu_full", "pdc", device="maui_v12")
+        self.assertEqual(status, fw_fetch.EXIT_OK)
+        self.assertEqual(self.read("mcu_app", "maui_app_signed.bin"), b"app")
+        self.assertEqual(self.manifest("mcu_full")["version"], "0.69-89b053b")
+        self.assertEqual(
+            sorted(os.listdir(os.path.join(self.dest, "mcu_full"))),
+            ["STABLE.json", "maui_full_flash_1mb.bin"],
+        )
+        self.assertEqual(self.manifest("pdc")["file"], "v20_0325_100W.bin")
+
+    def test_v12_without_marker_only_warns(self):
+        status, _, err = self.run_main("mcu_app", "pdc", device="maui_v12")
+        self.assertEqual(status, fw_fetch.EXIT_OK)
+        self.assertIn("mcu_app: no 'stable.maui_v12.mcufw' marker", err)
+
     def test_identical_file_is_not_downloaded_again(self):
         self.run_main("mcu")
         self.gcs.requests.clear()
@@ -349,9 +375,9 @@ class TestMain(FetchTestCase):
 
     def test_unsafe_payload_name_is_rejected(self):
         self.gcs.objects["pdc-fw/v21 x;rm/v21 x;rm.bin"] = b"x"
-        self.gcs.objects["pdc-fw/v21 x;rm/stable.maui_v11.pdcfw"] = b""
-        del self.gcs.objects["pdc-fw/v20_0325_100W/stable.maui_v11.pdcfw"]
-        status, _, err = self.run_main("pdc")
+        self.gcs.objects["pdc-fw/v21 x;rm/stable.maui_v12.pdcfw"] = b""
+        del self.gcs.objects["pdc-fw/v20_0325_100W/stable.maui_v12.pdcfw"]
+        status, _, err = self.run_main("pdc", device="maui_v12")
         self.assertEqual(status, fw_fetch.EXIT_FAILED)
         self.assertIn("unsafe file name", err)
         self.assertFalse(os.path.exists(os.path.join(self.dest, "pdc")))
@@ -439,6 +465,11 @@ class TestComponentTable(unittest.TestCase):
         for edition_id, meta in editions.items():
             for component in meta.get("firmware", []):
                 self.assertIn(component, fw_fetch.COMPONENTS, edition_id)
+            if meta.get("firmware"):
+                self.assertRegex(meta.get("maui_device", ""), "^maui_v[0-9]+$")
+
+    def test_v12_full_image_must_be_1_mib(self):
+        self.assertEqual(fw_fetch.COMPONENTS["mcu_full"].size, 1024 * 1024)
 
     def test_payloads_are_unique(self):
         payloads = {(c.gcs_dir, c.payload) for c in fw_fetch.COMPONENTS.values()}

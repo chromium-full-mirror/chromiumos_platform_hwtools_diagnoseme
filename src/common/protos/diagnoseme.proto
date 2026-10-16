@@ -25,9 +25,9 @@ message GetLogsResponse {
 message GetStationConfigRequest {}
 
 message StationConfig {
-  string edition = 1;              // e.g. "maui-v1.1"
-  string title = 2;                // e.g. "Maui v1.1"
+  string edition = 1;              // e.g. "maui-v1.2"
+  string title = 2;                // e.g. "Maui v1.2"
   repeated string services = 3;    // Registered gRPC service names
-  string maui_hw_rev = 4;          // e.g. "v1.1"; "" for non-Maui editions
+  string maui_hw_rev = 4;          // "v1.1" / "v1.2" / "" for non-Maui editions
   string station_id = 5;           // STATION_ID from config.env (optional)
 }

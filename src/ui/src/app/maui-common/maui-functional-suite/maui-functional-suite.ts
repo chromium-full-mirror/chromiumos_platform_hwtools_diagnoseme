@@ -39,6 +39,15 @@ import {
   MauiAdbTransferTestResponse,
   MauiLogFileInfo,
 } from '../../../proto/maui-manufacturing.pb';
+import {MauiHwRev, MauiHwRevProfile, mauiHwRevProfile} from '../maui-hw-rev';
+import {
+  MauiSerialProvisionCardComponent,
+  MauiSerialProvisionStatus,
+} from '../maui-serial-provision-card/maui-serial-provision-card';
+import {
+  MauiH2hSpiCheckCardComponent,
+  MauiH2hSpiCheckStatus,
+} from '../maui-h2h-spi-check-card/maui-h2h-spi-check-card';
 
 @Component({
   selector: 'app-maui-functional-suite',
@@ -55,6 +64,8 @@ import {
     MatFormFieldModule,
     MatIconModule,
     MatInputModule,
+    MauiH2hSpiCheckCardComponent,
+    MauiSerialProvisionCardComponent,
     TestPassFailButton,
   ],
 })
@@ -65,6 +76,8 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     'System-level functional testing for Maui hardware verification.';
   @Input() nextStageRoute = '/maui/v1.1/labeling';
   @Input() nextStageLabel = 'Go to Next Stage';
+  /** Hardware revision of the board under test (texts and extra cards). */
+  @Input() hwRev: MauiHwRev = 'v1.1';
 
   private readonly mauiService = inject(MauiStation2Service);
   private readonly deviceMgmtService = inject(MauiDeviceMgmtService);
@@ -116,6 +129,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
   hostOrientation = '';
   card1Hwrev: number | null = null;
   card1HwrevOk = false;
+  card1ExpectedHwrev = '';
   card1TempC: number | null = null;
   card1TempOk = false;
   card1GpiosOk = false;
@@ -134,6 +148,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
   card2Orientation = '';
   card2Hwrev: number | null = null;
   card2HwrevOk = false;
+  card2ExpectedHwrev = '';
   card2TempC: number | null = null;
   card2TempOk = false;
   card2GpiosOk = false;
@@ -194,6 +209,24 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
 
   // Card 8: Charger Disconnect Verification (No Charger)
   stage3InProgress = false;
+
+  /** True while any card of the suite is running. */
+  get anyTestInProgress(): boolean {
+    return (
+      this.barcodeCheckInProgress ||
+      this.usbCheckInProgress ||
+      this.replugInProgress ||
+      this.resetBaselineInProgress ||
+      this.resetVerifyInProgress ||
+      this.bslAdcInProgress ||
+      this.stage1InProgress ||
+      this.stage2InProgress ||
+      this.stage3InProgress ||
+      this.adbInProgress ||
+      this.serialProvisionInProgress ||
+      this.h2hSpiInProgress
+    );
+  }
   stage3Passed = false;
   stage3StatusValue: 'NOT_RUN' | 'PASSED' | 'FAILED' | 'BYPASSED' = 'NOT_RUN';
   chargerDisconnected = false;
@@ -252,6 +285,119 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
 
   get isFatpMode(): boolean {
     return this.mode === 'fatp_qt0';
+  }
+
+  get rev(): MauiHwRevProfile {
+    return mauiHwRevProfile(this.hwRev);
+  }
+
+  // Serial Number Provisioning (Maui v1.2 only)
+  serialProvisionStatus: MauiSerialProvisionStatus = 'NOT_RUN';
+  serialProvisionInProgress = false;
+  /** Last result of the serial card (logged when it is bypassed). */
+  private serialProvisionLastResult = '';
+
+  /** True when the serial card is not needed or passed / was bypassed. */
+  get serialStepDone(): boolean {
+    return (
+      !this.rev.requiresSerialProvisioning ||
+      this.serialProvisionStatus === 'PASSED' ||
+      this.serialProvisionStatus === 'BYPASSED'
+    );
+  }
+
+  // H2H SPI Flash Access Check (Maui v1.2 only)
+  h2hSpiStatus: MauiH2hSpiCheckStatus = 'NOT_RUN';
+  h2hSpiSerial = '';
+  h2hSpiInProgress = false;
+  /** Last result of the H2H SPI card (logged when it is bypassed). */
+  private h2hSpiLastResult = '';
+
+  /** True when the H2H SPI card is not needed or passed / was bypassed. */
+  get h2hSpiStepDone(): boolean {
+    return (
+      !this.rev.requiresH2hSpiCheck ||
+      this.h2hSpiStatus === 'PASSED' ||
+      this.h2hSpiStatus === 'BYPASSED'
+    );
+  }
+
+  /** Card 1 and the rest of the suite need the v1.2 serial cards done. */
+  get serialCardsDone(): boolean {
+    return this.serialStepDone && this.h2hSpiStepDone;
+  }
+
+  /** Number shown for functional card |n| (1 = Host USB & Console). */
+  cardNo(n: number): number {
+    return n + this.rev.cardNumberOffset;
+  }
+
+  /** v1.2: the serial and H2H SPI cards come first ("1." and "2."). */
+  get serialCardTitle(): string {
+    return `${this.cardNo(-1)}. Serial Number Provisioning (H2H → MCU)`;
+  }
+
+  get h2hSpiCardTitle(): string {
+    return `${this.cardNo(0)}. H2H Flash Access Check (SPI)`;
+  }
+
+  get bslCardTitle(): string {
+    return this.rev.bslMethod === 'gpio'
+      ? `${this.cardNo(4)}. Interactive BSL Button Test (GPIO)`
+      : `${this.cardNo(4)}. Interactive BSL Button Test (ADC Status)`;
+  }
+
+  get bslReadLabel(): string {
+    return this.rev.bslMethod === 'gpio' ? 'Read BSL Button' : 'Read BSL ADC';
+  }
+
+  onSerialProvisionStatus(event: {
+    status: MauiSerialProvisionStatus;
+    serial: string;
+    message?: string;
+  }): void {
+    this.serialProvisionStatus = event.status;
+    if (event.status === 'BYPASSED') {
+      this.logBypass(
+        'mcu_serial_provisioning',
+        'MCU Serial Provisioning',
+        this.serialProvisionLastResult,
+      );
+    } else {
+      this.serialProvisionLastResult = event.message ?? '';
+    }
+    if (event.serial && event.status === 'PASSED') {
+      this.serialNumber = event.serial;
+      this.lastTestedSerial = event.serial;
+    }
+    if (this.serialStepDone) {
+      autoAdvanceToCard(
+        this.h2hSpiStepDone ? 'func-card-1' : 'func-card-h2h-spi',
+      );
+    }
+    this.cdr.detectChanges();
+  }
+
+  onH2hSpiStatus(event: {
+    status: MauiH2hSpiCheckStatus;
+    serial: string;
+    message?: string;
+  }): void {
+    this.h2hSpiStatus = event.status;
+    this.h2hSpiSerial = event.serial;
+    if (event.status === 'BYPASSED') {
+      this.logBypass(
+        'h2h_spi_check',
+        'H2H SPI Flash Access',
+        this.h2hSpiLastResult,
+      );
+    } else {
+      this.h2hSpiLastResult = event.message ?? '';
+    }
+    if (this.serialCardsDone) {
+      autoAdvanceToCard('func-card-1');
+    }
+    this.cdr.detectChanges();
   }
 
   ngOnInit(): void {
@@ -325,7 +471,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
               if (this.deviceProgrammed) {
                 this.statusMessage = `Connected Maui Device: ${this.serialNumber || this.lastTestedSerial} (${this.devicePort})`;
               } else {
-                this.statusMessage = `Unprogrammed Device Detected: ${this.serialNumber || 'Unknown'} (FTDI PID: ${this.ftdiPid}) — Step 1 provisioning required`;
+                this.statusMessage = `Unprogrammed Device Detected: ${this.serialNumber || 'Unknown'} (${this.rev.consoleLabel} PID: ${this.ftdiPid}) — ${this.rev.unprovisionedHint}`;
               }
             } else {
               this.statusMessage =
@@ -343,7 +489,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
       .subscribe(res => {
         this.deviceConnected = res.isConnected;
         this.serialNumber = res.serialNumber;
-        this.devicePort = res.devicePort || '/dev/ttyUSB0';
+        this.devicePort = res.devicePort || this.rev.defaultConsolePort;
         this.deviceProgrammed = !!res.ftdiIsProgrammed;
         this.ftdiPid = res.ftdiPid ? '0x' + res.ftdiPid.toString(16) : '';
         this.adbSerial = res.adbSerial;
@@ -450,6 +596,8 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           this.card1Hwrev =
             res.detectedHwrev !== undefined ? res.detectedHwrev : null;
           this.card1HwrevOk = res.hwrevOk;
+          this.card1ExpectedHwrev =
+            res.expectedHwrev || this.rev.expectedHwrevText;
           this.card1TempC =
             res.temperatureC !== undefined ? res.temperatureC : null;
           this.card1TempOk = res.tempOk;
@@ -538,6 +686,8 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           this.card2Hwrev =
             res.detectedHwrev !== undefined ? res.detectedHwrev : null;
           this.card2HwrevOk = res.hwrevOk;
+          this.card2ExpectedHwrev =
+            res.expectedHwrev || this.rev.expectedHwrevText;
           this.card2TempC =
             res.temperatureC !== undefined ? res.temperatureC : null;
           this.card2TempOk = res.tempOk;
@@ -753,7 +903,10 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
             this.bslStatus.showFailed();
             this.dialogService.openFailure(
               'BSL Button Test Failed',
-              res.message || 'BSL ADC voltage did not rise above threshold.',
+              res.message ||
+                (this.rev.bslMethod === 'gpio'
+                  ? 'BSL button GPIO did not read pressed.'
+                  : 'BSL ADC voltage did not rise above threshold.'),
               () => this.readBslButton(),
               () => {
                 this.bslPassed = true;
@@ -809,7 +962,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
       this.ledStatus.showFailed();
       this.dialogService.openFailure(
         'LED Verification Incomplete',
-        'Please visually inspect and confirm Amber LED is ON and Green LED is BLINKING at 1 Hz.',
+        this.rev.leds.incompleteMessage,
         () => {},
         () => {
           this.ledAmberChecked = true;
@@ -1209,6 +1362,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     const phaseTag = this.isFatpMode ? 'FATP_QT0' : 'SMT_FUNCTIONAL';
     const allPassed =
       (!this.isFatpMode || this.barcodeMatches) &&
+      this.serialCardsDone &&
       this.usbCheckPassed &&
       this.replugPassed &&
       this.resetPassed &&
@@ -1233,22 +1387,32 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
       (this.isFatpMode
         ? `Outer Barcode Scanned: ${this.scannedBarcode}\n`
         : '') +
-      `Card 1 (Host USB & Console): ${this.usbStatusValue}\n` +
+      (this.rev.requiresSerialProvisioning
+        ? `Card ${this.cardNo(-1)} (Serial Provisioning): ${this.serialProvisionStatus}\n`
+        : '') +
+      (this.rev.requiresH2hSpiCheck
+        ? `Card ${this.cardNo(0)} (H2H SPI Flash Access): ${this.h2hSpiStatus}` +
+          (this.h2hSpiSerial ? ` (SPI serial ${this.h2hSpiSerial})` : '') +
+          '\n'
+        : '') +
+      `Card ${this.cardNo(1)} (Host USB & Console): ${this.usbStatusValue}\n` +
       `  MCU FW: ${this.mcuVersionStr}, PDC AppConfig: ${this.pdcAppConfigStr}\n` +
       `  HW Revision: ${this.card1Hwrev ?? 'N/A'} (${this.card1HwrevOk ? 'PASS' : 'FAIL'}), Temp: ${this.card1TempC?.toFixed(1) ?? 'N/A'}°C (${this.card1TempOk ? 'PASS' : 'FAIL'})\n` +
       `  GPIO Verification: ${this.card1GpiosOk ? 'PASS' : 'FAIL (' + this.card1GpioDetails + ')'}\n` +
       `  Voltage Verification: ${this.card1VoltagesOk ? 'PASS' : 'FAIL (' + this.card1VoltageDetails + ')'}\n` +
-      `Card 2 (Host 180° Flip): ${this.replugStatusValue} (${this.card1Orientation} -> ${this.card2Orientation})\n` +
+      `Card ${this.cardNo(2)} (Host 180° Flip): ${this.replugStatusValue} (${this.card1Orientation} -> ${this.card2Orientation})\n` +
       `  HW Revision: ${this.card2Hwrev ?? 'N/A'} (${this.card2HwrevOk ? 'PASS' : 'FAIL'}), Temp: ${this.card2TempC?.toFixed(1) ?? 'N/A'}°C (${this.card2TempOk ? 'PASS' : 'FAIL'})\n` +
       `  GPIO Verification: ${this.card2GpiosOk ? 'PASS' : 'FAIL (' + this.card2GpioDetails + ')'}\n` +
       `  Voltage Verification: ${this.card2VoltagesOk ? 'PASS' : 'FAIL (' + this.card2VoltageDetails + ')'}\n` +
-      `Card 3 (RESET Button): ${this.resetStatusValue}\n` +
-      `Card 4 (BSL Button ADC): ${this.bslStatusValue} (Peak BSL: ${this.peakBslMv} mV)\n` +
-      `Card 5 (Visual LEDs): ${this.ledStatusValue} (Amber=${this.ledAmberChecked}, Green_1Hz=${this.ledGreenChecked})\n` +
-      `Card 6 (Host+DUT+Charger): ${this.stage1StatusValue} (H2H=${this.h2hLinkSpeed}, PD=${this.negotiatedVoltage}V/${this.calculatedPowerW}W, CCD EC/GSC=${this.ecUartOk && this.gscUartOk})\n` +
-      `Card 7 (180° SBU Flip): ${this.stage2StatusValue} (DUT SBU Orientation=${this.dutOrientation})\n` +
-      `Card 8 (Charger Disconnected): ${this.stage3StatusValue} (Disconnected=${this.chargerDisconnected})\n` +
-      `Card 9 (ADB Transfer, two ~400 MB random files, must finish within 60 s): ${this.adbStatusValue} (${adbDetails})\n` +
+      `Card ${this.cardNo(3)} (RESET Button): ${this.resetStatusValue}\n` +
+      (this.rev.bslMethod === 'gpio'
+        ? `Card ${this.cardNo(4)} (BSL Button GPIO): ${this.bslStatusValue} (BSL GPIO: ${this.peakBslMv})\n`
+        : `Card ${this.cardNo(4)} (BSL Button ADC): ${this.bslStatusValue} (Peak BSL: ${this.peakBslMv} mV)\n`) +
+      `Card ${this.cardNo(5)} (Visual LEDs): ${this.ledStatusValue} (Amber=${this.ledAmberChecked}, Green_1Hz=${this.ledGreenChecked})\n` +
+      `Card ${this.cardNo(6)} (Host+DUT+Charger): ${this.stage1StatusValue} (H2H=${this.h2hLinkSpeed}, PD=${this.negotiatedVoltage}V/${this.calculatedPowerW}W, CCD EC/GSC=${this.ecUartOk && this.gscUartOk})\n` +
+      `Card ${this.cardNo(7)} (180° SBU Flip): ${this.stage2StatusValue} (DUT SBU Orientation=${this.dutOrientation})\n` +
+      `Card ${this.cardNo(8)} (Charger Disconnected): ${this.stage3StatusValue} (Disconnected=${this.chargerDisconnected})\n` +
+      `Card ${this.cardNo(9)} (ADB Transfer, two ~400 MB random files, must finish within 60 s): ${this.adbStatusValue} (${adbDetails})\n` +
       `OVERALL RESULT: ${allPassed ? 'PASS' : 'FAIL'}\n`;
 
     const logFileName = this.isFatpMode

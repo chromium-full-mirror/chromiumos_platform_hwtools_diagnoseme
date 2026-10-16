@@ -96,6 +96,177 @@ service MauiDeviceManagement {
   rpc submit_final_manufacturing_results(MauiFinalSubmissionRequest) returns (MauiFinalSubmissionResponse) {}
 }
 
+// ==========================================
+// MAUI v1.2 (ITE IT82002, native USB CDC-ACM 18d1:5085) MCU SERVICES
+// ==========================================
+service MauiMcuService {
+  // Enumeration status of the connected board (MCU console + H2H bridge).
+  rpc get_unit_status(google.protobuf.Empty) returns (MauiUnitStatusResponse) {}
+
+  // Copies the H2H serial into the MCU (serial set + reboot + re-enumeration).
+  rpc provision_mcu_serial(MauiProvisionSerialRequest) returns (MauiProvisionSerialResponse) {}
+
+  // Reads the unit serial from the H2H SPI flash through the MCU console
+  // (h2h_flash acquire/id/read/release) and compares it with the H2H iSerial
+  // before and after the bridge re-enumerates. Approved MCU App builds only.
+  rpc check_h2h_spi_serial(MauiH2hSpiCheckRequest) returns (MauiH2hSpiCheckResponse) {}
+
+  // Lists firmware files available on the station for a component.
+  rpc list_firmware(MauiListFirmwareRequest) returns (MauiListFirmwareResponse) {}
+
+  // Updates the MCU App through the RW bootloader (maui-flash mcu --target app).
+  rpc update_mcu_app(MauiMcuUpdateRequest) returns (stream MauiMcuUpdateProgress) {}
+
+  // Writes the whole 1 MiB MCU flash with itecomdbgr over an external
+  // USB-UART bridge (ITE UART DBGR). Also erases the MCU serial number.
+  rpc update_mcu_full_image(MauiMcuFullImageRequest) returns (stream MauiMcuFullImageProgress) {}
+
+  // USB-UART bridges that update_mcu_full_image can use (sysfs scan).
+  rpc list_uart_bridges(google.protobuf.Empty) returns (MauiUartBridgesResponse) {}
+}
+
+message MauiMcuConsoleInfo {
+  string device_port = 1;   // e.g. /dev/ttyACM0
+  string serial_number = 2; // USB iSerial
+  string product = 3;       // USB iProduct
+  string stage = 4;         // app | rw_bootloader | ro_bootloader | unknown
+  string usb_path = 5;
+}
+
+message MauiUnitStatusResponse {
+  bool mcu_detected = 1;
+  MauiMcuConsoleInfo mcu = 2;
+  bool h2h_detected = 3;
+  string h2h_serial = 4;
+  string h2h_product = 5;
+  uint32 h2h_pid = 6;
+  bool h2h_serial_valid = 7;
+  bool serials_match = 8;
+  string mcu_version = 9;
+  int32 hwrev = 10;
+  string mcu_nvs_serial = 11;
+  bool hub_usb2_detected = 12;
+  bool hub_usb3_detected = 13;
+  repeated MauiMcuConsoleInfo consoles = 14;
+  string message = 15;
+  // The MCU console is being read in the background; mcu_version, hwrev and
+  // mcu_nvs_serial follow in a later poll. All other fields come from sysfs.
+  bool console_pending = 16;
+}
+
+message MauiProvisionSerialRequest {
+  string expected_serial = 1; // Optional: must equal the H2H serial.
+}
+
+message MauiProvisionSerialResponse {
+  bool success = 1;
+  bool already_provisioned = 2;
+  string h2h_serial = 3;
+  string previous_mcu_serial = 4;
+  string mcu_serial = 5;
+  string device_port = 6;
+  double reenumeration_s = 7;
+  string message = 8;
+  string log = 9;
+}
+
+message MauiH2hSpiCheckRequest {
+  string serial_number = 1; // Used for logs; empty: the H2H serial.
+  string device_port = 2;   // MCU console; empty: first MCU App console.
+}
+
+message MauiH2hSpiCheckResponse {
+  bool success = 1;
+  // False when the MCU App cannot access the H2H SPI flash safely (not an
+  // approved build, or no `Size:` line in `h2h_flash id`): update the MCU App.
+  bool firmware_supported = 2;
+  string host_serial_before = 3; // H2H iSerial before the check
+  string spi_serial = 4;         // Serial string descriptor in the SPI flash
+  string host_serial_after = 5;  // H2H iSerial after the bridge re-enumerated
+  string jedec_id = 6;           // e.g. "0x852013"
+  string flash_size = 7;         // e.g. "512 KB"
+  string message = 8;
+  string log = 9;
+}
+
+message MauiListFirmwareRequest {
+  string component = 1; // mcu_app | mcu_full | pdc
+}
+
+message MauiFirmwareFile {
+  string component = 1;
+  string file_name = 2;
+  string path = 3;
+  int64 size_bytes = 4;
+  int64 expected_size_bytes = 5; // Required size (mcu_full: 1 MiB), 0: any.
+  bool is_stable = 6;            // Named by the component's STABLE.json.
+  string version = 7;            // From STABLE.json or the file name, or empty.
+}
+
+message MauiListFirmwareResponse {
+  repeated MauiFirmwareFile files = 1;
+  string message = 2;
+}
+
+message MauiMcuUpdateRequest {
+  string device_port = 1;   // Empty: first detected MCU.
+  string serial_number = 2; // Used for logs.
+  string file_name = 3;     // From list_firmware; empty: newest file.
+}
+
+message MauiMcuUpdateProgress {
+  bool is_complete = 1;
+  bool success = 2;
+  int32 progress_percent = 3;
+  string status_message = 4;
+  string error_message = 5;
+  string log_line = 6;
+  string mcu_version = 7;
+}
+
+message MauiMcuFullImageRequest {
+  string uart_port = 1; // From list_uart_bridges (dev node or by-id); empty: default.
+  string file_name = 2; // From list_firmware(mcu_full); empty: newest file.
+  bool verify = 3;      // Blank check + read-back verify (about twice as long).
+  uint32 baud = 4;      // 115200 (default when 0) or 3000000.
+}
+
+message MauiMcuFullImageProgress {
+  bool is_complete = 1;
+  bool success = 2;
+  int32 progress_percent = 3; // Overall; 100 only after the App enumerated.
+  // connecting | erasing | checking | programming | verifying | rebooting |
+  // done | failed
+  string phase = 4;
+  int32 phase_percent = 5;    // itecomdbgr progress of the current phase.
+  string status_message = 6;
+  string error_message = 7;
+  string log_line = 8;
+  string mcu_version = 9;     // App version read after the flash.
+  string mcu_serial = 10;     // USB iSerial of the new App (NVS erased).
+  double elapsed_s = 11;
+}
+
+message MauiUartBridge {
+  string device_port = 1;      // e.g. /dev/ttyUSB0
+  string by_id = 2;            // /dev/serial/by-id/... or empty
+  string driver = 3;           // ftdi_sio | cp210x | cdc_acm | pl2303 | ch341
+  uint32 vid = 4;
+  uint32 pid = 5;
+  string manufacturer = 6;
+  string product = 7;
+  string serial_number = 8;
+  string usb_path = 9;         // e.g. 1-2.3
+  uint32 interface_number = 10;
+  string label = 11;
+}
+
+message MauiUartBridgesResponse {
+  repeated MauiUartBridge bridges = 1; // Preferred order, default first.
+  string default_port = 2;
+  string message = 3;
+}
+
 // Data Messages
 message MauiBslDiscoveryResponse {
   bool bsl_detected = 1;
@@ -229,6 +400,7 @@ message MauiHostOnlyTestResponse {
   int32 chg_vbus_mv = 26;
   string gpio_details = 27;
   string voltage_details = 28;
+  string expected_hwrev = 29;    // Accepted `hwrev` values as shown to the operator
 }
 
 message MauiAdbTransferTestRequest {
@@ -395,6 +567,7 @@ message MauiHostReplugTestResponse {
   int32 chg_vbus_mv = 19;
   string gpio_details = 20;
   string voltage_details = 21;
+  string expected_hwrev = 22;    // Accepted `hwrev` values as shown to the operator
 }
 
 // Reset Button Test Messages
@@ -525,5 +698,3 @@ message MauiReadSerialResponse {
   int32 ftdi_pid = 13;            // e.g. 0x6001 (unprogrammed) or 0x6002 (programmed)
   bool ftdi_is_programmed = 14;   // True exclusively when ftdi_pid == 0x6002
 }
-
-

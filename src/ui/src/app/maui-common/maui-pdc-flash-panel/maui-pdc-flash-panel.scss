@@ -1,0 +1,61 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+.pdc-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pdc-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .pdc-discovery {
+    flex: 1;
+    color: #5f6368;
+  }
+}
+
+.pdc-empty {
+  color: #5f6368;
+  font-style: italic;
+}
+
+.pdc-slot {
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  padding: 8px 12px;
+
+  &.passed {
+    border-color: #137333;
+    background-color: #e6f4ea;
+  }
+
+  &.failed {
+    border-color: #c5221f;
+    background-color: #fce8e6;
+  }
+}
+
+.pdc-slot-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+
+  button {
+    margin-left: auto;
+  }
+}
+
+.pdc-slot-status {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.code {
+  font-family: 'Roboto Mono', monospace;
+}

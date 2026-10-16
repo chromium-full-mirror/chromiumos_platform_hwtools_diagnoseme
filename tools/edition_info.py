@@ -10,7 +10,7 @@ Examples:
   tools/edition_info.py get maui-v1.1 landing     # single field
   tools/edition_info.py get maui-v1.1 docker_tags # edition id + aliases
   tools/edition_info.py get maui-v1.1 deb_conflicts # other editions' debs
-  tools/edition_info.py validate maui-v1.1        # exit 1 when unknown
+  tools/edition_info.py validate maui-v1.2        # exit 1 when unknown
   tools/edition_info.py render-config maui-v1.1 config.env \
       --bundled-maui-utils 0.0.1-69-89b053b      # specialise a config.env
 """

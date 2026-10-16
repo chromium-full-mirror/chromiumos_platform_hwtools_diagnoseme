@@ -98,6 +98,14 @@
                 }
               ]
             },
+            "maui-v1.2": {
+              "fileReplacements": [
+                {
+                  "replace": "src/app/editions/active-edition.ts",
+                  "with": "src/app/editions/active-edition.maui-v1.2.ts"
+                }
+              ]
+            },
             "development": {
               "optimization": false,
               "extractLicenses": false,

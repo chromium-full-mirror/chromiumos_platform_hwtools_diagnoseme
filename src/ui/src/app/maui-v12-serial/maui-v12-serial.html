@@ -1,0 +1,241 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<app-maui-step3-labeling
+  hwRev="v1.2"
+  pageTitle="Maui v1.2: Enumeration Status, Serial Number & Barcode">
+  <!-- Card 0: USB enumeration (sysfs) and MCU console readout -->
+  <diagnoseme-rework-card
+    id="v12-status-card"
+    title="0. Enumeration Status"
+    [progress]="!status && !error"
+    [disabled]="false">
+    <diagnoseme-rework-card-column column="1">
+      <div class="steps-vertical-container">
+        <div class="instructions-box">
+          <span class="step-num">Step 1</span>
+          <span class="step-text"
+            >Connect the Maui <strong>Host USB-C port</strong> to the test station. The unit is detected
+            automatically.</span
+          >
+        </div>
+        <div class="instructions-box">
+          <span class="step-num">Check</span>
+          <span class="step-text"
+            >The MCU console (18d1:5085) and the H2H bridge must enumerate with the same, valid serial
+            number.</span
+          >
+        </div>
+      </div>
+    </diagnoseme-rework-card-column>
+
+    <diagnoseme-rework-card-column column="2">
+      <div class="status-panel">
+        <div class="info-row" id="v12-mcu-detected">
+          <span class="label">MCU Console:</span>
+          <span class="badge" [class.badge-active]="status?.mcuDetected" [class.badge-fail]="!status?.mcuDetected">{{
+            status?.mcuDetected ? 'Detected' : 'Not detected'
+          }}</span>
+        </div>
+        @if (status?.mcuDetected) {
+          <div class="info-row">
+            <span class="label">Port / Stage:</span>
+            <span class="value code">{{ status?.mcu?.devicePort }} ({{ status?.mcu?.stage }})</span>
+          </div>
+          <div class="info-row" id="v12-mcu-serial">
+            <span class="label">MCU USB Serial:</span>
+            <span class="value code">{{ status?.mcu?.serialNumber || '-' }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">MCU NVS Serial:</span>
+            <span class="value code">{{ consoleText(status?.mcuNvsSerial) }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">FW Version / HW Rev:</span>
+            <span class="value code"
+              >{{ consoleText(status?.mcuVersion) }} / {{ consoleText(hwrevText) }}</span
+            >
+          </div>
+        }
+        <div class="info-row" id="v12-h2h-detected">
+          <span class="label">H2H Bridge:</span>
+          <span class="badge" [class.badge-active]="status?.h2hDetected" [class.badge-fail]="!status?.h2hDetected">{{
+            status?.h2hDetected ? 'Detected' : 'Not detected'
+          }}</span>
+        </div>
+        @if (status?.h2hDetected) {
+          <div class="info-row" id="v12-h2h-serial">
+            <span class="label">H2H Serial:</span>
+            <span class="value code">{{ status?.h2hSerial || '-' }}</span>
+            <span class="badge" [class.badge-active]="status?.h2hSerialValid" [class.badge-fail]="!status?.h2hSerialValid">{{
+              status?.h2hSerialValid ? 'Valid' : 'Invalid'
+            }}</span>
+          </div>
+          <div class="info-row" id="v12-serials-match">
+            <span class="label">MCU = H2H Serial:</span>
+            <span class="badge" [class.badge-active]="status?.serialsMatch" [class.badge-fail]="!status?.serialsMatch">{{
+              yesNo(status?.serialsMatch)
+            }}</span>
+          </div>
+        }
+        <div class="info-row">
+          <span class="label">USB Hubs:</span>
+          <span class="value">USB 2.0: {{ yesNo(status?.hubUsb2Detected) }}, USB 3.x: {{ yesNo(status?.hubUsb3Detected) }}</span>
+        </div>
+        @if (error) {
+          <div class="operator-warning-banner" id="v12-status-error">
+            <mat-icon>warning</mat-icon>
+            <span>{{ error }}</span>
+          </div>
+        } @else if (status?.message) {
+          <div class="status-note">{{ status?.message }}</div>
+        }
+      </div>
+    </diagnoseme-rework-card-column>
+
+    <diagnoseme-rework-card-column column="3">
+      <test-pass-fail-button #enumStatus></test-pass-fail-button>
+    </diagnoseme-rework-card-column>
+  </diagnoseme-rework-card>
+
+  <!-- Card 2: label barcode check against the USB serials + log submission -->
+  <diagnoseme-rework-card
+    mauiTrailingCard
+    id="v12-barcode-card"
+    title="2. Label Barcode Check & Log Submission"
+    [progress]="barcodeChecking || submitting"
+    [disabled]="!unitSerial && !barcodeResult">
+    <diagnoseme-rework-card-column column="1">
+      <div class="steps-vertical-container">
+        <div class="instructions-box">
+          <span class="step-num">Step 1</span>
+          <span class="step-text"
+            >Scan the <strong>serial number barcode on the unit label</strong> with the handheld scanner (or
+            type it and press <strong>Enter</strong>). Pasting is disabled.</span
+          >
+        </div>
+        <div class="instructions-box">
+          <span class="step-num">Step 2</span>
+          <span class="step-text"
+            >The barcode must match both the H2H and the MCU USB serial numbers. The logs are submitted
+            automatically when it matches.</span
+          >
+        </div>
+        <div class="instructions-box">
+          <span class="step-num">Step 3</span>
+          <span class="step-text">Disconnect the unit and connect the next one.</span>
+        </div>
+      </div>
+    </diagnoseme-rework-card-column>
+
+    <diagnoseme-rework-card-column column="2">
+      <div class="status-panel">
+        <input
+          #barcodeInput
+          id="v12-barcode-input"
+          class="barcode-input"
+          type="text"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="Scan label barcode..."
+          aria-label="Scanned label barcode"
+          [(ngModel)]="scannedBarcode"
+          [disabled]="!canScan"
+          (keydown)="onBarcodeKeydown($event)"
+          (beforeinput)="onBeforeInput($event)"
+          (paste)="blockInput($event)"
+          (drop)="blockInput($event)"
+          (dragover)="blockInput($event)"
+          (contextmenu)="blockInput($event)" />
+        @if (inputWarning) {
+          <div class="operator-warning-banner" id="v12-barcode-warning">
+            <mat-icon>warning</mat-icon>
+            <span>{{ inputWarning }}</span>
+          </div>
+        }
+        @if (barcodeResult; as r) {
+          <div class="info-row" id="v12-barcode-result">
+            <span class="label">Scanned Barcode:</span>
+            <span class="value code">{{ r.scannedBarcode }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">H2H Serial:</span>
+            <span class="value code">{{ r.adbSerial || '-' }}</span>
+            <span class="badge" [class.badge-active]="r.adbMatches" [class.badge-fail]="!r.adbMatches">{{
+              r.adbMatches ? 'Match' : 'Mismatch'
+            }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">MCU Serial:</span>
+            <span class="value code">{{ r.ftdiSerial || '-' }}</span>
+            <span class="badge" [class.badge-active]="r.ftdiMatches" [class.badge-fail]="!r.ftdiMatches">{{
+              r.ftdiMatches ? 'Match' : 'Mismatch'
+            }}</span>
+          </div>
+          @if (!enumerationOk) {
+            <div class="operator-warning-banner">
+              <mat-icon>warning</mat-icon>
+              <span>Enumeration check failed (see card 0).</span>
+            </div>
+          }
+          <div class="status-note" [class.note-fail]="!barcodePassed">{{ r.message }}</div>
+        }
+        @if (submitting) {
+          <div class="status-note">Submitting logs...</div>
+        } @else if (submitted) {
+          <div class="operator-ready-banner" id="v12-submit-done">
+            <mat-icon>check_circle</mat-icon>
+            <span
+              ><strong>{{ overallPassed ? 'PASS' : 'FAIL' }} logs submitted.</strong> Disconnect the unit and
+              connect the next one.</span
+            >
+          </div>
+        } @else if (submitError) {
+          <div class="operator-warning-banner" id="v12-submit-error">
+            <mat-icon>warning</mat-icon>
+            <span>{{ submitError }}</span>
+          </div>
+        }
+        <div class="actions-wrapper">
+          <button
+            mat-raised-button
+            color="primary"
+            class="action-btn-wide"
+            id="v12-barcode-verify"
+            [disabled]="!canScan || !scannedBarcode.trim()"
+            (click)="verifyBarcode()">
+            <mat-icon>qr_code_scanner</mat-icon>
+            Verify
+          </button>
+          @if (barcodeResult && !submitted && !submitting) {
+            <button
+              mat-raised-button
+              [color]="barcodePassed ? 'primary' : 'warn'"
+              class="action-btn-wide"
+              id="v12-submit-logs"
+              (click)="submitLogs()">
+              <mat-icon>upload_file</mat-icon>
+              {{ barcodePassed ? 'Submit Logs' : 'Submit FAIL Result' }}
+            </button>
+          }
+          <button
+            mat-stroked-button
+            id="v12-barcode-rescan"
+            [disabled]="barcodeChecking || submitting || (!barcodeResult && !scannedBarcode)"
+            (click)="rescan()">
+            <mat-icon>restart_alt</mat-icon>
+            Scan Again
+          </button>
+        </div>
+      </div>
+    </diagnoseme-rework-card-column>
+
+    <diagnoseme-rework-card-column column="3">
+      <test-pass-fail-button #barcodeStatus></test-pass-fail-button>
+    </diagnoseme-rework-card-column>
+  </diagnoseme-rework-card>
+</app-maui-step3-labeling>

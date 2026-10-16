@@ -5,6 +5,7 @@
 import {
   ChangeDetectorRef,
   Component,
+  Input,
   OnDestroy,
   OnInit,
   ViewChild,
@@ -21,6 +22,11 @@ import {DiagnosemeReworkCard} from '../diagnoseme-rework-card/diagnoseme-rework-
 import {DiagnosemeReworkCardColumn} from '../diagnoseme-rework-card-column/diagnoseme-rework-card-column';
 import {MauiDeviceMgmtService} from '../services/maui-device-mgmt.service';
 import {TestPassFailButton} from '../test-pass-fail-button/test-pass-fail-button';
+import {
+  MauiHwRev,
+  MauiHwRevProfile,
+  mauiHwRevProfile,
+} from '../maui-common/maui-hw-rev';
 
 const CODE128_PATTERNS: string[] = [
   '212222',
@@ -154,6 +160,15 @@ export interface BarcodeBar {
   ],
 })
 export class MauiStep3LabelingComponent implements OnInit, OnDestroy {
+  /** Hardware revision of the board (endpoint names in the readout). */
+  @Input() hwRev: MauiHwRev = 'v1.1';
+  @Input() pageTitle =
+    'Maui FATP Step 3: Serial Number Readout & Label Printing Assistant';
+
+  get rev(): MauiHwRevProfile {
+    return mauiHwRevProfile(this.hwRev);
+  }
+
   private readonly deviceMgmtService = inject(MauiDeviceMgmtService);
   private readonly cdr = inject(ChangeDetectorRef);
 

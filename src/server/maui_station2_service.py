@@ -134,6 +134,22 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     """Returns the GPIO details text of a passing GPIO check."""
     return f"All {len(EXPECTED_HOST_GPIOS)} GPIOs verified"
 
+  def _expected_hwrev_text(self) -> str:
+    """Returns the expected `hwrev` shown in the logs and the UI."""
+    return self.EXPECTED_HWREV_TEXT
+
+  def _verify_gpios(self, tester, ser, adc_status) -> Tuple[bool, Dict[str, int], List[str], str]:
+    """Reads `gpio get` in the open session |ser| and checks the levels.
+
+    |adc_status| is the `adc status` reading of the same session.
+    """
+    del adc_status  # Not needed by Maui v1.1.
+    return tester.read_and_verify_gpios(ser=ser)
+
+  def _verify_voltages(self, adc_status) -> Tuple[bool, List[str]]:
+    """Checks the `adc status` readings of the host-only cards."""
+    return verify_host_adc_voltages(adc_status)
+
   def _check_host_usb_topology(self) -> Tuple[bool, bool, bool, bool]:
     """Checks presence of Hub2, Hub3, FTDI (0x6002), and H2H (18d1:506d/5084) using sysfs scanning."""
     hub_usb2_ok = False
@@ -197,8 +213,8 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
           adc_status = tester.read_adc_status(ser=ser)
           hwrev_ok, detected_hwrev, hwrev_raw = tester.read_hwrev(ser=ser)
           temp_ok, temp_c, temp_raw = tester.read_temperature(ser=ser)
-          gpios_ok, parsed_gpios, gpio_mismatches, gpios_raw = tester.read_and_verify_gpios(ser=ser)
-          voltages_ok, voltage_mismatches = verify_host_adc_voltages(adc_status)
+          gpios_ok, parsed_gpios, gpio_mismatches, gpios_raw = self._verify_gpios(tester, ser, adc_status)
+          voltages_ok, voltage_mismatches = self._verify_voltages(adc_status)
       except Exception as e:
         logging.warning("Console session failed during host replug on %s: %s", port_node, e)
         console_results["MCU Version Check"] = (False, str(e))
@@ -276,7 +292,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         "host_replug_test",
         f"ALL_PASSED={all_passed}\n{status_msg}\nHost CC1: {cc1_mv} mV, Host CC2: {cc2_mv} mV\n"
         f"Orientation: {curr_orientation}\n"
-        f"HWRev: {detected_hwrev} (Expected: {self.EXPECTED_HWREV_TEXT})\n"
+        f"HWRev: {detected_hwrev} (Expected: {self._expected_hwrev_text()})\n"
         f"Temperature: {temp_c:.2f} 'C (Limits: 20-65 'C)\n"
         f"GPIO Status: {'PASS' if gpios_ok else 'FAIL'}\n"
         f"GPIO Details: {gpio_details}\n"
@@ -302,6 +318,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         gpios_ok=gpios_ok,
         hwrev_ok=hwrev_ok,
         detected_hwrev=detected_hwrev,
+        expected_hwrev=self._expected_hwrev_text(),
         temp_ok=temp_ok,
         temperature_c=temp_c,
         voltages_ok=voltages_ok,
@@ -524,8 +541,8 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
           adc_status = tester.read_adc_status(ser=ser)
           hwrev_ok, detected_hwrev, hwrev_raw = tester.read_hwrev(ser=ser)
           temp_ok, temp_c, temp_raw = tester.read_temperature(ser=ser)
-          gpios_ok, parsed_gpios, gpio_mismatches, gpios_raw = tester.read_and_verify_gpios(ser=ser)
-          voltages_ok, voltage_mismatches = verify_host_adc_voltages(adc_status)
+          gpios_ok, parsed_gpios, gpio_mismatches, gpios_raw = self._verify_gpios(tester, ser, adc_status)
+          voltages_ok, voltage_mismatches = self._verify_voltages(adc_status)
       except Exception as e:
         logging.warning("Console session failed on %s: %s", port_node, e)
         results["SerialConnection"] = (False, str(e))
@@ -597,7 +614,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         "host_only_tests",
         f"ALL_PASSED={all_passed}\n{summary}\n"
         f"Host Orientation: {host_orientation}\nHost CC1: {cc1_mv} mV, Host CC2: {cc2_mv} mV\n"
-        f"HWRev: {detected_hwrev} (Expected: {self.EXPECTED_HWREV_TEXT})\n"
+        f"HWRev: {detected_hwrev} (Expected: {self._expected_hwrev_text()})\n"
         f"Temperature: {temp_c:.2f} 'C (Limits: 20-65 'C)\n"
         f"GPIO Status: {'PASS' if gpios_ok else 'FAIL'}\n"
         f"GPIO Details: {gpio_details}\n"
@@ -619,8 +636,8 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         mcu_version_ok=mcu_version_ok,
         pdc_info_ok=pdc_info_ok,
         mcu_version_str=mcu_version_msg,
-        pdc_appconfig_ver="00000318" if pdc_info_ok else "UNKNOWN",
-        pdc_fw_ver="00000019" if pdc_info_ok else "UNKNOWN",
+        pdc_appconfig_ver=(tester.EXPECTED_PDC_APP_CONFIG_VER or "00000318") if pdc_info_ok else "UNKNOWN",
+        pdc_fw_ver=(tester.EXPECTED_PDC_FW_VER or "00000019") if pdc_info_ok else "UNKNOWN",
         summary=summary,
         pdc_charger_ok=pdc_charger_ok,
         charger_voltage_v=chg_v,
@@ -631,6 +648,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         gpios_ok=gpios_ok,
         hwrev_ok=hwrev_ok,
         detected_hwrev=detected_hwrev,
+        expected_hwrev=self._expected_hwrev_text(),
         temp_ok=temp_ok,
         temperature_c=temp_c,
         voltages_ok=voltages_ok,

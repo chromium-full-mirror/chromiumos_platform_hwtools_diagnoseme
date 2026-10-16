@@ -34,6 +34,10 @@ services:
       - STATION_ID=${STATION_ID:-}
       # Optional override of the maui-utils image baked into the server image.
       - MAUI_UTILS_IMAGE
+      # Optional Maui v1.2 test overrides (see /etc/diagnoseme/config.env).
+      - MAUI_V12_APPROVED_FW
+      - MAUI_V12_HWREVS
+      - MAUI_ITE_NO_OUTPUT_TIMEOUT_S
       # Optional ADB transfer test overrides (see /etc/diagnoseme/config.env).
       - MAUI_ADB_SIZE_MB
       - MAUI_ADB_DEADLINE_S

@@ -5,7 +5,7 @@
 
 <div class="maui-container">
   <div class="header-section">
-    <h2>Maui FATP Step 3: Serial Number Readout & Label Printing Assistant</h2>
+    <h2>{{ pageTitle }}</h2>
     <p class="subtitle">
       Automatic electronic serial number readout and optical barcode display for Windows PC label-printing tool.
     </p>
@@ -29,6 +29,9 @@
   </div>
 
   <div class="cards-column">
+    <!-- Optional revision specific cards (e.g. Maui v1.2 enumeration status) -->
+    <ng-content></ng-content>
+
     <!-- Single Card: Electronic Serial Number Readout & Barcode Display -->
     <diagnoseme-rework-card
       id="step3-card-1"
@@ -119,8 +122,8 @@
               }
               @if (ftdiSerial) {
                 <div class="info-row">
-                  <span class="label">FTDI Serial:</span>
-                  <span class="value code">{{ ftdiSerial }} (PID: {{ ftdiIsProgrammed ? '0x6002' : '0x6001' }})</span>
+                  <span class="label">{{ rev.consoleLabel }} Serial:</span>
+                  <span class="value code">{{ ftdiSerial }} (PID: {{ rev.consolePidText(ftdiIsProgrammed) }})</span>
                 </div>
               }
               <div class="info-row">
@@ -176,5 +179,8 @@
         <test-pass-fail-button #readoutStatus></test-pass-fail-button>
       </diagnoseme-rework-card-column>
     </diagnoseme-rework-card>
+
+    <!-- Optional revision specific cards after the serial card (mauiTrailingCard) -->
+    <ng-content select="[mauiTrailingCard]"></ng-content>
   </div>
 </div>

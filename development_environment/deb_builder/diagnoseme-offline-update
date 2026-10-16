@@ -236,7 +236,8 @@ mkdir -p "$FW_TARGET"
 
 if [ -d "firmware" ]; then
     echo "Updating offline Maui firmware cache in $FW_TARGET..."
-    # One directory per component (mcu, pdc, ...; see editions.json).
+    # One directory per component (mcu, pdc, mcu_app, mcu_full, ...; see
+    # editions.json).
     for COMP_DIR in firmware/*/; do
         [ -d "$COMP_DIR" ] || continue
         COMP="$(basename "$COMP_DIR")"

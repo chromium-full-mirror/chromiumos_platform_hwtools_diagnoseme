@@ -1,0 +1,118 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+:host {
+  display: block;
+  width: 100%;
+}
+
+.full-image-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+
+  mat-progress-bar {
+    width: 100%;
+  }
+}
+
+.warning-box,
+.serial-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 4px;
+}
+
+.warning-box {
+  background: #fce8e6;
+  color: #a50e0e;
+  border-left: 4px solid #d93025;
+}
+
+.serial-note {
+  background: #e8f0fe;
+  color: #174ea6;
+  border-left: 4px solid #1a73e8;
+}
+
+.wiring {
+  background: #f8f9fa;
+  border-radius: 4px;
+  padding: 8px 12px;
+
+  .wiring-title {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-weight: 500;
+  }
+
+  ul {
+    margin: 6px 0 0;
+    padding-left: 22px;
+  }
+
+  li {
+    line-height: 1.6;
+  }
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+
+  .bridge-field,
+  .image-field {
+    min-width: 420px;
+  }
+
+  .baud-field {
+    width: 150px;
+  }
+}
+
+.hint {
+  color: #5f6368;
+  font-style: italic;
+}
+
+.progress-row {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 500;
+
+  .elapsed {
+    color: #5f6368;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.result {
+  font-weight: 500;
+
+  &.passed {
+    color: #137333;
+  }
+
+  &.failed {
+    color: #c5221f;
+  }
+}
+
+.tool-log {
+  width: 100%;
+  max-height: 240px;
+  overflow: auto;
+  background: #202124;
+  color: #e8eaed;
+  font-size: 11px;
+  padding: 8px;
+  border-radius: 4px;
+  box-sizing: border-box;
+}

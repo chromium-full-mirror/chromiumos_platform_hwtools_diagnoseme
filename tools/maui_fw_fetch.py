@@ -105,6 +105,18 @@ COMPONENTS: Dict[str, Component] = {
     "mcu": Component("mcu-fw/mspm0", ".mcufw", "zephyr.txt"),
     # PDC (TPS66994) firmware of every Maui revision.
     "pdc": Component("pdc-fw", ".pdcfw", "{version}.bin"),
+    # Maui v1.2 (ITE IT82002) MCUboot-signed App (maui-flash) and the whole
+    # 1 MiB flash image (itecomdbgr), from the same version directory.
+    "mcu_app": Component(
+        "mcu-fw/maui_v12", ".mcufw", "maui_app_signed.bin", required=False
+    ),
+    "mcu_full": Component(
+        "mcu-fw/maui_v12",
+        ".mcufw",
+        "maui_full_flash_1mb.bin",
+        size=0x100000,
+        required=False,
+    ),
 }
 
 

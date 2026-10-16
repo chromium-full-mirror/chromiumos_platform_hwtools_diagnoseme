@@ -89,7 +89,7 @@ if [ -z "$NEW_ISO" ]; then
     NEW_ISO="custom-debian-preseed-${EDITION}.iso"
 fi
 # Tag the installed station runs (config.env DOCKER_TAG); the packaged images
-# are also tagged with it, so e.g. --tag maui-v1.1-<commit> still works.
+# are also tagged with it, so e.g. --tag maui-v1.2-<commit> still works.
 ISO_TAG="$(${EDITION_INFO} get "${EDITION}" docker_tags | cut -d' ' -f1)"
 # Every station tag of the edition, e.g. "maui-v1.1 maui": stations installed
 # before the editions still run DOCKER_TAG=maui.
@@ -130,7 +130,8 @@ OFFLINE_ASSETS_DIR="$BUILD_DIR/offline_assets"
 mkdir -p "$OFFLINE_ASSETS_DIR/images" "$OFFLINE_ASSETS_DIR/deb"
 
 # Copy the edition's local firmware components (editions.json "firmware",
-# e.g. mcu+pdc for maui-v1.1) from dist/firmware if present.
+# e.g. mcu+pdc for v1.1, mcu_app+mcu_full+pdc for v1.2) from dist/firmware if
+# present.
 for COMP in $(${EDITION_INFO} get "${EDITION}" firmware); do
     mkdir -p "$OFFLINE_ASSETS_DIR/firmware/${COMP}"
     if [ -d "../dist/firmware/${COMP}" ]; then

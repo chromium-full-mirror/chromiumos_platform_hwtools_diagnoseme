@@ -181,6 +181,16 @@ MAUI_SERVICERS: Dict[str, Tuple[str, str]] = {
         "maui_station1_service",
         "MauiDeviceManagementServicer",
     ),
+    editions.SERVICE_MAUI_V12_PDC: ("maui_v12_services", "MauiV12PdcServicer"),
+    editions.SERVICE_MAUI_V12_STATION2: (
+        "maui_v12_services",
+        "MauiV12Station2Servicer",
+    ),
+    editions.SERVICE_MAUI_V12_DEVICE_MGMT: (
+        "maui_v12_services",
+        "MauiV12DeviceManagementServicer",
+    ),
+    editions.SERVICE_MAUI_MCU: ("maui_v12_mcu_service", "MauiMcuServicer"),
 }
 
 # Service key (see server/editions.py) -> registration function.

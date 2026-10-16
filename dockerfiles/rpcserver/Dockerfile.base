@@ -11,6 +11,7 @@
 #   base-servo-v4p1   Servo v4p1 (dfu-util, dfu-programmer, fwupd, rtunicpg, ...)
 #   base-servo-micro  Servo Micro (dfu-util, servo_micro firmware)
 #   base-maui-v1.1    Maui v1.1 (adb, ft232r_prog; flashing via maui-utils)
+#   base-maui-v1.2    Maui v1.2 (adb, itecomdbgr; App/PDC flashing via maui-utils)
 #   base-all          Every tool above (development / CQ only, default target)
 #
 # Build a specific edition with e.g.:
@@ -19,6 +20,9 @@
 # The Maui flashing tools (maui-flash, maui-ctl, fw-updater) are NOT part of
 # the Maui images. They run inside the separate maui-utils container, started by the
 # server through the host docker socket (see src/server/maui_utils_runner.py).
+# The one exception is itecomdbgr (ChromiumOS platform/ec): it writes the whole
+# Maui v1.2 MCU flash over an external USB-UART bridge and lives in the server
+# image (see src/server/maui_v12_ite_flash.py).
 
 ####################################################################
 FROM debian:trixie AS hdctools-builder
@@ -105,6 +109,40 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 RUN curl -k -sSL https://rtr.ca/ft232r/ft232r_prog-1.25.tar.gz | tar -xz \
  && make -C ft232r_prog-1.25
+
+######################################################################
+# itecomdbgr: ITE IT8xxx2 UART DBGR flasher (whole Maui v1.2 MCU image).
+# Same build as the ec-devutils ebuild, without cros_sdk: only the three
+# source files and LICENSE are fetched from chromiumos/platform/ec at a pinned
+# commit and checked against their sha256. Bump EC_COMMIT and the hashes
+# together, deliberately.
+FROM debian:trixie AS itecomdbgr-builder
+
+ARG EC_REPO=https://chromium.googlesource.com/chromiumos/platform/ec
+ARG EC_COMMIT=7b199d4f080e2d35cec41a71a206dfb813c0c616
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    g++
+
+WORKDIR /src
+RUN set -e; \
+    for f in util/itecomdbgr.cc util/uart_utils.cc util/uart_utils.h LICENSE; do \
+      curl -fsSL --retry 5 --retry-all-errors \
+        "${EC_REPO}/+/${EC_COMMIT}/${f}?format=TEXT" \
+        | base64 -d > "$(basename "${f}")"; \
+    done; \
+    printf '%s\n' \
+      'ef9ec892df5e75ef3791b43f32bdbf13276f539bd009a7c2a88f16d9ca82522c  itecomdbgr.cc' \
+      '1477835d815156edd2ffacc3f02236521cb47fd1eab6bd07c2b169ac85497db0  uart_utils.cc' \
+      'f00c86d8390eda6e749d388741ae22fc3a10e5da61ab74dbb59c4e6c902fed57  uart_utils.h' \
+      'f0edee4e8678401849119448fc7412a0ce153710298013f1d47b41b2993f4336  LICENSE' \
+      | sha256sum -c -
+RUN mkdir -p /out \
+ && g++ -O2 -Wall -s -o /out/itecomdbgr itecomdbgr.cc uart_utils.cc -I. \
+ && cp LICENSE /out/LICENSE \
+ && echo "${EC_REPO} ${EC_COMMIT} util/itecomdbgr.cc util/uart_utils.cc" > /out/SOURCE
 
 ######################################################################
 FROM debian:trixie AS servo-fw-fetcher
@@ -220,6 +258,14 @@ RUN apt-get update && apt-get install -yq \
 COPY --from=ft232r-builder /build/ft232r_prog-1.25/ft232r_prog /usr/local/bin/ft232r_prog
 
 #####################################################################
+# Maui v1.2: ITE IT82002 with native USB CDC-ACM console.
+FROM base-maui-common AS base-maui-v1.2
+
+# Whole-image MCU flashing over an external USB-UART bridge (UART DBGR).
+COPY --from=itecomdbgr-builder /out/itecomdbgr /usr/local/bin/itecomdbgr
+COPY --from=itecomdbgr-builder /out/LICENSE /out/SOURCE /usr/share/doc/itecomdbgr/
+
+#####################################################################
 # Development / CQ image containing the tooling of every edition.
 # Keep last so it is the default target.
 FROM base-servo-v4p1 AS base-all
@@ -231,6 +277,8 @@ RUN apt-get update && apt-get install -yq \
     libftdi1
 
 COPY --from=ft232r-builder /build/ft232r_prog-1.25/ft232r_prog /usr/local/bin/ft232r_prog
+COPY --from=itecomdbgr-builder /out/itecomdbgr /usr/local/bin/itecomdbgr
+COPY --from=itecomdbgr-builder /out/LICENSE /out/SOURCE /usr/share/doc/itecomdbgr/
 COPY --from=servo-fw-fetcher /out/servo_micro/ /usr/local/servo_micro/
 COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=fwupdater-builder /dolos/fw-updater/target/release/fw-updater /usr/local/bin/fw-updater

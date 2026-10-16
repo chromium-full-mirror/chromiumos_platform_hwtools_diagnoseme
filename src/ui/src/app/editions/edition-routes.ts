@@ -135,3 +135,40 @@ export const MAUI_V11_MENU: EditionMenuItem[] = [
     route: '/maui/v1.1/qt0',
   },
 ];
+
+/** Maui v1.2 (ITE IT82002, native USB CDC-ACM) routes. */
+export const MAUI_V12_ROUTES: Routes = [
+  {
+    path: 'maui/v1.2/testing',
+    loadComponent: () =>
+      import('../maui-v12-testing/maui-v12-testing').then(
+        m => m.MauiV12TestingComponent,
+      ),
+  },
+  {
+    path: 'maui/v1.2/programming',
+    loadComponent: () =>
+      import('../maui-v12-programming/maui-v12-programming').then(
+        m => m.MauiV12ProgrammingComponent,
+      ),
+  },
+  {
+    path: 'maui/v1.2/serial',
+    loadComponent: () =>
+      import('../maui-v12-serial/maui-v12-serial').then(
+        m => m.MauiV12SerialComponent,
+      ),
+  },
+];
+
+export const MAUI_V12_MENU: EditionMenuItem[] = [
+  {
+    label: 'Testing: Serial Number & Functional Tests',
+    route: '/maui/v1.2/testing',
+  },
+  {label: 'Programming: MCU App, PDC, H2H', route: '/maui/v1.2/programming'},
+  {
+    label: 'Enumeration Status, Serial Number & Barcode',
+    route: '/maui/v1.2/serial',
+  },
+];

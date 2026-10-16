@@ -1,0 +1,158 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<div class="full-image-panel">
+  <div class="warning-box">
+    <mat-icon>warning</mat-icon>
+    <div>
+      <strong>Erases the whole MCU flash</strong> (RO and RW bootloader, App
+      and settings), <strong>including the MCU serial number</strong>.
+      Provision the serial number again after flashing. An interrupted flash
+      leaves the MCU blank until it is flashed again.
+    </div>
+  </div>
+
+  <div class="wiring">
+    <div class="wiring-title">
+      <mat-icon>cable</mat-icon>
+      Wiring: 3.3 V USB-UART bridge on the MCU debug UART test points
+    </div>
+    <ul>
+      <li>
+        Bridge <strong>TX</strong> &rarr; MCU <strong>DEBUG_UART_RX</strong>
+        (GPB0)
+      </li>
+      <li>
+        Bridge <strong>RX</strong> &larr; MCU <strong>DEBUG_UART_TX</strong>
+        (GPB1)
+      </li>
+      <li>Bridge <strong>GND</strong> &harr; board GND</li>
+      <li>
+        <strong>Do not connect the bridge VCC.</strong> 3.3 V logic only; the
+        bridge must support even parity (8E1).
+      </li>
+      <li>
+        Connect the board Host USB-C port to this station: it powers the board
+        and the new MCU App has to enumerate after flashing.
+      </li>
+    </ul>
+  </div>
+
+  <div class="form-row">
+    <mat-form-field appearance="outline" class="bridge-field">
+      <mat-label>USB-UART bridge</mat-label>
+      <mat-select
+        [(ngModel)]="selectedPort"
+        [disabled]="inProgress || !bridges.length">
+        @for (b of bridges; track b.devicePort) {
+          <mat-option [value]="b.devicePort" [title]="b.label">
+            {{ bridgeLabel(b) }}
+          </mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <button
+      mat-stroked-button
+      class="rescan-button"
+      [disabled]="inProgress || scanning"
+      (click)="rescan(); loadImages()">
+      <mat-icon>refresh</mat-icon>
+      Rescan
+    </button>
+  </div>
+  @if (!bridges.length && bridgesMessage) {
+    <div class="hint">{{ bridgesMessage }}</div>
+  }
+
+  <div class="form-row">
+    <mat-form-field appearance="outline" class="image-field">
+      <mat-label>Full MCU image (1 MiB)</mat-label>
+      <mat-select
+        [(ngModel)]="selectedImage"
+        [disabled]="inProgress || !images.length">
+        @for (f of images; track f.path) {
+          <mat-option [value]="f.fileName" [disabled]="!isValidImage(f)">
+            {{ f.fileName }}
+            @if (f.isStable) {
+              (stable {{ f.version }})
+            } @else if (f.version) {
+              ({{ f.version }})
+            }
+            @if (!isValidImage(f)) {
+              (wrong size: {{ f.sizeBytes }} bytes)
+            }
+          </mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline" class="baud-field">
+      <mat-label>Baud rate</mat-label>
+      <mat-select [(ngModel)]="baud" [disabled]="inProgress">
+        @for (rate of baudRates; track rate) {
+          <mat-option [value]="rate">{{ rate }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-checkbox [(ngModel)]="verify" [disabled]="inProgress">
+      Verify (blank check and read-back, about twice as long)
+    </mat-checkbox>
+  </div>
+  @if (!images.length || !selectedImage) {
+    <div class="hint">{{ imagesMessage }}</div>
+  }
+  @if (baud !== baudRates[0]) {
+    <div class="hint">3 Mbaud needs a bridge that supports it.</div>
+  }
+
+  <div class="form-row">
+    <button
+      mat-raised-button
+      color="warn"
+      class="start-button"
+      [disabled]="!canStart"
+      (click)="start()">
+      <mat-icon>bolt</mat-icon>
+      Flash Full Image
+    </button>
+    <span class="hint">
+      About 1-3 min at 115200 baud (6-8 min with Verify). Leaving this page
+      cancels the flash.
+    </span>
+  </div>
+  @if (locked && !inProgress) {
+    <div class="hint">Wait until the MCU App update has finished.</div>
+  }
+
+  @if (inProgress || result !== 'NONE') {
+    <div class="progress-row">
+      <span class="phase">{{ phaseLabel }}</span>
+      <span class="elapsed">{{ elapsedText }}</span>
+    </div>
+    <mat-progress-bar mode="determinate" [value]="progress"></mat-progress-bar>
+    <div
+      class="result"
+      [class.passed]="result === 'PASSED'"
+      [class.failed]="result === 'FAILED'">
+      {{ status }}
+    </div>
+  }
+  @if (log.length) {
+    <pre class="tool-log">{{ log.join('\n') }}</pre>
+  }
+
+  @if (showSerialCard) {
+    <div class="serial-note">
+      <mat-icon>info</mat-icon>
+      <span>
+        The full flash erased the MCU serial number. Provision it again with
+        the card below: the H2H serial is copied into the MCU.
+      </span>
+    </div>
+    <app-maui-serial-provision-card
+      cardId="full-image-serial-card"
+      cardTitle="1. Serial Number Provisioning (after the full flash)">
+    </app-maui-serial-provision-card>
+  }
+</div>
