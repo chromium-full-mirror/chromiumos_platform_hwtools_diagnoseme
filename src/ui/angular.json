@@ -58,6 +58,46 @@
               ],
               "outputHashing": "all"
             },
+            "all": {
+              "fileReplacements": [
+                {
+                  "replace": "src/app/editions/active-edition.ts",
+                  "with": "src/app/editions/active-edition.all.ts"
+                }
+              ]
+            },
+            "dolos": {
+              "fileReplacements": [
+                {
+                  "replace": "src/app/editions/active-edition.ts",
+                  "with": "src/app/editions/active-edition.dolos.ts"
+                }
+              ]
+            },
+            "servo-v4p1": {
+              "fileReplacements": [
+                {
+                  "replace": "src/app/editions/active-edition.ts",
+                  "with": "src/app/editions/active-edition.servo-v4p1.ts"
+                }
+              ]
+            },
+            "servo-micro": {
+              "fileReplacements": [
+                {
+                  "replace": "src/app/editions/active-edition.ts",
+                  "with": "src/app/editions/active-edition.servo-micro.ts"
+                }
+              ]
+            },
+            "maui-v1.1": {
+              "fileReplacements": [
+                {
+                  "replace": "src/app/editions/active-edition.ts",
+                  "with": "src/app/editions/active-edition.maui-v1.1.ts"
+                }
+              ]
+            },
             "development": {
               "optimization": false,
               "extractLicenses": false,

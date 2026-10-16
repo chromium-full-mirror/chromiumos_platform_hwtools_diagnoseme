@@ -5,10 +5,12 @@ This project provides a system for generating a custom Debian 13 (Trixie) instal
 ## Quick Start: Generate the USB Stick
 
 1. **Build the ISO:**
-   Run the provided build script. It will download the official Debian 13.3.0 netinst ISO, download the latest stable Maui firmware, embed initial Docker assets, and inject the `preseed.cfg`.
+   Run the provided build script for one edition (see `editions.json`). It will download the official Debian 13.3.0 netinst ISO, download the latest stable Maui firmware, embed the edition's Docker images and Debian package, and inject the `preseed.cfg`.
    ```bash
-   ./build_iso.sh
+   ./build_iso.sh --edition maui-v1.1             # pull the released :maui-v1.1 images
+   ./build_iso.sh --edition maui-v1.1 --build-local  # or build them from this checkout
    ```
+   The result is `custom-debian-preseed-<edition>.iso` (`--output` overrides it).
 
 2. **Identify your USB Drive:**
    Plug in your USB stick and find its device name (e.g., `/dev/sda`, `/dev/sdb`).
@@ -19,7 +21,7 @@ This project provides a system for generating a custom Debian 13 (Trixie) instal
 3. **Flash the ISO:**
    Use `dd` to write the ISO to the **entire device** (replace `/dev/sda` with your actual device).
    ```bash
-   sudo dd if=custom-debian-preseed.iso of=/dev/sda bs=4M status=progress oflag=sync
+   sudo dd if=custom-debian-preseed-<edition>.iso of=/dev/sda bs=4M status=progress oflag=sync
    ```
 
 ---
@@ -67,6 +69,21 @@ After the first reboot, `diagnoseme-setup.service` performs one-time initializat
 ### Building an Offline Update Bundle for Factory USBs
 From the repository root on a connected development machine:
 ```bash
-./development_environment/build-offline-bundle.sh --tag maui
+./development_environment/build-offline-bundle.sh --edition maui-v1.1 \
+    [--build-local | --use-local]
 ```
-This downloads the latest stable MCU/PDC firmware from GCS, exports `:maui` Docker images, builds the Debian package, computes SHA256 checksums, and creates a ready-to-copy update directory and ZIP file.
+This exports the edition's Docker images (tagged with the station tag, e.g. `:maui` for `maui-v1.1`), copies/downloads the edition's firmware components, builds the edition's Debian package (Maui editions include the maui-utils image), computes SHA256 checksums, and creates a ready-to-copy update directory and ZIP file in `offline_update_bundle/<edition>/`.
+
+### Maui Firmware and maui-utils Versions
+Builds and stations always use the releases marked stable in the public `gs://maui-firmware` bucket: there are no version options or pinned versions.
+
+* **Firmware:** `tools/maui_fw_fetch.py` downloads the edition's firmware components (`editions.json` `"firmware"`) into `firmware/<component>/` when the ISO or an offline bundle is built (`--skip-fw` skips the download; `dist/firmware` is still bundled) and when a station starts with `start-diagnoseme --online` (`FIRMWARE_COMPONENTS` in `/etc/diagnoseme/config.env`; a failed download only prints a warning). Each component follows the stable marker of the edition's Maui device (`editions.json` `"maui_device"`, `MAUI_DEVICE` in `config.env`), an empty file in the version directory, e.g. `pdc-fw/v20_0325_100W/stable.maui_v11.pdcfw`:
+
+  | Component | Bucket directory | Stable marker | Payload |
+  |---|---|---|---|
+  | `mcu` | `mcu-fw/mspm0/<version>/` | `stable.<device>.mcufw` | `zephyr.txt` |
+  | `pdc` | `pdc-fw/<version>/` | `stable.<device>.pdcfw` | `<version>.bin` |
+
+  A missing marker fails the fetch. Downloads are size- and md5-checked and atomic. `firmware/<component>/STABLE.json` records the stable image as `{"version", "file", "md5", "source"}`; when the stable version changes, the payload named by the previous `STABLE.json` is deleted (nothing else is). `--dry-run` shows what would be fetched.
+* **Flashing:** station 1 flashes the MCU and PDC images named by `STABLE.json` after checking their md5. Without a manifest, the only image of the component directory is flashed with a warning; several images are an error. An explicitly selected PDC version is flashed as chosen.
+* **maui-utils:** Maui editions always bundle the stable maui-utils release, the `<version>` marked by `docker/<version>/stable.dockertag` in `gs://maui-firmware` (`tools/fetch_maui_utils.sh`); there is no version option. The deb records it in `config.env` as `MAUI_UTILS_IMAGE=maui-utils:<version>`; a server without `MAUI_UTILS_IMAGE` uses the newest local `maui-utils:*` image. Developer-only override: `--maui-utils-tar <file>` (`build_iso.sh`, `build-offline-bundle.sh`, `build-diagnoseme.sh`) bundles a local `docker save` tar of an unreleased build instead.

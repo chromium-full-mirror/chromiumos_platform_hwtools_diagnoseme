@@ -15,7 +15,8 @@ import {FormsModule} from '@angular/forms';
 import {MatButtonModule} from '@angular/material/button';
 import {MatIconModule} from '@angular/material/icon';
 import {MatTooltipModule} from '@angular/material/tooltip';
-import {Subscription, timer} from 'rxjs';
+import {EMPTY, Subscription, timer} from 'rxjs';
+import {catchError, exhaustMap} from 'rxjs/operators';
 import {DiagnosemeReworkCard} from '../diagnoseme-rework-card/diagnoseme-rework-card';
 import {DiagnosemeReworkCardColumn} from '../diagnoseme-rework-card-column/diagnoseme-rework-card-column';
 import {MauiDeviceMgmtService} from '../services/maui-device-mgmt.service';
@@ -157,6 +158,7 @@ export class MauiStep3LabelingComponent implements OnInit, OnDestroy {
   private readonly cdr = inject(ChangeDetectorRef);
 
   private readonly subs = new Subscription();
+  private pollSub?: Subscription;
 
   electronicSerial = '';
   adbSerial = '';
@@ -182,52 +184,57 @@ export class MauiStep3LabelingComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.pollSub?.unsubscribe();
     this.subs.unsubscribe();
   }
 
   pollElectronicSerial(): void {
-    this.subs.add(
-      timer(0, 2000).subscribe(() => {
-        this.readingSerial = true;
-        this.deviceMgmtService.readConnectedDeviceSerial().subscribe({
-          next: res => {
-            this.readingSerial = false;
-            this.adbSerial = res.adbSerial || '';
-            this.adbConnected = res.adbConnected;
-            this.ftdiSerial = res.ftdiSerial || '';
-            this.ftdiConnected = res.ftdiConnected;
-            this.dualEndpointsMatch = res.dualEndpointsMatch;
-            this.deviceConnected = res.isConnected;
-            this.ftdiIsProgrammed = !!res.ftdiIsProgrammed;
-            const detectedSn = (
-              res.serialNumber ||
-              res.adbSerial ||
-              res.ftdiSerial ||
-              ''
-            ).trim();
+    // Restart (never stack) the polling loop, e.g. on "Refresh Detection".
+    this.pollSub?.unsubscribe();
+    this.pollSub = timer(0, 2000)
+      .pipe(
+        exhaustMap(() => {
+          this.readingSerial = true;
+          return this.deviceMgmtService.readConnectedDeviceSerial().pipe(
+            catchError(() => {
+              this.readingSerial = false;
+              this.serialDetectionMessage = 'Error querying device detection.';
+              this.cdr.detectChanges();
+              return EMPTY;
+            }),
+          );
+        }),
+      )
+      .subscribe(res => {
+        this.readingSerial = false;
+        this.adbSerial = res.adbSerial || '';
+        this.adbConnected = res.adbConnected;
+        this.ftdiSerial = res.ftdiSerial || '';
+        this.ftdiConnected = res.ftdiConnected;
+        this.dualEndpointsMatch = res.dualEndpointsMatch;
+        this.deviceConnected = res.isConnected;
+        this.ftdiIsProgrammed = !!res.ftdiIsProgrammed;
+        const detectedSn = (
+          res.serialNumber ||
+          res.adbSerial ||
+          res.ftdiSerial ||
+          ''
+        ).trim();
 
-            if (res.isConnected && detectedSn) {
-              this.electronicSerial = detectedSn;
-              this.serialDetectionMessage = `Connected Maui Device: ${this.electronicSerial}`;
-              this.generateBarcode(this.electronicSerial);
-              this.readoutStatus?.showPassed();
-            } else {
-              this.electronicSerial = '';
-              this.svgBarcodeBars = [];
-              this.serialDetectionMessage =
-                'No Maui Device Detected. Please connect Maui Host USB-C cable.';
-              this.readoutStatus?.showFailed();
-            }
-            this.cdr.detectChanges();
-          },
-          error: () => {
-            this.readingSerial = false;
-            this.serialDetectionMessage = 'Error querying device detection.';
-            this.cdr.detectChanges();
-          },
-        });
-      }),
-    );
+        if (res.isConnected && detectedSn) {
+          this.electronicSerial = detectedSn;
+          this.serialDetectionMessage = `Connected Maui Device: ${this.electronicSerial}`;
+          this.generateBarcode(this.electronicSerial);
+          this.readoutStatus?.showPassed();
+        } else {
+          this.electronicSerial = '';
+          this.svgBarcodeBars = [];
+          this.serialDetectionMessage =
+            'No Maui Device Detected. Please connect Maui Host USB-C cable.';
+          this.readoutStatus?.showFailed();
+        }
+        this.cdr.detectChanges();
+      });
   }
 
   generateBarcode(text: string): void {

@@ -20,7 +20,14 @@ import {MatCheckboxModule} from '@angular/material/checkbox';
 import {MatFormFieldModule} from '@angular/material/form-field';
 import {MatIconModule} from '@angular/material/icon';
 import {MatInputModule} from '@angular/material/input';
-import {Subscription, switchMap, timer} from 'rxjs';
+import {
+  EMPTY,
+  Subscription,
+  catchError,
+  exhaustMap,
+  switchMap,
+  timer,
+} from 'rxjs';
 import {DiagnosemeReworkCard} from '../../diagnoseme-rework-card/diagnoseme-rework-card';
 import {DiagnosemeReworkCardColumn} from '../../diagnoseme-rework-card-column/diagnoseme-rework-card-column';
 import {MauiDialogService} from '../maui-dialog.service';
@@ -28,7 +35,10 @@ import {autoAdvanceToCard} from '../maui-scroll.utils';
 import {MauiStation2Service} from '../../services/maui-station2.service';
 import {MauiDeviceMgmtService} from '../../services/maui-device-mgmt.service';
 import {TestPassFailButton} from '../../test-pass-fail-button/test-pass-fail-button';
-import {MauiLogFileInfo} from '../../../proto/maui-manufacturing.pb';
+import {
+  MauiAdbTransferTestResponse,
+  MauiLogFileInfo,
+} from '../../../proto/maui-manufacturing.pb';
 
 @Component({
   selector: 'app-maui-functional-suite',
@@ -53,7 +63,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
   @Input() suiteTitle = 'Maui Functional Verification';
   @Input() suiteSubtitle =
     'System-level functional testing for Maui hardware verification.';
-  @Input() nextStageRoute = '/maui-step3';
+  @Input() nextStageRoute = '/maui/v1.1/labeling';
   @Input() nextStageLabel = 'Go to Next Stage';
 
   private readonly mauiService = inject(MauiStation2Service);
@@ -73,7 +83,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
 
   get canSaveLogs(): boolean {
     return (
-      this.stage3Passed &&
+      this.adbPassed &&
       !this.deviceConnected &&
       !this.savingLogs &&
       !this.logsSaved
@@ -188,7 +198,13 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
   stage3StatusValue: 'NOT_RUN' | 'PASSED' | 'FAILED' | 'BYPASSED' = 'NOT_RUN';
   chargerDisconnected = false;
 
-  // Card 9: Log Saving & Finalization
+  // Card 9: ADB Data Transfer Reliability (DUT through the H2H bridge)
+  adbInProgress = false;
+  adbPassed = false;
+  adbStatusValue: 'NOT_RUN' | 'PASSED' | 'FAILED' | 'BYPASSED' = 'NOT_RUN';
+  adbTransfer: MauiAdbTransferTestResponse | null = null;
+
+  // Card 10: Log Saving & Finalization
   savingLogs = false;
   logsSaved = false;
   logFiles: MauiLogFileInfo[] = [];
@@ -208,8 +224,11 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
   @ViewChild('stage1Status') stage1Status!: TestPassFailButton;
   @ViewChild('stage2Status') stage2Status!: TestPassFailButton;
   @ViewChild('stage3Status') stage3Status!: TestPassFailButton;
+  @ViewChild('adbStatus') adbStatus!: TestPassFailButton;
   @ViewChild('completeStatus') completeStatus!: TestPassFailButton;
 
+  @ViewChild('runUsbCheckBtn', {read: ElementRef})
+  runUsbCheckBtn?: ElementRef<HTMLButtonElement>;
   @ViewChild('replugBtn', {read: ElementRef})
   replugBtn?: ElementRef<HTMLButtonElement>;
   @ViewChild('captureResetBtn', {read: ElementRef})
@@ -224,6 +243,8 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
   stage2Btn?: ElementRef<HTMLButtonElement>;
   @ViewChild('stage3Btn', {read: ElementRef})
   stage3Btn?: ElementRef<HTMLButtonElement>;
+  @ViewChild('adbTransferBtn', {read: ElementRef})
+  adbTransferBtn?: ElementRef<HTMLButtonElement>;
   @ViewChild('saveLogsBtn', {read: ElementRef})
   saveLogsBtn?: ElementRef<HTMLButtonElement>;
   @ViewChild('barcodeInput', {read: ElementRef})
@@ -268,7 +289,17 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     this.subs.add(
       timer(0, 1500)
         .pipe(
-          switchMap(() => this.deviceMgmtService.readConnectedDeviceSerial()),
+          // A failed poll must not end the polling: Card 10 waits for the
+          // operator to unplug the unit.
+          exhaustMap(() =>
+            this.deviceMgmtService.readConnectedDeviceSerial().pipe(
+              catchError(() => {
+                this.statusMessage = 'Device detection error.';
+                this.cdr.detectChanges();
+                return EMPTY;
+              }),
+            ),
+          ),
         )
         .subscribe({
           next: res => {
@@ -302,26 +333,25 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
             }
             this.cdr.detectChanges();
           },
-          error: () => {
-            this.statusMessage = 'Device detection error.';
-            this.cdr.detectChanges();
-          },
         }),
     );
   }
 
   refreshDeviceStatus(): void {
-    this.deviceMgmtService.readConnectedDeviceSerial().subscribe(res => {
-      this.deviceConnected = res.isConnected;
-      this.serialNumber = res.serialNumber;
-      this.devicePort = res.devicePort || '/dev/ttyUSB0';
-      this.deviceProgrammed = !!res.ftdiIsProgrammed;
-      this.ftdiPid = res.ftdiPid ? '0x' + res.ftdiPid.toString(16) : '';
-      this.adbSerial = res.adbSerial;
-      this.ftdiSerial = res.ftdiSerial;
-      this.dualEndpointsMatch = res.dualEndpointsMatch;
-      this.cdr.detectChanges();
-    });
+    const sub = this.deviceMgmtService
+      .readConnectedDeviceSerial()
+      .subscribe(res => {
+        this.deviceConnected = res.isConnected;
+        this.serialNumber = res.serialNumber;
+        this.devicePort = res.devicePort || '/dev/ttyUSB0';
+        this.deviceProgrammed = !!res.ftdiIsProgrammed;
+        this.ftdiPid = res.ftdiPid ? '0x' + res.ftdiPid.toString(16) : '';
+        this.adbSerial = res.adbSerial;
+        this.ftdiSerial = res.ftdiSerial;
+        this.dualEndpointsMatch = res.dualEndpointsMatch;
+        this.cdr.detectChanges();
+      });
+    this.subs.add(sub);
   }
 
   // Card 0: Barcode Verification (FATP QT0)
@@ -333,7 +363,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     this.barcodeCheckFailed = false;
     this.barcodeStatus?.showWorking();
 
-    this.deviceMgmtService
+    const sub = this.deviceMgmtService
       .verifyScannedLabel(
         this.serialNumber,
         this.scannedBarcode.trim(),
@@ -347,7 +377,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           this.barcodeMessage = res.message;
           if (res.matches) {
             this.barcodeStatus?.showPassed();
-            autoAdvanceToCard('func-card-1', this.replugBtn);
+            autoAdvanceToCard('func-card-1', this.runUsbCheckBtn);
           } else {
             this.barcodeCheckFailed = true;
             this.barcodeStatus?.showFailed();
@@ -360,7 +390,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
                 this.barcodeMessage =
                   'Barcode verification bypassed by operator.';
                 this.barcodeStatus?.showBypassed();
-                autoAdvanceToCard('func-card-1', this.replugBtn);
+                autoAdvanceToCard('func-card-1', this.runUsbCheckBtn);
                 this.cdr.detectChanges();
               },
             );
@@ -378,20 +408,21 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
             () => {
               this.barcodeMatches = true;
               this.barcodeStatus?.showBypassed();
-              autoAdvanceToCard('func-card-1', this.replugBtn);
+              autoAdvanceToCard('func-card-1', this.runUsbCheckBtn);
               this.cdr.detectChanges();
             },
           );
           this.cdr.detectChanges();
         },
       });
+    this.subs.add(sub);
   }
 
   bypassBarcode(): void {
     this.barcodeMatches = true;
     this.barcodeMessage = 'Barcode verification bypassed by operator.';
     this.barcodeStatus?.showBypassed();
-    autoAdvanceToCard('func-card-1', this.replugBtn);
+    autoAdvanceToCard('func-card-1', this.runUsbCheckBtn);
     this.cdr.detectChanges();
   }
 
@@ -401,7 +432,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     this.usbCheckStatus.showWorking();
     this.cdr.detectChanges();
 
-    timer(this.stabilizationDelayMs)
+    const sub = timer(this.stabilizationDelayMs)
       .pipe(
         switchMap(() =>
           this.mauiService.runHostOnlyTests(this.serialNumber, this.devicePort),
@@ -471,6 +502,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           this.cdr.detectChanges();
         },
       });
+    this.subs.add(sub);
   }
 
   bypassUsbCheck(): void {
@@ -487,7 +519,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     this.replugStatus.showWorking();
     this.cdr.detectChanges();
 
-    timer(this.stabilizationDelayMs)
+    const sub = timer(this.stabilizationDelayMs)
       .pipe(
         switchMap(() =>
           this.mauiService.testHostReplug(
@@ -558,6 +590,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           this.cdr.detectChanges();
         },
       });
+    this.subs.add(sub);
   }
 
   bypassReplug(): void {
@@ -574,7 +607,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     this.resetStatus.showWorking();
     this.cdr.detectChanges();
 
-    this.mauiService
+    const sub = this.mauiService
       .testResetButton(
         this.serialNumber,
         this.devicePort,
@@ -622,6 +655,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           this.cdr.detectChanges();
         },
       });
+    this.subs.add(sub);
   }
 
   verifyResetReboot(): void {
@@ -629,7 +663,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     this.resetStatus.showWorking();
     this.cdr.detectChanges();
 
-    this.mauiService
+    const sub = this.mauiService
       .testResetButton(
         this.serialNumber,
         this.devicePort,
@@ -684,6 +718,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           this.cdr.detectChanges();
         },
       });
+    this.subs.add(sub);
   }
 
   bypassReset(): void {
@@ -700,7 +735,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     this.bslStatus.showWorking();
     this.cdr.detectChanges();
 
-    this.mauiService
+    const sub = this.mauiService
       .testBslButton(this.serialNumber, this.devicePort)
       .subscribe({
         next: res => {
@@ -750,6 +785,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           this.cdr.detectChanges();
         },
       });
+    this.subs.add(sub);
   }
 
   bypassBsl(): void {
@@ -805,7 +841,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     this.stage1Status.showWorking();
     this.cdr.detectChanges();
 
-    timer(this.stabilizationDelayMs)
+    const sub = timer(this.stabilizationDelayMs)
       .pipe(
         switchMap(() =>
           this.mauiService.runHostDutTests(
@@ -882,6 +918,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           this.cdr.detectChanges();
         },
       });
+    this.subs.add(sub);
   }
 
   bypassStage1(): void {
@@ -898,7 +935,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     this.stage2Status.showWorking();
     this.cdr.detectChanges();
 
-    timer(this.stabilizationDelayMs)
+    const sub = timer(this.stabilizationDelayMs)
       .pipe(
         switchMap(() =>
           this.mauiService.runHostDutTests(
@@ -956,6 +993,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           this.cdr.detectChanges();
         },
       });
+    this.subs.add(sub);
   }
 
   bypassStage2(): void {
@@ -972,7 +1010,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     this.stage3Status.showWorking();
     this.cdr.detectChanges();
 
-    timer(this.stabilizationDelayMs)
+    const sub = timer(this.stabilizationDelayMs)
       .pipe(
         switchMap(() =>
           this.mauiService.runHostDutTests(
@@ -991,8 +1029,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           if (res.allPassed) {
             this.stage3StatusValue = 'PASSED';
             this.stage3Status.showPassed();
-            this.inspectLogs();
-            autoAdvanceToCard('func-card-9', this.saveLogsBtn);
+            autoAdvanceToCard('func-card-adb', this.adbTransferBtn);
           } else {
             this.stage3StatusValue = 'FAILED';
             this.stage3Status.showFailed();
@@ -1004,8 +1041,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
                 this.stage3Passed = true;
                 this.stage3StatusValue = 'BYPASSED';
                 this.stage3Status.showBypassed();
-                this.inspectLogs();
-                autoAdvanceToCard('func-card-9', this.saveLogsBtn);
+                autoAdvanceToCard('func-card-adb', this.adbTransferBtn);
                 this.cdr.detectChanges();
               },
             );
@@ -1024,46 +1060,137 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
               this.stage3Passed = true;
               this.stage3StatusValue = 'BYPASSED';
               this.stage3Status.showBypassed();
-              this.inspectLogs();
-              autoAdvanceToCard('func-card-9', this.saveLogsBtn);
+              autoAdvanceToCard('func-card-adb', this.adbTransferBtn);
               this.cdr.detectChanges();
             },
           );
           this.cdr.detectChanges();
         },
       });
+    this.subs.add(sub);
   }
 
   bypassStage3(): void {
     this.stage3Passed = true;
     this.stage3StatusValue = 'BYPASSED';
     this.stage3Status.showBypassed();
+    autoAdvanceToCard('func-card-adb', this.adbTransferBtn);
+    this.cdr.detectChanges();
+  }
+
+  // Card 9: ADB Data Transfer Reliability
+  runAdbTransfer(): void {
+    this.adbInProgress = true;
+    this.adbTransfer = null;
+    this.adbStatus.showWorking();
+    this.cdr.detectChanges();
+
+    const sub = this.mauiService
+      .runAdbTransferTest(this.serialNumber)
+      .subscribe({
+        next: res => {
+          this.adbInProgress = false;
+          this.adbTransfer = res;
+          this.adbPassed = res.success;
+          if (res.success) {
+            this.adbStatusValue = 'PASSED';
+            this.adbStatus.showPassed();
+            this.advanceToLogs();
+          } else {
+            this.adbStatusValue = 'FAILED';
+            this.adbStatus.showFailed();
+            this.dialogService.openFailure(
+              'ADB Transfer Test Failed',
+              res.message || 'ADB data transfer check failed.',
+              () => this.runAdbTransfer(),
+              () => this.bypassAdbTransfer(),
+            );
+          }
+          this.cdr.detectChanges();
+        },
+        error: err => {
+          this.adbInProgress = false;
+          this.adbStatusValue = 'FAILED';
+          this.adbStatus.showFailed();
+          this.dialogService.openFailure(
+            'ADB Transfer Test Error',
+            err,
+            () => this.runAdbTransfer(),
+            () => this.bypassAdbTransfer(),
+          );
+          this.cdr.detectChanges();
+        },
+      });
+    this.subs.add(sub);
+  }
+
+  bypassAdbTransfer(): void {
+    this.adbPassed = true;
+    this.adbStatusValue = 'BYPASSED';
+    this.adbStatus.showBypassed();
+    this.logBypass(
+      'adb_transfer_test',
+      'ADB Data Transfer Reliability',
+      this.adbTransfer?.message ?? '',
+      () => this.advanceToLogs(),
+    );
+    this.cdr.detectChanges();
+  }
+
+  /**
+   * Records a bypassed card in its stage log so that the log checklist and
+   * the final verdict show BYPASSED instead of the last failure (or
+   * NOT_RUN). |done| runs once the log was written (or failed to).
+   */
+  private logBypass(
+    logStepName: string,
+    stageLabel: string,
+    lastResult: string,
+    done?: () => void,
+  ): void {
+    const serial = this.serialNumber || this.lastTestedSerial || 'UNKNOWN';
+    const content =
+      `=== ${stageLabel} ===\n` +
+      `Date: ${new Date().toISOString()}\n` +
+      'STATUS=BYPASSED\n' +
+      'RESULT: BYPASSED\n' +
+      'Bypassed by operator.\n' +
+      (lastResult ? `Last result before the bypass: ${lastResult}\n` : '');
+    const sub = this.deviceMgmtService
+      .saveCardLog(serial, logStepName, content)
+      .subscribe({next: () => done?.(), error: () => done?.()});
+    this.subs.add(sub);
+  }
+
+  private advanceToLogs(): void {
     this.inspectLogs();
     autoAdvanceToCard('func-card-9', this.saveLogsBtn);
-    this.cdr.detectChanges();
   }
 
   inspectLogs(): void {
     const targetSerial = this.serialNumber || 'UNKNOWN';
     this.inspectingLogs = true;
-    this.deviceMgmtService.getDeviceLogsStatus(targetSerial).subscribe({
-      next: res => {
-        this.inspectingLogs = false;
-        this.logsInspected = true;
-        this.logFiles = res.logs || [];
-        this.logsDirectory = res.directoryPath || '';
-        this.overallLogsVerdict = res.overallVerdict || '';
-        this.cdr.detectChanges();
-      },
-      error: () => {
-        this.inspectingLogs = false;
-        this.logsInspected = true;
-        this.cdr.detectChanges();
-      },
-    });
+    const sub = this.deviceMgmtService
+      .getDeviceLogsStatus(targetSerial)
+      .subscribe({
+        next: res => {
+          this.inspectingLogs = false;
+          this.logsInspected = true;
+          this.logFiles = res.logs || [];
+          this.logsDirectory = res.directoryPath || '';
+          this.overallLogsVerdict = res.overallVerdict || '';
+          this.cdr.detectChanges();
+        },
+        error: () => {
+          this.inspectingLogs = false;
+          this.logsInspected = true;
+          this.cdr.detectChanges();
+        },
+      });
+    this.subs.add(sub);
   }
 
-  // Card 9: Save Logs & Export
+  // Card 10: Save Logs & Export
   saveLogs(): void {
     if (this.deviceConnected) {
       this.dialogService.openFailure(
@@ -1089,7 +1216,14 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
       this.ledPassed &&
       this.stage1Passed &&
       this.stage2Passed &&
-      this.stage3Passed;
+      this.stage3Passed &&
+      this.adbPassed;
+
+    const t = this.adbTransfer;
+    const adbDetails = t
+      ? `push ${t.pushMbPerS.toFixed(1)} MB/s, pull ${t.pullMbPerS.toFixed(1)} MB/s, ` +
+        `${(Number(t.fileSizeBytes) / 1e6).toFixed(0)} MB, ${t.totalSeconds.toFixed(1)} s`
+      : 'no data';
 
     const summaryContent =
       `=== Maui ${phaseTag} Verification Summary ===\n` +
@@ -1114,17 +1248,18 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
       `Card 6 (Host+DUT+Charger): ${this.stage1StatusValue} (H2H=${this.h2hLinkSpeed}, PD=${this.negotiatedVoltage}V/${this.calculatedPowerW}W, CCD EC/GSC=${this.ecUartOk && this.gscUartOk})\n` +
       `Card 7 (180° SBU Flip): ${this.stage2StatusValue} (DUT SBU Orientation=${this.dutOrientation})\n` +
       `Card 8 (Charger Disconnected): ${this.stage3StatusValue} (Disconnected=${this.chargerDisconnected})\n` +
+      `Card 9 (ADB Transfer, two ~400 MB random files, must finish within 60 s): ${this.adbStatusValue} (${adbDetails})\n` +
       `OVERALL RESULT: ${allPassed ? 'PASS' : 'FAIL'}\n`;
 
     const logFileName = this.isFatpMode
       ? 'fatp_qt0_summary'
       : 'smt_functional_summary';
 
-    this.deviceMgmtService
+    const sub = this.deviceMgmtService
       .saveCardLog(targetSerial, logFileName, summaryContent)
       .subscribe({
         next: () => {
-          this.deviceMgmtService
+          const submitSub = this.deviceMgmtService
             .submitFinalManufacturingResults(
               targetSerial,
               'OP_FACTORY',
@@ -1150,9 +1285,9 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
                 this.inspectLogs();
                 this.cdr.detectChanges();
                 // Auto refresh after 2.5s for next unit
-                timer(2500).subscribe(() => {
-                  window.location.reload();
-                });
+                this.subs.add(
+                  timer(2500).subscribe(() => this.reloadForNextUnit()),
+                );
               },
               error: () => {
                 this.savingLogs = false;
@@ -1160,11 +1295,12 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
                 this.completeStatus.showPassed();
                 this.inspectLogs();
                 this.cdr.detectChanges();
-                timer(2500).subscribe(() => {
-                  window.location.reload();
-                });
+                this.subs.add(
+                  timer(2500).subscribe(() => this.reloadForNextUnit()),
+                );
               },
             });
+          this.subs.add(submitSub);
         },
         error: () => {
           this.savingLogs = false;
@@ -1172,11 +1308,15 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           this.completeStatus.showPassed();
           this.inspectLogs();
           this.cdr.detectChanges();
-          timer(2500).subscribe(() => {
-            window.location.reload();
-          });
+          this.subs.add(timer(2500).subscribe(() => this.reloadForNextUnit()));
         },
       });
+    this.subs.add(sub);
+  }
+
+  /** Reloads the page for the next unit (a method so that specs can stub it). */
+  reloadForNextUnit(): void {
+    window.location.reload();
   }
 
   formatLogSize(sizeBytes?: string | number): string {

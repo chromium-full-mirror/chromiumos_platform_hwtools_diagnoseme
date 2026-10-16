@@ -374,7 +374,6 @@ export class MauiStep1ProvisioningComponent implements OnInit, OnDestroy {
         slot.slotIndex,
         slot.serialNumber || `MAUI-SLOT${slot.slotIndex}`,
         slot.devicePort,
-        'v20_0325_100W',
       )
       .subscribe({
         next: progress => {
@@ -641,9 +640,17 @@ export class MauiStep1ProvisioningComponent implements OnInit, OnDestroy {
     this.logsSaved = true;
     this.disconnectStatus.showPassed();
     this.cdr.detectChanges();
-    // Auto refresh the page after 2.5s so fresh slots are ready for the next batch
-    timer(2500).subscribe(() => {
-      window.location.reload();
-    });
+    // Auto refresh the page after 2.5s so fresh slots are ready for the next
+    // batch (cancelled when the page is left before that).
+    this.subs.add(
+      timer(2500).subscribe(() => {
+        this.reloadForNextUnit();
+      }),
+    );
+  }
+
+  /** Reloads the page for the next batch (separate so specs can stub it). */
+  reloadForNextUnit(): void {
+    window.location.reload();
   }
 }

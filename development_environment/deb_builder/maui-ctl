@@ -3,12 +3,35 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# Forward maui-ctl command to the running server container or local python script
-if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^server$'; then
-    docker exec -i server maui-ctl "$@"
-elif [ -f /usr/local/maui/tools/src/maui_ctl.py ]; then
-    python3 /usr/local/maui/tools/src/maui_ctl.py "$@"
-else
-    echo "Error: DiagnoseMe server container is not running. Please run 'start-diagnoseme' first."
+# Run maui-ctl from the maui-utils container (the maui tools are not part of the
+# DiagnoseMe images). The current directory is mounted at /mnt/firmware_dir,
+# so firmware files can be passed as /mnt/firmware_dir/<file>; the station
+# firmware in /var/lib/diagnoseme/firmware is available read-only as well.
+CONFIG_FILE="/etc/diagnoseme/config.env"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    source "$CONFIG_FILE"
+fi
+if [ -z "${MAUI_UTILS_IMAGE:-}" ]; then
+    # config.env of older packages: the newest local maui-utils image.
+    MAUI_UTILS_IMAGE=$(docker images maui-utils \
+        --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' 2>/dev/null |
+        grep -v ':<none>$' | sort -r | head -n 1 | cut -f2)
+fi
+
+if [ -z "${MAUI_UTILS_IMAGE}" ] || ! docker image inspect "$MAUI_UTILS_IMAGE" > /dev/null 2>&1; then
+    echo "Error: Docker image '${MAUI_UTILS_IMAGE:-maui-utils}' not found. Run 'start-diagnoseme' first."
     exit 1
 fi
+
+TTY_ARGS=(-i)
+if [ -t 0 ] && [ -t 1 ]; then
+    TTY_ARGS=(-it)
+fi
+
+# Relative paths in the arguments refer to the current directory.
+exec docker run --rm "${TTY_ARGS[@]}" --privileged \
+    -v /dev:/dev -v /run/udev:/run/udev:ro \
+    -v "$(pwd)":/mnt/firmware_dir -w /mnt/firmware_dir \
+    -v /var/lib/diagnoseme/firmware:/var/lib/diagnoseme/firmware:ro \
+    --entrypoint maui-ctl "$MAUI_UTILS_IMAGE" "$@"

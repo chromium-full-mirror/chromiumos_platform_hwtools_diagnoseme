@@ -3,27 +3,29 @@
 # found in the LICENSE file.
 """Unit tests for Maui manufacturing services and console testing framework."""
 
+import fnmatch
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
 
+from server import maui_common
 from server.generated import maui_manufacturing_pb2
-from server.maui_common import (
-    UsbDeviceInfo,
-    extract_container_id_from_bos_file,
-    find_offline_fw_file,
-    get_device_log_dir,
-    write_device_log,
-)
-from server.maui_console_tester import (
-    EXPECTED_HOST_GPIOS,
-    MauiConsoleTester,
-    PdcInfoTestCase,
-    RegexMatchTestCase,
-    verify_host_adc_voltages,
-)
+from server.maui_common import extract_container_id_from_bos_file
+from server.maui_common import find_offline_fw_file
+from server.maui_common import FwSelection
+from server.maui_common import get_device_log_dir
+from server.maui_common import safe_log_step_name
+from server.maui_common import UsbDeviceInfo
+from server.maui_common import write_device_log
+from server.maui_console_tester import EXPECTED_HOST_GPIOS
+from server.maui_console_tester import MauiConsoleTester
+from server.maui_console_tester import PdcInfoTestCase
+from server.maui_console_tester import RegexMatchTestCase
+from server.maui_console_tester import verify_host_adc_voltages
+
 
 SAMPLE_HWREV_OUTPUT = "Hardware revision: 2\r\nmaui$ "
 SAMPLE_TEMP_OUTPUT = "Temperature = 43.26 'C\r\nmaui$ "
@@ -83,17 +85,13 @@ SAMPLE_GPIO_OUTPUT = """[              h2h_reset_l] O = 0
 [             pp1100_pg_od] I = 1
 [           hub_hs_suspend] I = 1
 maui$ """
-from server.maui_station1_service import (
-    MauiDeviceManagementServicer,
-    MauiPdcServicer,
-    MauiStation1Servicer,
-    analyze_device_manufacturing_logs,
-)
-from server.maui_station2_service import (
-    MauiStation2Servicer,
-    is_host_cc_flipped,
-    is_sbu_flipped,
-)
+from server.maui_station1_service import analyze_device_manufacturing_logs
+from server.maui_station1_service import MauiDeviceManagementServicer
+from server.maui_station1_service import MauiPdcServicer
+from server.maui_station1_service import MauiStation1Servicer
+from server.maui_station2_service import is_host_cc_flipped
+from server.maui_station2_service import is_sbu_flipped
+from server.maui_station2_service import MauiStation2Servicer
 
 
 class TestMauiStation1Servicer(unittest.IsolatedAsyncioTestCase):
@@ -161,9 +159,13 @@ class TestMauiStation1Servicer(unittest.IsolatedAsyncioTestCase):
     self.assertIn("failed", resp.message)
 
   @mock.patch("server.maui_station1_service.write_device_log")
-  @mock.patch("server.maui_station1_service.find_offline_fw_file", return_value="/var/lib/diagnoseme/firmware/mcu/zephyr.txt")
+  @mock.patch("server.maui_station1_service.select_stable_fw", return_value=FwSelection(path="/var/lib/diagnoseme/firmware/mcu/zephyr.txt"))
+  @mock.patch(
+      "server.maui_utils_runner.MauiUtilsSession.stage",
+      side_effect=lambda path: "/mnt/firmware_dir/" + os.path.basename(path),
+  )
   @mock.patch("subprocess.run")
-  def test_auto_program_mcu_bsl_offline_file(self, mock_run, mock_find, mock_log):
+  def test_auto_program_mcu_bsl_offline_file(self, mock_run, mock_stage, mock_find, mock_log):
     mock_run.return_value = mock.Mock(
         stdout="INFO: MCU firmware update successful from zephyr.txt\n",
         returncode=0,
@@ -174,11 +176,51 @@ class TestMauiStation1Servicer(unittest.IsolatedAsyncioTestCase):
     )
     resp = self.servicer.auto_program_mcu_bsl(req, self.context)
     self.assertTrue(resp.success)
-    # Ensure offline file path was passed in command
-    called_cmd = mock_run.call_args[0][0]
-    self.assertIn("/var/lib/diagnoseme/firmware/mcu/zephyr.txt", called_cmd)
+    # Ensure fw-updater runs in maui-utils with the staged offline file and
+    # the same arguments as the former in-image tool.
+    mock_stage.assert_called_once_with("/var/lib/diagnoseme/firmware/mcu/zephyr.txt")
+    # The last subprocess.run call is the container cleanup (docker rm -f).
+    run_cmds = [c[0][0] for c in mock_run.call_args_list if c[0][0][1] == "run"]
+    self.assertEqual(len(run_cmds), 1)
+    called_cmd = run_cmds[0]
+    entrypoint_idx = called_cmd.index("--entrypoint")
+    self.assertEqual(called_cmd[entrypoint_idx + 1], "fw-updater")
+    self.assertEqual(
+        called_cmd[entrypoint_idx + 3:],
+        ["/mnt/firmware_dir/zephyr.txt", "--uart", "/dev/ttyUSB0", "--bsl-mode"],
+    )
 
-  @mock.patch("server.maui_station1_service.find_offline_fw_file", return_value=None)
+  @mock.patch("server.maui_station1_service.time.sleep")
+  @mock.patch("server.maui_station1_service.write_device_log")
+  @mock.patch("server.maui_station1_service.select_stable_fw", return_value=FwSelection(path="/var/lib/diagnoseme/firmware/mcu/zephyr.txt"))
+  @mock.patch(
+      "server.maui_utils_runner.MauiUtilsSession.stage",
+      side_effect=lambda path: "/mnt/firmware_dir/" + os.path.basename(path),
+  )
+  @mock.patch("subprocess.run")
+  def test_auto_program_mcu_bsl_retry_uses_a_fresh_container(self, mock_run, mock_stage, mock_find, mock_log, mock_sleep):
+    def fake_run(cmd, **unused_kwargs):
+      if cmd[1] == "run" and sum(1 for c in mock_run.call_args_list if c[0][0][1] == "run") == 1:
+        raise subprocess.CalledProcessError(1, cmd, output="Unable to connect to BSL")
+      return mock.Mock(stdout="INFO: MCU firmware update successful\n", returncode=0)
+
+    mock_run.side_effect = fake_run
+    req = maui_manufacturing_pb2.MauiAutoProgramMcuRequest(
+        device_port="/dev/ttyUSB0",
+        fw_channel="offline",
+    )
+    resp = self.servicer.auto_program_mcu_bsl(req, self.context)
+    self.assertTrue(resp.success)
+    self.assertIn("retry 2", resp.message)
+    run_cmds = [c[0][0] for c in mock_run.call_args_list if c[0][0][1] == "run"]
+    self.assertEqual(len(run_cmds), 2)
+    names = [cmd[cmd.index("--name") + 1] for cmd in run_cmds]
+    self.assertNotEqual(names[0], names[1])
+    # Same tool arguments, staged once.
+    self.assertEqual(run_cmds[0][run_cmds[0].index("--entrypoint"):], run_cmds[1][run_cmds[1].index("--entrypoint"):])
+    mock_stage.assert_called_once()
+
+  @mock.patch("server.maui_station1_service.select_stable_fw", return_value=FwSelection(error="No mcu firmware"))
   def test_auto_program_mcu_bsl_offline_missing(self, mock_find):
     req = maui_manufacturing_pb2.MauiAutoProgramMcuRequest(
         device_port="/dev/ttyUSB0",
@@ -562,7 +604,124 @@ class TestMauiPdcServicer(unittest.IsolatedAsyncioTestCase):
           found = find_offline_fw_file("mcu")
           self.assertEqual(found, fw_file)
 
-  @mock.patch("server.maui_station1_service.find_offline_fw_file", return_value=None)
+  def _find_pdc(self, files, channel, finder=find_offline_fw_file):
+    """Runs find_offline_fw_file("pdc", channel) with only |files| on disk."""
+    def fake_glob(pattern):
+      return sorted(
+          f for f in files
+          if os.path.dirname(f) == os.path.dirname(pattern)
+          and fnmatch.fnmatch(os.path.basename(f), os.path.basename(pattern)))
+
+    def fake_isdir(path):
+      return any(f.startswith(path.rstrip("/") + "/") for f in files)
+
+    with mock.patch("server.maui_common.glob.glob", side_effect=fake_glob):
+      with mock.patch("server.maui_common.os.path.isdir", side_effect=fake_isdir):
+        return finder("pdc", channel)
+
+  def test_find_offline_fw_file_prefers_the_exact_file_name(self):
+    files = [
+        "/var/lib/diagnoseme/firmware/pdc/pdc_v20_0325_100W.bin",
+        "/usr/local/server/firmware/pdc/v20_0325_100W.bin",
+    ]
+    self.assertEqual(self._find_pdc(files, "v20_0325_100W"), files[1])
+
+  def _select(self, component, files, manifests=None):
+    """Runs select_stable_fw(component) on temporary firmware directories.
+
+    Args:
+      files: {"<dir index>/<name>": content} below two firmware roots.
+      manifests: {dir index: STABLE.json dict}.
+    """
+    tmp = tempfile.mkdtemp()
+    self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+    roots = (f"{tmp}/0/{{component}}", f"{tmp}/1/{{component}}")
+    for rel, content in files.items():
+      index, name = rel.split("/", 1)
+      path = roots[int(index)].format(component=component) + "/" + name
+      os.makedirs(os.path.dirname(path), exist_ok=True)
+      with open(path, "wb") as f:
+        f.write(content)
+    for index, manifest in (manifests or {}).items():
+      d = roots[index].format(component=component)
+      os.makedirs(d, exist_ok=True)
+      with open(os.path.join(d, "STABLE.json"), "w", encoding="utf-8") as f:
+        json.dump(manifest, f)
+    with mock.patch.object(maui_common, "OFFLINE_FW_COMPONENT_DIRS", roots):
+      return maui_common.select_stable_fw(component), roots
+
+  def test_select_stable_fw_follows_the_manifest(self):
+    files = {"0/v20_0325.bin": b"old", "0/v20_0325_100W.bin": b"new"}
+    sel, roots = self._select("pdc", files, {0: {
+        "version": "v20_0325_100W", "file": "v20_0325_100W.bin",
+        "md5": __import__("hashlib").md5(b"new").hexdigest(), "source": "gs://x"}})
+    self.assertEqual(sel.path, roots[0].format(component="pdc") + "/v20_0325_100W.bin")
+    self.assertEqual(sel.version, "v20_0325_100W")
+    self.assertEqual((sel.warning, sel.error), ("", ""))
+
+  def test_select_stable_fw_rejects_a_file_that_does_not_match_its_manifest(self):
+    sel, _ = self._select("pdc", {"0/v20.bin": b"corrupt"}, {0: {"file": "v20.bin", "md5": "0" * 32}})
+    self.assertEqual(sel.path, "")
+    self.assertTrue(sel.ambiguous)
+    self.assertIn("does not match the md5", sel.error)
+
+  def test_select_stable_fw_without_manifest(self):
+    # The only image: used, with a warning.
+    sel, _ = self._select("pdc", {"0/v20_0325.bin": b"x"})
+    self.assertTrue(sel.path.endswith("/v20_0325.bin"))
+    self.assertIn("no STABLE.json", sel.warning)
+    self.assertIn("flashing v20_0325.bin", sel.warning)
+    # Several images: no guess.
+    sel, _ = self._select("pdc", {"0/v19_0318.bin": b"a", "0/v20_0325.bin": b"b"})
+    self.assertEqual(sel.path, "")
+    self.assertTrue(sel.ambiguous)
+    self.assertIn("2 pdc images", sel.error)
+    self.assertIn("v19_0318.bin, v20_0325.bin", sel.error)
+    # Nothing at all.
+    sel, _ = self._select("mcu", {})
+    self.assertEqual(sel.path, "")
+    self.assertFalse(sel.ambiguous)
+    self.assertIn("No mcu firmware", sel.error)
+
+  def test_select_stable_fw_uses_the_first_directory_with_a_manifest(self):
+    sel, roots = self._select("mcu", {"0/old.txt": b"a", "1/zephyr.txt": b"z"}, {1: {"file": "zephyr.txt"}})
+    self.assertEqual(sel.path, roots[1].format(component="mcu") + "/zephyr.txt")
+    self.assertEqual(sel.warning, "")
+
+  def test_find_offline_fw_file_never_falls_back_to_another_version(self):
+    pdc_dir = "/var/lib/diagnoseme/firmware/pdc"
+    self.assertIsNone(self._find_pdc([f"{pdc_dir}/v20_0325.bin"], "v20_0325_100W"))
+    both = [f"{pdc_dir}/v20_0325.bin", f"{pdc_dir}/v20_0325_100W.bin"]
+    self.assertEqual(self._find_pdc(both, "v20_0325_100W"), f"{pdc_dir}/v20_0325_100W.bin")
+    # A version that is a prefix of another one picks its own file.
+    self.assertEqual(self._find_pdc(both, "v20_0325"), f"{pdc_dir}/v20_0325.bin")
+    self.assertEqual(
+        self._find_pdc([f"{pdc_dir}/pdc_v13_0213.bin"], "v13_0213"), f"{pdc_dir}/pdc_v13_0213.bin")
+    self.assertEqual(
+        self._find_pdc([f"{pdc_dir}/v13_122/pdc.bin"], "v13_122"), f"{pdc_dir}/v13_122/pdc.bin")
+    # Channels without a version still take any local file.
+    self.assertEqual(self._find_pdc([f"{pdc_dir}/v20_0325.bin"], "stable"), f"{pdc_dir}/v20_0325.bin")
+
+  @mock.patch("server.maui_station1_service.select_stable_fw", return_value=FwSelection(error="No pdc firmware in /var/lib/diagnoseme/firmware/pdc. Update the station firmware."))
+  @mock.patch("asyncio.create_subprocess_exec")
+  async def test_program_single_pdc_default_channel_without_file_fails(self, mock_exec, mock_find):
+    req = maui_manufacturing_pb2.MauiProgramSinglePdcRequest(
+        slot_index=1,
+        serial_number="TEST_MAUI_SERIAL_001",
+        device_port="/dev/ttyUSB0",
+    )
+    responses = []
+    async for resp in self.servicer.program_single_pdc(req, self.context):
+      responses.append(resp)
+
+    mock_find.assert_called_once_with("pdc")
+    mock_exec.assert_not_called()
+    self.assertEqual(len(responses), 1)
+    self.assertEqual(responses[0].current_block, "Failed")
+    self.assertIn("not found", responses[0].status_message)
+    self.assertIn("/var/lib/diagnoseme/firmware/pdc", responses[0].error_message)
+
+  @mock.patch("server.maui_station1_service.select_stable_fw", return_value=FwSelection(error="No pdc firmware in /var/lib/diagnoseme/firmware/pdc. Update the station firmware."))
   async def test_program_single_pdc_offline_missing_fails_cleanly(self, mock_find):
     req = maui_manufacturing_pb2.MauiProgramSinglePdcRequest(
         slot_index=1,
@@ -579,9 +738,13 @@ class TestMauiPdcServicer(unittest.IsolatedAsyncioTestCase):
     self.assertEqual(responses[0].current_block, "Failed")
     self.assertIn("Offline PDC firmware binary not found", responses[0].status_message)
 
-  @mock.patch("server.maui_station1_service.find_offline_fw_file", return_value="/var/lib/diagnoseme/firmware/pdc/v20_0325.bin")
+  @mock.patch("server.maui_station1_service.select_stable_fw", return_value=FwSelection(path="/var/lib/diagnoseme/firmware/pdc/v20_0325.bin"))
+  @mock.patch(
+      "server.maui_utils_runner.MauiUtilsSession.stage",
+      side_effect=lambda path: "/mnt/firmware_dir/" + os.path.basename(path),
+  )
   @mock.patch("asyncio.create_subprocess_exec")
-  async def test_program_single_pdc_offline_file_success(self, mock_exec, mock_find):
+  async def test_program_single_pdc_offline_file_success(self, mock_exec, mock_stage, mock_find):
     mock_proc = mock.AsyncMock()
     mock_proc.returncode = 0
     mock_proc.stdout.readline.side_effect = [
@@ -608,14 +771,19 @@ class TestMauiPdcServicer(unittest.IsolatedAsyncioTestCase):
     self.assertEqual(final_resp.current_block, "Complete")
     self.assertIn("succeeded", final_resp.status_message)
 
-    # Verify that --file was passed to maui-flash subprocess
-    call_args = mock_exec.call_args[0]
+    # Verify that maui-flash runs in maui-utils with --file <staged file>
+    call_args = list(mock_exec.call_args[0])
+    self.assertEqual(call_args[call_args.index("--entrypoint") + 1], "maui-flash")
     self.assertIn("--file", call_args)
-    self.assertIn("/var/lib/diagnoseme/firmware/pdc/v20_0325.bin", call_args)
+    self.assertIn("/mnt/firmware_dir/v20_0325.bin", call_args)
 
   @mock.patch("server.maui_station1_service.find_offline_fw_file", return_value="/var/lib/diagnoseme/firmware/pdc/v20_0325_100W.bin")
+  @mock.patch(
+      "server.maui_utils_runner.MauiUtilsSession.stage",
+      side_effect=lambda path: "/mnt/firmware_dir/" + os.path.basename(path),
+  )
   @mock.patch("asyncio.create_subprocess_exec")
-  async def test_program_single_pdc_100w_channel_success(self, mock_exec, mock_find):
+  async def test_program_single_pdc_100w_channel_success(self, mock_exec, mock_stage, mock_find):
     mock_proc = mock.AsyncMock()
     mock_proc.returncode = 0
     mock_proc.stdout.readline.side_effect = [
@@ -644,7 +812,87 @@ class TestMauiPdcServicer(unittest.IsolatedAsyncioTestCase):
     # Verify that --file was passed with v20_0325_100W.bin
     call_args = mock_exec.call_args[0]
     self.assertIn("--file", call_args)
-    self.assertIn("/var/lib/diagnoseme/firmware/pdc/v20_0325_100W.bin", call_args)
+    self.assertIn("/mnt/firmware_dir/v20_0325_100W.bin", call_args)
+
+  @staticmethod
+  def _finished_proc(returncode, output):
+    """Returns a fake maui-flash process that already exited."""
+    proc = mock.AsyncMock()
+    proc.returncode = returncode
+    proc.stdout.readline.side_effect = [b""]
+    proc.stdout.read.return_value = output
+    proc.wait.return_value = returncode
+    return proc
+
+  @mock.patch("server.maui_station1_service.write_device_log")
+  @mock.patch(
+      "server.maui_station1_service.select_stable_fw",
+      return_value=FwSelection(path="/var/lib/diagnoseme/firmware/pdc/v20_0325.bin",
+                               warning="v20_0325_100W.bin not found - flashing v20_0325.bin instead"))
+  @mock.patch(
+      "server.maui_utils_runner.MauiUtilsSession.stage",
+      side_effect=lambda path: "/mnt/firmware_dir/" + os.path.basename(path),
+  )
+  @mock.patch("asyncio.create_subprocess_exec")
+  async def test_program_single_pdc_reports_the_substitute_image(self, mock_exec, mock_stage, mock_find, mock_log):
+    mock_exec.return_value = self._finished_proc(0, b"Flashing complete.")
+    req = maui_manufacturing_pb2.MauiProgramSinglePdcRequest(
+        slot_index=1, serial_number="TEST_MAUI_SERIAL_001", device_port="/dev/ttyUSB0")
+    responses = [resp async for resp in self.servicer.program_single_pdc(req, self.context)]
+
+    warning = "v20_0325_100W.bin not found - flashing v20_0325.bin instead"
+    self.assertEqual(responses[0].status_message, f"WARNING: {warning}")
+    self.assertFalse(responses[0].is_complete)
+    self.assertEqual(responses[-1].current_block, "Complete")
+    self.assertIn(f"WARNING: {warning}", responses[-1].status_message)
+    self.assertIn("/mnt/firmware_dir/v20_0325.bin", mock_exec.call_args[0])
+    serial, step, content = mock_log.call_args[0]
+    self.assertEqual((serial, step), ("TEST_MAUI_SERIAL_001", "pdc_flashing"))
+    self.assertIn(f"STATUS: SUCCESS\nWARNING: {warning}\n", content)
+
+  @mock.patch("server.maui_station1_service.write_device_log")
+  @mock.patch("server.maui_station1_service.find_offline_fw_file", return_value="/var/lib/diagnoseme/firmware/pdc/v20_0325.bin")
+  @mock.patch(
+      "server.maui_utils_runner.MauiUtilsSession.stage",
+      side_effect=lambda path: "/mnt/firmware_dir/" + os.path.basename(path),
+  )
+  @mock.patch("asyncio.create_subprocess_exec")
+  async def test_program_single_pdc_explicit_version_uses_the_local_file(self, mock_exec, mock_stage, mock_find, mock_log):
+    mock_exec.return_value = self._finished_proc(0, b"Flashing complete.")
+    req = maui_manufacturing_pb2.MauiProgramSinglePdcRequest(
+        slot_index=1, serial_number="TEST_MAUI_SERIAL_001", device_port="/dev/ttyUSB0",
+        fw_channel="v20_0325")
+    responses = [resp async for resp in self.servicer.program_single_pdc(req, self.context)]
+
+    self.assertEqual(responses[-1].current_block, "Complete")
+    call_args = list(mock_exec.call_args[0])
+    self.assertIn("--file", call_args)
+    self.assertNotIn("--fw_channel", call_args)
+
+  @mock.patch("server.maui_station1_service.time.sleep")
+  @mock.patch("server.maui_station1_service.write_device_log")
+  @mock.patch("server.maui_station1_service.select_stable_fw", return_value=FwSelection(path="/var/lib/diagnoseme/firmware/pdc/v20_0325_100W.bin"))
+  @mock.patch(
+      "server.maui_utils_runner.MauiUtilsSession.stage",
+      side_effect=lambda path: "/mnt/firmware_dir/" + os.path.basename(path),
+  )
+  @mock.patch("asyncio.create_subprocess_exec")
+  async def test_program_single_pdc_retry_uses_a_fresh_container(self, mock_exec, mock_stage, mock_find, mock_log, mock_sleep):
+    mock_exec.side_effect = [
+        self._finished_proc(1, b"Timeout while waiting for prompt"),
+        self._finished_proc(0, b"Flashing complete."),
+    ]
+    req = maui_manufacturing_pb2.MauiProgramSinglePdcRequest(
+        slot_index=1, serial_number="TEST_MAUI_SERIAL_001", device_port="/dev/ttyUSB0")
+    responses = [resp async for resp in self.servicer.program_single_pdc(req, self.context)]
+
+    self.assertEqual(responses[-1].current_block, "Complete")
+    self.assertEqual(mock_exec.call_count, 2)
+    first, second = (list(c[0]) for c in mock_exec.call_args_list)
+    self.assertNotEqual(first[first.index("--name") + 1], second[second.index("--name") + 1])
+    self.assertEqual(first[first.index("--entrypoint"):], second[second.index("--entrypoint"):])
+    _, _, content = mock_log.call_args[0]
+    self.assertIn(second[second.index("--name") + 1], content)
 
 
 class TestMauiDeviceManagementServicer(unittest.TestCase):
@@ -666,6 +914,26 @@ class TestMauiDeviceManagementServicer(unittest.TestCase):
         with open(saved_path, "r", encoding="utf-8") as f:
           content = f.read()
         self.assertIn("Sample log content", content)
+
+  def test_write_device_log_keeps_ui_step_names_inside_the_log_dir(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      log_dir = os.path.join(tmpdir, "logs")
+      os.makedirs(log_dir)
+      with mock.patch("server.maui_common.get_device_log_dir", return_value=log_dir):
+        for step in ("../../evil", "/etc/cron.d/evil", "..\\evil", "evil.log"):
+          saved_path = write_device_log("TESTSERIAL", step, "x")
+          self.assertEqual(saved_path, os.path.join(log_dir, "evil.log"), step)
+        self.assertEqual(sorted(os.listdir(tmpdir)), ["logs"])
+
+  def test_safe_log_step_name(self):
+    self.assertEqual(safe_log_step_name("smt_functional_summary"), "smt_functional_summary")
+    self.assertEqual(safe_log_step_name("host_dut_tests.log"), "host_dut_tests.log")
+    self.assertEqual(safe_log_step_name("pdc_flashing_slot2"), "pdc_flashing_slot2")
+    self.assertEqual(safe_log_step_name("../x y"), "xy")
+    self.assertEqual(safe_log_step_name(".hidden"), "hidden")
+    self.assertEqual(safe_log_step_name(".."), "device_log")
+    self.assertEqual(safe_log_step_name(""), "device_log")
+    self.assertEqual(safe_log_step_name(None), "device_log")
 
   def test_verify_scanned_label_match(self):
     req = maui_manufacturing_pb2.MauiVerifyLabelRequest(

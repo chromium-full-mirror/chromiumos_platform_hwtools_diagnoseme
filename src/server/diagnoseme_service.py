@@ -9,6 +9,7 @@ import os
 
 import grpc
 
+from server import editions
 from server.generated import diagnoseme_pb2
 from server.generated import diagnoseme_pb2_grpc
 
@@ -38,3 +39,19 @@ class DiagnoseMeServicer(diagnoseme_pb2_grpc.DiagnoseMeServiceServicer):
             return diagnoseme_pb2.GetLogsResponse(
                 log_content=f"Error reading logs: {str(e)}"
             )
+
+    def get_station_config(
+        self,
+        unused_request: diagnoseme_pb2.GetStationConfigRequest,  # pylint: disable=no-member
+        unused_context: grpc.ServicerContext,
+    ) -> diagnoseme_pb2.StationConfig:  # pylint: disable=no-member
+        """Returns the edition this server image was built for."""
+        # pylint: disable=no-member
+        edition = editions.get_active_edition()
+        return diagnoseme_pb2.StationConfig(
+            edition=edition.edition_id,
+            title=edition.title,
+            services=list(edition.services),
+            maui_hw_rev=edition.maui_hw_rev,
+            station_id=os.environ.get("STATION_ID", ""),
+        )

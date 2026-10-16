@@ -34,4 +34,5 @@ dist/**
 *.iso
 test_server/iso_build/**
 iso_build/**
-offline_update_bundle/**
+# Offline bundles (older scripts wrote them relative to the current directory).
+**/offline_update_bundle/**

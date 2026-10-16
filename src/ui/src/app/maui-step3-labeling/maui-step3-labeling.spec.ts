@@ -2,7 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {
+  ComponentFixture,
+  TestBed,
+  discardPeriodicTasks,
+  fakeAsync,
+  tick,
+} from '@angular/core/testing';
 import {NoopAnimationsModule} from '@angular/platform-browser/animations';
 import {provideRouter} from '@angular/router';
 import {of} from 'rxjs';
@@ -42,12 +48,19 @@ describe('MauiStep3LabelingComponent', () => {
     fixture.detectChanges();
   });
 
-  it('should create and detect electronic serial and generate SVG barcode bars', () => {
+  it('should create and detect electronic serial and generate SVG barcode bars', fakeAsync(() => {
     expect(component).toBeTruthy();
+    // The serial is polled with timer(0, 2000): restart the loop inside the
+    // fake zone and let the first poll run.
+    component.pollElectronicSerial();
+    tick();
+    fixture.detectChanges();
     expect(component.electronicSerial).toBe('MAUI-TEST-001');
     expect(component.deviceConnected).toBeTrue();
     expect(component.svgBarcodeBars.length).toBeGreaterThan(0);
-  });
+    fixture.destroy();
+    discardPeriodicTasks();
+  }));
 
   it('should copy serial to clipboard', () => {
     spyOn(navigator.clipboard, 'writeText').and.returnValue(Promise.resolve());
@@ -55,6 +68,18 @@ describe('MauiStep3LabelingComponent', () => {
     component.copySerialToClipboard();
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('MAUI-TEST-001');
   });
+
+  it('restarts instead of stacking the polling loop on refresh', fakeAsync(() => {
+    const spy = mockDeviceMgmtService.readConnectedDeviceSerial;
+    component.pollElectronicSerial();
+    component.pollElectronicSerial();
+    spy.calls.reset();
+    tick(2000);
+    // One loop polls at t=0 and t=2000; stacked loops would poll 4 times.
+    expect(spy).toHaveBeenCalledTimes(2);
+    fixture.destroy();
+    discardPeriodicTasks();
+  }));
 
   it('should generate valid Code 128 barcode bars for any serial', () => {
     component.generateBarcode('ABC123456');

@@ -2,7 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {
+  ComponentFixture,
+  TestBed,
+  discardPeriodicTasks,
+  fakeAsync,
+  tick,
+} from '@angular/core/testing';
 import {NoopAnimationsModule} from '@angular/platform-browser/animations';
 import {provideRouter} from '@angular/router';
 import {of} from 'rxjs';
@@ -35,6 +41,7 @@ describe('MauiStep1ProvisioningComponent', () => {
     discoverTopologyAndSerial: jasmine.createSpy().and.returnValue(
       of({
         success: true,
+        ftdiDevNode: '/dev/ttyUSB0',
         readSerialNumber: 'MAUI-TEST-001',
         ftdiCurrentSerial: 'FT123456',
         ftdiCurrentPid: 0x6001,
@@ -94,6 +101,9 @@ describe('MauiStep1ProvisioningComponent', () => {
 
     fixture = TestBed.createComponent(MauiStep1ProvisioningComponent);
     component = fixture.componentInstance;
+    // Saving the batch logs reloads the page after 2.5 s; a real reload
+    // would abort the whole karma run.
+    spyOn(component, 'reloadForNextUnit');
     fixture.detectChanges();
   });
 
@@ -101,17 +111,21 @@ describe('MauiStep1ProvisioningComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should auto-run pipeline (MCU -> PDC -> FTDI) on slot', () => {
+  it('should auto-run pipeline (MCU -> PDC -> FTDI) on slot', fakeAsync(() => {
     const slot = component.slots[0];
     slot.devicePort = '/dev/ttyUSB0';
     component.startPipelineForSlot(slot);
+    // The pipeline waits 6 s for the MCU firmware to re-enumerate the
+    // console before it flashes the PDC and programs the FTDI EEPROM.
+    tick(10000);
 
     expect(mockStation1Service.autoProgramMcuBsl).toHaveBeenCalled();
     expect(mockPdcService.programSinglePdc).toHaveBeenCalled();
     expect(mockStation1Service.programFtdiEeprom).toHaveBeenCalled();
     expect(slot.stage).toBe('PROVISIONED');
     expect(component.pipelineCardPassed).toBeTrue();
-  });
+    discardPeriodicTasks();
+  }));
 
   it('should dynamically allocate separate slots for multiple connected devices', () => {
     // Slot 1 bound on init
@@ -152,11 +166,15 @@ describe('MauiStep1ProvisioningComponent', () => {
     component.slots[1].serialNumber = 'MAUI-002';
     component.slots[2].stage = 'IDLE';
     component.slots[3].stage = 'IDLE';
+    // Logs can only be saved once every board is unplugged and no slot is
+    // still flashing (the slot discovered on init starts its pipeline).
+    component.connectedDevicesCount = 0;
+    component.allDisconnected = true;
+    component.isAnyFlashing = false;
 
     expect(component.hasCompletedSlots).toBeTrue();
     expect(component.canSaveLogs).toBeTrue();
 
-    component.connectedDevicesCount = 0;
     component.saveBatchLogsAndFinalize();
     expect(mockDeviceMgmtService.saveCardLog).toHaveBeenCalled();
   });

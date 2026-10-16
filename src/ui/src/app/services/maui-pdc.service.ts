@@ -22,11 +22,16 @@ export class MauiPdcService {
     return this.client.discoverConnectedPdcDevices(new Empty());
   }
 
+  /**
+   * Flashes the PDC firmware of one board. An empty fwChannel selects the
+   * server's default PDC firmware (DEFAULT_PDC_CHANNEL in maui_common.py),
+   * which is also the version the station firmware sync downloads.
+   */
   programSinglePdc(
     slotIndex: number,
     serialNumber: string,
     devicePort: string,
-    fwChannel = 'v20_0325_100W',
+    fwChannel = '',
   ): Observable<MauiProgramPdcProgressResponse> {
     const request = new MauiProgramSinglePdcRequest();
     request.slotIndex = slotIndex;

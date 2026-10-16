@@ -7,7 +7,9 @@ set -e
 
 COMPOSE_FILE="/etc/diagnoseme/docker-compose.yaml"
 CONFIG_FILE="/etc/diagnoseme/config.env"
-DEFAULT_UI_URL="http://localhost:8888/maui-initial-flashing"
+DEFAULT_UI_URL="http://localhost:8888/"
+FW_ROOT="/var/lib/diagnoseme/firmware"
+FW_FETCH="/usr/lib/diagnoseme/maui_fw_fetch.py"
 
 # Load configuration if available
 if [ -f "$CONFIG_FILE" ]; then
@@ -19,6 +21,40 @@ MODE="${MODE:-offline}"
 AUTO_OPEN_BROWSER="${AUTO_OPEN_BROWSER:-true}"
 UI_URL="${UI_URL:-$DEFAULT_UI_URL}"
 DOCKER_TAG="${DOCKER_TAG:-maui}"
+# Maui firmware components of the edition (editions.json "firmware", written
+# to config.env by the deb builder); fall back for config files without it.
+if [ -z "${FIRMWARE_COMPONENTS:-}" ]; then
+    case "${DIAGNOSEME_EDITION:-maui-v1.1}" in
+        maui-v1.1|all) FIRMWARE_COMPONENTS="mcu pdc" ;;
+    esac
+fi
+FIRMWARE_COMPONENTS="${FIRMWARE_COMPONENTS:-}"
+# Maui device of the stable firmware markers (editions.json "maui_device").
+if [ -z "${MAUI_DEVICE:-}" ]; then
+    case "${DIAGNOSEME_EDITION:-maui-v1.1}" in
+        maui-v1.1|all) MAUI_DEVICE="maui_v11" ;;
+    esac
+fi
+MAUI_DEVICE="${MAUI_DEVICE:-}"
+
+# Fetches the current Maui firmware of the edition from the public GCS bucket
+# into ${FW_ROOT} (see maui_fw_fetch.py). Failures only print a warning.
+sync_maui_firmware() {
+    local fetch=(python3 "${FW_FETCH}" --device "${MAUI_DEVICE}" --dest-root "${FW_ROOT}" --timeout 10 --retries 0)
+    if [ ! -f "${FW_FETCH}" ]; then
+        echo "WARNING: ${FW_FETCH} is missing; skipping the Maui firmware sync."
+        return 0
+    fi
+    if [ "$(id -u)" -ne 0 ] && [ ! -w "${FW_ROOT}" ]; then
+        # The firmware directories belong to root (deb / ISO installation).
+        fetch=(sudo -n "${fetch[@]}")
+    fi
+    echo "Checking for updated Maui firmware (${FIRMWARE_COMPONENTS}) from cloud..."
+    # shellcheck disable=SC2086 # one argument per component
+    if ! "${fetch[@]}" ${FIRMWARE_COMPONENTS}; then
+        echo "WARNING: Maui firmware sync failed; using the firmware already on this station."
+    fi
+}
 
 # Parse command line options
 while [[ $# -gt 0 ]]; do
@@ -43,10 +79,10 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: start-diagnoseme [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --online        Run in online mode (pulls latest :maui Docker images)"
+            echo "  --online        Run in online mode (pulls latest :${DOCKER_TAG} Docker images)"
             echo "  --offline       Run in offline mode (uses pre-loaded local images, default)"
             echo "  --no-browser    Start services without launching the web browser"
-            echo "  --tag <tag>     Override Docker image tag (default: maui)"
+            echo "  --tag <tag>     Override Docker image tag (default: DOCKER_TAG of config.env)"
             echo "  -h, --help      Show this help message"
             exit 0
             ;;
@@ -69,6 +105,58 @@ echo " Image Tag: ${DOCKER_TAG}"
 echo "=================================================="
 
 export DOCKER_TAG="${DOCKER_TAG:-maui}"
+export STATION_ID="${STATION_ID:-}"
+export RESULTS_SERVER="${RESULTS_SERVER:-}"
+if [ -n "${MAUI_UTILS_IMAGE:-}" ]; then
+    export MAUI_UTILS_IMAGE
+fi
+# Optional Maui test overrides of config.env (docker compose passes them to
+# the server only when they are exported).
+for VAR in MAUI_ADB_SIZE_MB MAUI_ADB_DEADLINE_S MAUI_ADB_MIN_RATE_MB_S; do
+    if [ -n "${!VAR:-}" ]; then
+        export "${VAR?}"
+    fi
+done
+
+# Maui editions run their flashing tools in the maui-utils container. Load the
+# bundled image if it is not present yet (offline stations).
+MAUI_UTILS_TAR="/var/lib/diagnoseme/maui-utils/maui-utils.tar"
+if [ -f "${MAUI_UTILS_TAR}" ] && [ ! -r "${MAUI_UTILS_TAR}" ]; then
+    # Older packages installed the tar readable by root only.
+    sudo chmod 644 "${MAUI_UTILS_TAR}" || true
+fi
+if [ -z "${MAUI_UTILS_IMAGE:-}" ] && [ -r "${MAUI_UTILS_TAR}" ]; then
+    # config.env of older packages has no MAUI_UTILS_IMAGE: use the
+    # maui-utils:<version> tag stored in the bundled tar.
+    MAUI_UTILS_IMAGE=$(python3 -c '
+import json, sys, tarfile
+with tarfile.open(sys.argv[1]) as tar:
+    manifest = json.load(tar.extractfile("manifest.json"))
+tags = [t for m in manifest for t in (m.get("RepoTags") or [])]
+print(next((t for t in tags if t.startswith("maui-utils:")), ""))
+' "${MAUI_UTILS_TAR}" 2>/dev/null || true)
+fi
+if [ -f "${MAUI_UTILS_TAR}" ] && { [ -z "${MAUI_UTILS_IMAGE:-}" ] || \
+        ! docker image inspect "${MAUI_UTILS_IMAGE}" > /dev/null 2>&1; }; then
+    echo "Loading bundled ${MAUI_UTILS_IMAGE:-maui-utils} (this takes a minute)..."
+    LOADED=$(docker load -i "${MAUI_UTILS_TAR}" | sed -n 's/^Loaded image[^:]*: //p' | tail -n 1)
+    if [ -z "${MAUI_UTILS_IMAGE:-}" ]; then
+        MAUI_UTILS_IMAGE="${LOADED}"
+    elif [ -n "${LOADED}" ] && [ "${LOADED}" != "${MAUI_UTILS_IMAGE}" ]; then
+        docker tag "${LOADED}" "${MAUI_UTILS_IMAGE}"
+    fi
+    if [ -z "${MAUI_UTILS_IMAGE:-}" ] || ! docker image inspect "${MAUI_UTILS_IMAGE}" > /dev/null 2>&1; then
+        echo "ERROR: could not load ${MAUI_UTILS_IMAGE:-maui-utils} from ${MAUI_UTILS_TAR}."
+        echo "       MCU / PDC flashing will fail. Try:"
+        echo "       sudo docker load -i ${MAUI_UTILS_TAR}"
+    fi
+elif [ -n "${MAUI_UTILS_IMAGE:-}" ] && ! docker image inspect "${MAUI_UTILS_IMAGE}" > /dev/null 2>&1; then
+    echo "WARNING: ${MAUI_UTILS_IMAGE} is missing and no bundled image was found."
+    # TODO(editions): fetch the stable maui-utils from GCS in online mode.
+fi
+if [ -n "${MAUI_UTILS_IMAGE:-}" ]; then
+    export MAUI_UTILS_IMAGE
+fi
 
 # Ensure local image aliases exist for Docker Compose
 for IMG in ui server envoy; do
@@ -77,8 +165,12 @@ for IMG in ui server envoy; do
     fi
 done
 
-# Ensure host log and results directories exist with full permissions
-mkdir -p /var/log/diagnoseme/nginx /var/log/diagnoseme/rpcserver /var/log/diagnoseme/envoy /var/lib/diagnoseme/firmware/mcu /var/lib/diagnoseme/firmware/pdc "${HOME:-/home/diagnoseme}/diagnoseme_results/highlevel" "${HOME:-/home/diagnoseme}/diagnoseme_results/detailed" 2>/dev/null || true
+# Ensure host log, firmware and results directories exist with full permissions
+FW_DIRS=()
+for COMP in ${FIRMWARE_COMPONENTS}; do
+    FW_DIRS+=("${FW_ROOT}/${COMP}")
+done
+mkdir -p /var/log/diagnoseme/nginx /var/log/diagnoseme/rpcserver /var/log/diagnoseme/envoy "${FW_DIRS[@]}" "${HOME:-/home/diagnoseme}/diagnoseme_results/highlevel" "${HOME:-/home/diagnoseme}/diagnoseme_results/detailed" 2>/dev/null || true
 chmod -R 777 /var/log/diagnoseme "${HOME:-/home/diagnoseme}/diagnoseme_results" 2>/dev/null || true
 
 PROFILE_ARGS=""
@@ -91,49 +183,9 @@ if [ "$MODE" == "online" ]; then
         export PULL_POLICY="if_not_present"
     }
 
-    echo "Checking for updated Maui firmware from cloud..."
-    python3 - <<'EOF' 2>/dev/null || true
-import os, urllib.request, xml.etree.ElementTree as ET
-
-GCS_BASE = "https://storage.googleapis.com/maui-firmware"
-FW_DIR = "/var/lib/diagnoseme/firmware"
-
-def sync_fw(comp, suffix, ext, dest):
-    try:
-        req = urllib.request.Request(f"{GCS_BASE}?prefix={comp}/", headers={"User-Agent": "DiagnoseMe"})
-        with urllib.request.urlopen(req, timeout=5) as r:
-            root = ET.fromstring(r.read())
-        target_key = None
-        for child in root:
-            if child.tag.endswith("Contents"):
-                for sub in child:
-                    if sub.tag.endswith("Key") and sub.text and sub.text.endswith(f"/stable{suffix}"):
-                        target_key = os.path.dirname(sub.text)
-                        break
-                if target_key:
-                    break
-        if not target_key:
-            return
-        sub_req = urllib.request.Request(f"{GCS_BASE}?prefix={target_key}/", headers={"User-Agent": "DiagnoseMe"})
-        with urllib.request.urlopen(sub_req, timeout=5) as r:
-            sub_root = ET.fromstring(r.read())
-        for child in sub_root:
-            if child.tag.endswith("Contents"):
-                for sub in child:
-                    if sub.tag.endswith("Key") and sub.text and sub.text.endswith(ext):
-                        fname = os.path.basename(sub.text)
-                        out_f = os.path.join(dest, fname)
-                        if not os.path.exists(out_f):
-                            os.makedirs(dest, exist_ok=True)
-                            with urllib.request.urlopen(f"{GCS_BASE}/{sub.text}", timeout=15) as fin, open(out_f, "wb") as fout:
-                                fout.write(fin.read())
-                            print(f"Synced new {comp} firmware from cloud -> {fname}")
-    except Exception:
-        pass
-
-sync_fw("mcu-fw", ".mcufw", ".txt", f"{FW_DIR}/mcu")
-sync_fw("pdc-fw", ".pdcfw", ".bin", f"{FW_DIR}/pdc")
-EOF
+    if [ -n "${FIRMWARE_COMPONENTS}" ]; then
+        sync_maui_firmware
+    fi
 else
     export PULL_POLICY="if_not_present"
 fi

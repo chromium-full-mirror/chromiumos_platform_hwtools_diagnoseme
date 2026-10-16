@@ -75,6 +75,11 @@ steps:
     cd src/ui
     npm install --legacy-peer-deps
     npm run lint
+    # Compile every edition (see editions.json / angular.json configurations).
+    for EDITION in $(python3 ../../tools/edition_info.py list); do
+      echo "Building UI edition $${EDITION}"
+      npx ng build --configuration=production,$${EDITION} --output-path=/tmp/ui-$${EDITION}
+    done
   waitFor: ['proto-gen']
 
 - name: 'gcr.io/kaniko-project/executor:latest'
@@ -119,9 +124,10 @@ steps:
   args:
   - '-c'
   - |
-    mkdir -p dist
+    # The deb builder COPYs these; they must exist even when empty.
+    mkdir -p dist/firmware dist/maui-utils
     gcloud storage cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar.bz2" "dist/rtunicpg.tar.bz2" || true
-    gcloud storage cp "gs://rtk-tools/r8152-2.21.4.tar.bz2" "dist/r8152.tar.bz2" || true
+    gcloud storage cp "gs://rtk-tools/r8152-2.21.4.tar.bz2" "dist/r8152-2.21.4.tar.bz2" || true
   waitFor: ['-']
 
 - name: 'gcr.io/cloud-builders/docker'

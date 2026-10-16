@@ -1,6 +1,24 @@
 # Copyright 2026 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+#
+# Multi-target base image of the DiagnoseMe rpcserver.
+#
+# Every DiagnoseMe edition (see editions.json) has its own final target that
+# only contains the tooling the edition needs:
+#
+#   base-dolos        Dolos rework (doloscmd, dolosbattery, fw-updater)
+#   base-servo-v4p1   Servo v4p1 (dfu-util, dfu-programmer, fwupd, rtunicpg, ...)
+#   base-servo-micro  Servo Micro (dfu-util, servo_micro firmware)
+#   base-maui-v1.1    Maui v1.1 (adb, ft232r_prog; flashing via maui-utils)
+#   base-all          Every tool above (development / CQ only, default target)
+#
+# Build a specific edition with e.g.:
+#   docker build --target base-maui-v1.1 -f dockerfiles/rpcserver/Dockerfile.base .
+#
+# The Maui flashing tools (maui-flash, maui-ctl, fw-updater) are NOT part of
+# the Maui images. They run inside the separate maui-utils container, started by the
+# server through the host docker socket (see src/server/maui_utils_runner.py).
 
 ####################################################################
 FROM debian:trixie AS hdctools-builder
@@ -41,10 +59,8 @@ RUN python3 setup.py bdist_wheel
 WORKDIR /dolos/tools/dolosbattery
 RUN python3 setup.py bdist_wheel
 
-WORKDIR /
-RUN git clone https://chromium.googlesource.com/chromiumos/platform/hwtools/maui /maui || true
-
 ####################################################################
+# Dolos fw-updater (Dolos edition tooling).
 FROM debian:trixie AS fwupdater-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -63,7 +79,6 @@ RUN git clone https://chromium.googlesource.com/chromiumos/platform/dolos
 WORKDIR /dolos/fw-updater
 ENV USER=root
 RUN cargo build --release
-
 
 ######################################################################
 FROM debian:trixie AS rtk-tools-builder
@@ -91,27 +106,36 @@ WORKDIR /build
 RUN curl -k -sSL https://rtr.ca/ft232r/ft232r_prog-1.25.tar.gz | tar -xz \
  && make -C ft232r_prog-1.25
 
+######################################################################
+FROM debian:trixie AS servo-fw-fetcher
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    xz-utils \
+    ca-certificates
+
+RUN mkdir -p /out/genesys /out/servo_v4p1 /out/servo_micro
+RUN wget https://storage.googleapis.com/fwupd-cache/GenesysLogic_Google_Servo_GL3590_64.18.cab \
+    -O /out/genesys/GenesysLogic_GL3590_64.18.cab
+WORKDIR /out/servo_v4p1
+RUN wget https://storage.googleapis.com/chromeos-localmirror/distfiles/servo_v4p1_v2.0.29298-4d4a4e980.tar.xz \
+    -O servo_v4p1.tar.xz && tar xvf servo_v4p1.tar.xz && rm servo_v4p1.tar.xz
+WORKDIR /out/servo_micro
+RUN wget https://storage.googleapis.com/chromeos-localmirror/distfiles/servo_micro_v2.4.82-dbed085877.tar.xz \
+    -O servo_micro.tar.xz && tar xvf servo_micro.tar.xz && rm servo_micro.tar.xz
+
 #####################################################################
-FROM python:3-trixie
+# Common runtime shared by every edition.
+FROM python:3-trixie AS base-common
 
 RUN apt-get update && apt-get install -yq \
     python3-docker \
-    dfu-util \
-    dfu-programmer \
     usb.ids \
-    libcurl3t64-gnutls \
-    libxmlb2 \
-    libjcat1 \
-    ethtool \
     usbutils \
-    adb \
-    libftdi1-2 \
-    libftdi1 \
     libusb-1.0-0 \
     libudev1 \
     udev \
-    libudev-dev \
-    fwupd
+    libudev-dev
 
 COPY dockerfiles/rpcserver/requirements.txt .
 RUN python3 -m pip install -r requirements.txt --require-hashes --break-system-packages && \
@@ -121,51 +145,103 @@ RUN mkdir /var/log/rpcserver
 RUN mkdir /usr/local/tmp
 RUN mkdir -p /usr/local/server/binfiles
 RUN mkdir -p /usr/local/server/binfiles_shadow
+RUN chmod og+w /var/log
 
-COPY --from=rtk-tools-builder /build/*/rtunicpg-x86_64 /usr/local/bin/rtunicpg
-COPY --from=rtk-tools-builder /build/*/EF8153B* /usr/local/server/binfiles_shadow/
-COPY --from=rtk-tools-builder /build/*/EE8153B* /usr/local/server/binfiles_shadow/
-COPY --from=ft232r-builder /build/ft232r_prog-1.25/ft232r_prog /usr/local/bin/ft232r_prog
-COPY --from=fwupdater-builder /dolos/fw-updater/target/release/fw-updater /usr/local/bin/fw-updater
-COPY --from=dolostools /maui /usr/local/maui
-RUN if [ -d /usr/local/maui/tools/scripts ]; then cp -a /usr/local/maui/tools/scripts/* /usr/local/bin/ && chmod +x /usr/local/bin/maui*; fi
-RUN if [ -f /usr/local/maui/tools/requirements.txt ]; then python3 -m pip install -r /usr/local/maui/tools/requirements.txt --break-system-packages; fi
-RUN if [ -f /usr/local/maui/tools/setup.py ] || [ -f /usr/local/maui/tools/pyproject.toml ]; then python3 -m pip install -e /usr/local/maui/tools --break-system-packages; fi
-RUN printf '#!/bin/bash\npython3 /usr/local/maui/tools/src/maui_ctl.py "$@"\n' > /usr/local/bin/maui-ctl && chmod +x /usr/local/bin/maui-ctl
-RUN printf '#!/bin/bash\npython3 /usr/local/maui/tools/src/maui_flash.py "$@"\n' > /usr/local/bin/maui-flash && chmod +x /usr/local/bin/maui-flash
+ENV PYTHONPATH=/usr/lib/python3/dist-packages/
 
 WORKDIR /usr/local/server
+EXPOSE 6002
+
+#####################################################################
+FROM base-common AS base-dolos
+
+COPY --from=fwupdater-builder /dolos/fw-updater/target/release/fw-updater /usr/local/bin/fw-updater
 
 WORKDIR /install_tmp
 COPY --from=dolostools /dolos/tools/doloscmd/dist .
 COPY --from=dolostools /dolos/tools/dolosbattery/dist .
 COPY --from=dolostools /dolos/tools/requirements.txt .
-COPY --from=hdctools-builder /hdctools/servo/firmware/usbkm/KeyboardSerial/Keyboard.hex /usr/local/server/binfiles_shadow/
-RUN python3 -m pip install *.whl --no-deps --no-index --break-system-packages
-RUN python3 -m pip install -r requirements.txt --require-hashes --break-system-packages
-
+# PYTHONPATH (set in base-common) exposes debian dist-packages, which pip
+# cannot uninstall; keep it unset while installing (as before editions).
+RUN PYTHONPATH= python3 -m pip install *.whl --no-deps --no-index --break-system-packages
+RUN PYTHONPATH= python3 -m pip install -r requirements.txt --require-hashes --break-system-packages
+WORKDIR /usr/local/server
 RUN rm -rf /install_tmp
 
-RUN mkdir /usr/local/genesys/
-RUN wget https://storage.googleapis.com/fwupd-cache/GenesysLogic_Google_Servo_GL3590_64.18.cab \
-    -O /usr/local/genesys/GenesysLogic_GL3590_64.18.cab
-WORKDIR /usr/local/servo_v4p1/
-RUN wget https://storage.googleapis.com/chromeos-localmirror/distfiles/servo_v4p1_v2.0.29298-4d4a4e980.tar.xz \
-    -O /usr/local/servo_v4p1/servo_v4p1_v2.0.29298-4d4a4e980.tar.xz
-RUN tar xvf *
-RUN rm *.tar.xz
+#####################################################################
+# Tooling shared by both servo editions (servod runs in its own container).
+FROM base-common AS base-servo-common
 
-RUN mkdir /usr/local/servo_micro/
-WORKDIR /usr/local/servo_micro/
-RUN wget https://storage.googleapis.com/chromeos-localmirror/distfiles/servo_micro_v2.4.82-dbed085877.tar.xz \
-    -O /usr/local/servo_micro/servo_micro_v2.4.82-dbed085877.tar.xz
-RUN tar xvf *
-RUN rm *.tar.xz
+RUN apt-get update && apt-get install -yq \
+    dfu-util
 
-#RUN python3 -m unittest discover -s server
+#####################################################################
+FROM base-servo-common AS base-servo-v4p1
 
-RUN chmod og+w /var/log
+RUN apt-get update && apt-get install -yq \
+    dfu-programmer \
+    libcurl3t64-gnutls \
+    libxmlb2 \
+    libjcat1 \
+    ethtool \
+    fwupd
 
-ENV PYTHONPATH=/usr/local/maui/tools:/usr/local/maui:/usr/lib/python3/dist-packages/
+COPY --from=rtk-tools-builder /build/*/rtunicpg-x86_64 /usr/local/bin/rtunicpg
+COPY --from=rtk-tools-builder /build/*/EF8153B* /usr/local/server/binfiles_shadow/
+COPY --from=rtk-tools-builder /build/*/EE8153B* /usr/local/server/binfiles_shadow/
+COPY --from=hdctools-builder /hdctools/servo/firmware/usbkm/KeyboardSerial/Keyboard.hex /usr/local/server/binfiles_shadow/
+COPY --from=servo-fw-fetcher /out/genesys/ /usr/local/genesys/
+COPY --from=servo-fw-fetcher /out/servo_v4p1/ /usr/local/servo_v4p1/
 
-EXPOSE 6002
+#####################################################################
+FROM base-servo-common AS base-servo-micro
+
+COPY --from=servo-fw-fetcher /out/servo_micro/ /usr/local/servo_micro/
+
+#####################################################################
+# Tooling shared by every Maui revision. The flashing tools live in the
+# maui-utils container, so only host-side discovery helpers are needed here.
+FROM base-common AS base-maui-common
+
+RUN apt-get update && apt-get install -yq \
+    adb
+
+# Docker CLI used to start maui-utils through the host docker socket.
+COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
+
+#####################################################################
+# Maui v1.1: TI MSPM0 behind an FTDI FT232R bridge.
+FROM base-maui-common AS base-maui-v1.1
+
+RUN apt-get update && apt-get install -yq \
+    libftdi1-2 \
+    libftdi1
+
+COPY --from=ft232r-builder /build/ft232r_prog-1.25/ft232r_prog /usr/local/bin/ft232r_prog
+
+#####################################################################
+# Development / CQ image containing the tooling of every edition.
+# Keep last so it is the default target.
+FROM base-servo-v4p1 AS base-all
+
+RUN apt-get update && apt-get install -yq \
+    adb \
+    dfu-util \
+    libftdi1-2 \
+    libftdi1
+
+COPY --from=ft232r-builder /build/ft232r_prog-1.25/ft232r_prog /usr/local/bin/ft232r_prog
+COPY --from=servo-fw-fetcher /out/servo_micro/ /usr/local/servo_micro/
+COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=fwupdater-builder /dolos/fw-updater/target/release/fw-updater /usr/local/bin/fw-updater
+
+WORKDIR /install_tmp
+COPY --from=dolostools /dolos/tools/doloscmd/dist .
+COPY --from=dolostools /dolos/tools/dolosbattery/dist .
+COPY --from=dolostools /dolos/tools/requirements.txt .
+# PYTHONPATH (set in base-common) exposes debian dist-packages, which pip
+# cannot uninstall; keep it unset while installing (as before editions).
+RUN PYTHONPATH= python3 -m pip install *.whl --no-deps --no-index --break-system-packages
+RUN PYTHONPATH= python3 -m pip install -r requirements.txt --require-hashes --break-system-packages
+WORKDIR /usr/local/server
+RUN rm -rf /install_tmp

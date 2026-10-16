@@ -6,7 +6,7 @@ services:
   ##############################################################################
   ui:
     container_name: ui
-    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/ui:maui
+    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/ui:${DOCKER_TAG:-maui}
     hostname: ui
     restart: unless-stopped
     pull_policy: ${PULL_POLICY:-if_not_present}
@@ -21,7 +21,7 @@ services:
   ##############################################################################
   server:
     container_name: server
-    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/server:maui
+    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/server:${DOCKER_TAG:-maui}
     hostname: server
     restart: unless-stopped
     privileged: true
@@ -31,6 +31,13 @@ services:
       - TEST_DUT=brya
       - TEST_MODEL=banshee
       - RESULTS_SERVER=${RESULTS_SERVER:-}
+      - STATION_ID=${STATION_ID:-}
+      # Optional override of the maui-utils image baked into the server image.
+      - MAUI_UTILS_IMAGE
+      # Optional ADB transfer test overrides (see /etc/diagnoseme/config.env).
+      - MAUI_ADB_SIZE_MB
+      - MAUI_ADB_DEADLINE_S
+      - MAUI_ADB_MIN_RATE_MB_S
 
     volumes:
       - /var/log/diagnoseme/rpcserver:/var/log/rpcserver
@@ -45,7 +52,7 @@ services:
   #############################################################################
   envoy:
     container_name: envoy
-    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/envoy:maui
+    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/envoy:${DOCKER_TAG:-maui}
     restart: unless-stopped
     pull_policy: ${PULL_POLICY:-if_not_present}
     network_mode: host

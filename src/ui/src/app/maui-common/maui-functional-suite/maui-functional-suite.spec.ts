@@ -10,7 +10,7 @@ import {
 } from '@angular/core/testing';
 import {NoopAnimationsModule} from '@angular/platform-browser/animations';
 import {provideRouter} from '@angular/router';
-import {of} from 'rxjs';
+import {Subject, of, throwError} from 'rxjs';
 import {MauiFunctionalSuiteComponent} from './maui-functional-suite';
 import {MauiStation2Service} from '../../services/maui-station2.service';
 import {MauiDeviceMgmtService} from '../../services/maui-device-mgmt.service';
@@ -19,6 +19,29 @@ import {MauiDialogService} from '../maui-dialog.service';
 describe('MauiFunctionalSuiteComponent', () => {
   let component: MauiFunctionalSuiteComponent;
   let fixture: ComponentFixture<MauiFunctionalSuiteComponent>;
+
+  const connectedDevice = {
+    isConnected: true,
+    serialNumber: 'MAUI-TEST-001',
+    devicePort: '/dev/ttyUSB0',
+    ftdiPid: 0x6002,
+    adbSerial: 'MAUI-TEST-001',
+    ftdiSerial: 'MAUI-TEST-001',
+    dualEndpointsMatch: true,
+    ftdiIsProgrammed: true,
+  };
+
+  const adbTransferPassed = {
+    success: true,
+    message: 'ADB transfer OK',
+    adbSerial: 'DUT123',
+    fileSizeBytes: 400000000,
+    pushSeconds: 8,
+    pullSeconds: 8,
+    pushMbPerS: 50,
+    pullMbPerS: 50,
+    totalSeconds: 18,
+  };
 
   const mockMauiService = {
     runHostOnlyTests: jasmine.createSpy().and.returnValue(
@@ -115,6 +138,9 @@ describe('MauiFunctionalSuiteComponent', () => {
         message: 'Charger disconnected',
       }),
     ),
+    runAdbTransferTest: jasmine
+      .createSpy()
+      .and.returnValue(of(adbTransferPassed)),
     writeDeviceLog: jasmine.createSpy().and.returnValue(
       of({
         success: true,
@@ -124,18 +150,9 @@ describe('MauiFunctionalSuiteComponent', () => {
   };
 
   const mockDeviceMgmtService = {
-    readConnectedDeviceSerial: jasmine.createSpy().and.returnValue(
-      of({
-        isConnected: true,
-        serialNumber: 'MAUI-TEST-001',
-        devicePort: '/dev/ttyUSB0',
-        ftdiPid: 0x6002,
-        adbSerial: 'MAUI-TEST-001',
-        ftdiSerial: 'MAUI-TEST-001',
-        dualEndpointsMatch: true,
-        ftdiIsProgrammed: true,
-      }),
-    ),
+    readConnectedDeviceSerial: jasmine
+      .createSpy()
+      .and.returnValue(of(connectedDevice)),
     verifyScannedLabel: jasmine.createSpy().and.returnValue(
       of({
         matches: true,
@@ -179,6 +196,15 @@ describe('MauiFunctionalSuiteComponent', () => {
   };
 
   beforeEach(async () => {
+    // The mocks are shared by all specs and jasmine runs them in random
+    // order: undo what a spec changed (e.g. a failing ADB transfer).
+    mockMauiService.runAdbTransferTest.and.returnValue(of(adbTransferPassed));
+    mockDeviceMgmtService.readConnectedDeviceSerial.and.returnValue(
+      of(connectedDevice),
+    );
+    mockDeviceMgmtService.saveCardLog.calls.reset();
+    mockDialogService.openFailure.calls.reset();
+
     await TestBed.configureTestingModule({
       imports: [MauiFunctionalSuiteComponent, NoopAnimationsModule],
       providers: [
@@ -214,6 +240,69 @@ describe('MauiFunctionalSuiteComponent', () => {
     expect(component.barcodeMatches).toBeTrue();
   });
 
+  it('focuses the Card 1 button after the barcode matched', fakeAsync(() => {
+    component.mode = 'fatp_qt0';
+    fixture.detectChanges();
+    const focus = spyOn(component.runUsbCheckBtn!.nativeElement, 'focus');
+    component.scannedBarcode = 'MAUI-TEST-001';
+    component.verifyBarcode();
+    tick(500);
+    expect(focus).toHaveBeenCalled();
+  }));
+
+  it('keeps polling the device after a failed poll', fakeAsync(() => {
+    mockDeviceMgmtService.readConnectedDeviceSerial.and.returnValues(
+      throwError(() => new Error('UNAVAILABLE')),
+      of({...connectedDevice, isConnected: false}),
+    );
+    const polled = TestBed.createComponent(MauiFunctionalSuiteComponent);
+    polled.detectChanges();
+    tick(0);
+    expect(polled.componentInstance.statusMessage).toBe(
+      'Device detection error.',
+    );
+    tick(1500);
+    expect(polled.componentInstance.deviceConnected).toBeFalse();
+    expect(polled.componentInstance.statusMessage).toContain(
+      'No Maui Device Detected',
+    );
+    polled.destroy();
+  }));
+
+  it('drops pending test results when the page is left', () => {
+    const pending = new Subject<typeof adbTransferPassed>();
+    mockMauiService.runAdbTransferTest.and.returnValue(pending);
+    component.stage3Passed = true;
+    component.runAdbTransfer();
+    expect(pending.observed).toBeTrue();
+    fixture.destroy();
+    expect(pending.observed).toBeFalse();
+  });
+
+  it('does not reload once the page was left', fakeAsync(() => {
+    const reload = spyOn(component, 'reloadForNextUnit');
+    component.adbPassed = true;
+    component.deviceConnected = false;
+    component.saveLogs();
+    fixture.destroy();
+    tick(2500);
+    expect(reload).not.toHaveBeenCalled();
+  }));
+
+  it('logs a bypassed ADB transfer as BYPASSED', () => {
+    component.serialNumber = 'MAUI-TEST-001'; // As reported by the device poll.
+    component.stage3Passed = true;
+    component.bypassAdbTransfer();
+    expect(component.adbStatusValue).toBe('BYPASSED');
+    const [serial, step, content] =
+      mockDeviceMgmtService.saveCardLog.calls.mostRecent().args;
+    expect(serial).toBe('MAUI-TEST-001');
+    expect(step).toBe('adb_transfer_test');
+    expect(content).toContain('STATUS=BYPASSED');
+    expect(content).toContain('Bypassed by operator.');
+    expect(mockDeviceMgmtService.getDeviceLogsStatus).toHaveBeenCalled();
+  });
+
   it('should run host USB check and record orientation', fakeAsync(() => {
     component.runUsbCheck();
     tick(3000);
@@ -232,6 +321,7 @@ describe('MauiFunctionalSuiteComponent', () => {
   }));
 
   it('should execute full test sequence and save logs', fakeAsync(() => {
+    const reload = spyOn(component, 'reloadForNextUnit');
     component.usbCheckPassed = true;
     component.replugPassed = true;
     component.resetPassed = true;
@@ -252,12 +342,46 @@ describe('MauiFunctionalSuiteComponent', () => {
     component.runStage3();
     tick(3000);
     expect(component.stage3Passed).toBeTrue();
+    expect(component.canSaveLogs).toBeFalse();
 
+    component.runAdbTransfer();
+    expect(mockMauiService.runAdbTransferTest).toHaveBeenCalled();
+    expect(component.adbPassed).toBeTrue();
+
+    component.deviceConnected = false;
     component.saveLogs();
     expect(mockDeviceMgmtService.saveCardLog).toHaveBeenCalled();
+    const summary = mockDeviceMgmtService.saveCardLog.calls.mostRecent()
+      .args[2] as string;
+    expect(summary).toContain(
+      'Card 9 (ADB Transfer, two ~400 MB random files, must finish within 60 s): PASSED',
+    );
+    expect(summary).toContain('push 50.0 MB/s, pull 50.0 MB/s');
     expect(
       mockDeviceMgmtService.submitFinalManufacturingResults,
     ).toHaveBeenCalled();
     expect(component.logsSaved).toBeTrue();
+    tick(2500);
+    expect(reload).toHaveBeenCalled();
   }));
+
+  it('offers retry and bypass when the ADB transfer fails', () => {
+    mockMauiService.runAdbTransferTest.and.returnValue(
+      of({success: false, message: 'Data corrupted on pull'}),
+    );
+    component.stage3Passed = true;
+    component.runAdbTransfer();
+    expect(component.adbPassed).toBeFalse();
+    expect(component.adbStatusValue).toBe('FAILED');
+    expect(mockDialogService.openFailure).toHaveBeenCalledWith(
+      'ADB Transfer Test Failed',
+      'Data corrupted on pull',
+      jasmine.any(Function),
+      jasmine.any(Function),
+    );
+    const bypass = mockDialogService.openFailure.calls.mostRecent().args[3];
+    bypass();
+    expect(component.adbPassed).toBeTrue();
+    expect(component.adbStatusValue).toBe('BYPASSED');
+  });
 });

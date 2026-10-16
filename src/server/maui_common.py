@@ -5,12 +5,18 @@
 
 import dataclasses
 import glob
+import hashlib
+import json
 import logging
 import os
 import re
-import shutil
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
+
 
 # ==========================================
 # Hardware Constants
@@ -26,6 +32,12 @@ PROLIFIC_PID_ADB = 0x506D
 PROLIFIC_PID_H2H = 0x5084
 HUB_USB2_VID_PID = (0x0451, 0x8142)
 HUB_USB3_VID_PID = (0x0451, 0x8140)
+
+# Manifest of the stable firmware of a component directory, written by
+# tools/maui_fw_fetch.py: {"version", "file", "md5", "source"}.
+FW_MANIFEST_NAME = "STABLE.json"
+# Firmware channels that mean "the station's stable image" (no version).
+STABLE_FW_CHANNELS = ("", "stable", "offline")
 
 
 @dataclasses.dataclass
@@ -321,6 +333,12 @@ def get_device_log_dir(serial_number: str) -> str:
   return dir_path
 
 
+def safe_log_step_name(log_step_name: Optional[str]) -> str:
+  """Returns |log_step_name| reduced to a plain file name (it may come from the UI)."""
+  name = re.sub(r"[^A-Za-z0-9_.-]", "", os.path.basename(log_step_name or ""))
+  return name.lstrip(".") or "device_log"
+
+
 def write_device_log(
     serial_number: Optional[str],
     log_step_name: str,
@@ -331,7 +349,8 @@ def write_device_log(
   try:
     safe_serial = re.sub(r"[^a-zA-Z0-9_-]", "", serial_number) if serial_number else "UNKNOWN"
     log_dir = get_device_log_dir(safe_serial)
-    filename = f"{log_step_name}.log" if not log_step_name.endswith(".log") else log_step_name
+    step = safe_log_step_name(log_step_name)
+    filename = f"{step}.log" if not step.endswith(".log") else step
     file_path = os.path.join(log_dir, filename)
     mode = "a" if append else "w"
     with open(file_path, mode, encoding="utf-8") as f:
@@ -347,17 +366,21 @@ def write_device_log(
     return ""
 
 
+# Directories with the local firmware of a component, in priority order.
+OFFLINE_FW_COMPONENT_DIRS = (
+    "/var/lib/diagnoseme/firmware/{component}",
+    "/usr/local/server/firmware/{component}",
+    "/usr/share/diagnoseme/firmware/{component}",
+    "/dist/firmware/{component}",
+    "/offline_assets/firmware/{component}",
+)
+
+
 def find_offline_fw_file(
     component: str, channel_or_version: Optional[str] = None
 ) -> Optional[str]:
   """Checks for local offline firmware files in standard firmware directories."""
-  candidates = [
-      f"/var/lib/diagnoseme/firmware/{component}",
-      f"/usr/local/server/firmware/{component}",
-      f"/usr/share/diagnoseme/firmware/{component}",
-      f"/usr/local/maui/firmware/{component}",
-      f"/dist/firmware/{component}",
-      f"/offline_assets/firmware/{component}",
+  candidates = [d.format(component=component) for d in OFFLINE_FW_COMPONENT_DIRS] + [
       "/var/lib/diagnoseme/firmware",
       "/usr/local/server/firmware",
   ]
@@ -366,10 +389,18 @@ def find_offline_fw_file(
   # If a specific version/channel tag was requested, prioritize matching files
   if channel_or_version and channel_or_version not in ("offline", "stable", ""):
     tag = channel_or_version.strip()
+    # The file named exactly after the version first (e.g. v20_0325_100W.bin).
+    for d in candidates:
+      for ext in exts:
+        exact = glob.glob(os.path.join(d, glob.escape(tag) + ext))
+        if exact:
+          return exact[0]
     for d in candidates:
       if os.path.isdir(d):
         for ext in exts:
-          tag_matches = glob.glob(os.path.join(d, f"*{tag}*{ext}"))
+          # The name must end with the version: v20_0325 must not pick
+          # v20_0325_100W.bin.
+          tag_matches = glob.glob(os.path.join(d, f"*{tag}{ext}"))
           if tag_matches:
             return sorted(tag_matches)[-1]
         sub_d = os.path.join(d, tag)
@@ -378,6 +409,8 @@ def find_offline_fw_file(
             sub_matches = glob.glob(os.path.join(sub_d, f"*{ext}"))
             if sub_matches:
               return sorted(sub_matches)[-1]
+    # Never fall back to another version: that would flash the wrong image.
+    return None
 
   for d in candidates:
     if os.path.isdir(d):
@@ -388,16 +421,85 @@ def find_offline_fw_file(
   return None
 
 
-def resolve_maui_tool(tool_name: str) -> str:
-  """Resolves the executable path for a Maui CLI utility (e.g. maui-flash, maui-ctl)."""
-  return shutil.which(tool_name) or f"/usr/local/bin/{tool_name}"
+@dataclasses.dataclass
+class FwSelection:
+  """Local firmware image chosen for flashing."""
+  path: str = ""
+  version: str = ""
+  # Shown to the operator when an image is used without a STABLE.json.
+  warning: str = ""
+  # Why no image was chosen.
+  error: str = ""
+  # True when images exist but none can be chosen safely (several images
+  # without STABLE.json, or an image that does not match its manifest).
+  ambiguous: bool = False
 
 
-def get_maui_env() -> Dict[str, str]:
-  """Constructs standard environment dictionary for invoking Maui Python CLI tools."""
-  env = os.environ.copy()
-  env["PYTHONPATH"] = f"/usr/local/maui/tools:/usr/local/maui:{env.get('PYTHONPATH', '')}"
-  return env
+def read_fw_manifest(component_dir: str) -> Dict[str, Any]:
+  """Returns the STABLE.json of |component_dir| ({} when missing or invalid)."""
+  try:
+    with open(os.path.join(component_dir, FW_MANIFEST_NAME), "r", encoding="utf-8") as f:
+      manifest = json.load(f)
+  except (OSError, ValueError):
+    return {}
+  return manifest if isinstance(manifest, dict) else {}
+
+
+def _file_md5(path: str) -> str:
+  """Returns the hex md5 of |path| (integrity check only)."""
+  digest = hashlib.md5(usedforsecurity=False)
+  with open(path, "rb") as f:
+    for chunk in iter(lambda: f.read(1024 * 1024), b""):
+      digest.update(chunk)
+  return digest.hexdigest()
+
+
+def select_stable_fw(component: str) -> FwSelection:
+  """Returns the stable |component| firmware of this station.
+
+  The STABLE.json written by tools/maui_fw_fetch.py names it (first firmware
+  directory that has one). Stations without a manifest: the only image of
+  the component directory is used with a warning; several images are an
+  error instead of a guess.
+  """
+  dirs = [d.format(component=component) for d in OFFLINE_FW_COMPONENT_DIRS]
+  update_hint = (
+      "Update the station firmware (start DiagnoseMe online, install the "
+      "offline update bundle or reinstall from the ISO)."
+  )
+  for d in dirs:
+    manifest = read_fw_manifest(d)
+    name = manifest.get("file")
+    if not isinstance(name, str) or not name or os.path.basename(name) != name:
+      continue
+    path = os.path.join(d, name)
+    if not os.path.isfile(path):
+      continue
+    md5 = manifest.get("md5")
+    if isinstance(md5, str) and md5 and _file_md5(path) != md5:
+      return FwSelection(
+          error=f"{path} does not match the md5 in {d}/{FW_MANIFEST_NAME}. {update_hint}",
+          ambiguous=True,
+      )
+    return FwSelection(path=path, version=str(manifest.get("version", "")))
+  exts = (".txt", ".bin", ".hex") if component == "mcu" else (".bin", ".hex", ".txt")
+  for d in dirs:
+    images = sorted({f for ext in exts for f in glob.glob(os.path.join(d, f"*{ext}"))})
+    if len(images) == 1:
+      return FwSelection(
+          path=images[0],
+          warning=f"no {FW_MANIFEST_NAME} in {d} - flashing {os.path.basename(images[0])}",
+      )
+    if images:
+      names = ", ".join(os.path.basename(f) for f in images)
+      return FwSelection(
+          error=(
+              f"{len(images)} {component} images in {d} ({names}) and no "
+              f"{FW_MANIFEST_NAME} to choose the stable one. {update_hint}"
+          ),
+          ambiguous=True,
+      )
+  return FwSelection(error=f"No {component} firmware in {dirs[0]}. {update_hint}")
 
 
 def ensure_zephyr_shell_awake(port_node: str, timeout: float = 3.0) -> bool:

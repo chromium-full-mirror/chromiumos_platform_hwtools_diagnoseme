@@ -1,0 +1,61 @@
+{
+  "_comment": "DiagnoseMe editions (build-time product flavors). Consumed by build-diagnoseme.sh, cloudbuild, deb/ISO builders and tools/promote.sh. Keep in sync with src/server/editions.py and src/ui/src/app/editions (checked by src/server/tests/unit/test_editions.py). Maui editions bundle the stable maui-utils release (gs://maui-firmware/docker/<version>/stable.dockertag); firmware lists the components of /var/lib/diagnoseme/firmware and maui_device the device of their stable markers (tools/maui_fw_fetch.py).",
+  "editions": {
+    "dolos": {
+      "title": "Dolos",
+      "landing": "/dolos-rework",
+      "shipped": true,
+      "maui_utils": false,
+      "firmware": [],
+      "station_id": "DOLOS_STATION",
+      "deb_package": "diagnoseme-dolos"
+    },
+    "servo-v4p1": {
+      "title": "Servo v4p1",
+      "landing": "/servo-v4p1-manufacturing",
+      "shipped": true,
+      "maui_utils": false,
+      "firmware": [],
+      "station_id": "SERVO_V4P1_STATION",
+      "deb_package": "diagnoseme-servo-v4p1"
+    },
+    "servo-micro": {
+      "title": "Servo Micro",
+      "landing": "/servo-micro-manufacturing",
+      "shipped": true,
+      "maui_utils": false,
+      "firmware": [],
+      "station_id": "SERVO_MICRO_STATION",
+      "deb_package": "diagnoseme-servo-micro"
+    },
+    "maui-v1.1": {
+      "title": "Maui v1.1",
+      "landing": "/maui/v1.1/provisioning",
+      "shipped": true,
+      "maui_utils": true,
+      "maui_device": "maui_v11",
+      "firmware": [
+        "mcu",
+        "pdc"
+      ],
+      "station_id": "MAUI_V1_1_STATION",
+      "docker_tag_aliases": [
+        "maui"
+      ],
+      "deb_package": "diagnoseme"
+    },
+    "all": {
+      "title": "All (development)",
+      "landing": "/maui/v1.1/provisioning",
+      "shipped": false,
+      "maui_utils": true,
+      "maui_device": "maui_v11",
+      "firmware": [
+        "mcu",
+        "pdc"
+      ],
+      "station_id": "DEV_STATION",
+      "deb_package": "diagnoseme-dev"
+    }
+  }
+}

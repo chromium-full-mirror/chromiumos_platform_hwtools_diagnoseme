@@ -9,21 +9,24 @@ import os
 import re
 import subprocess
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
+
 import grpc
 import serial
 
+from server import maui_adb_transfer
 from server import maui_common
 from server import util
 from server.generated import maui_manufacturing_pb2
 from server.generated import maui_manufacturing_pb2_grpc
 from server.maui_common import write_device_log
-from server.maui_console_tester import (
-    EXPECTED_HOST_GPIOS,
-    MauiConsoleTester,
-    open_serial_port,
-    verify_host_adc_voltages,
-)
+from server.maui_console_tester import EXPECTED_HOST_GPIOS
+from server.maui_console_tester import MauiConsoleTester
+from server.maui_console_tester import open_serial_port
+from server.maui_console_tester import verify_host_adc_voltages
 
 
 def is_sbu_flipped(orig: str, curr: str) -> bool:
@@ -68,9 +71,68 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
   PROLIFIC_PID_ADB = 0x506D
   PROLIFIC_PID_H2H = 0x5084
 
+  # Revision hooks. Maui v1.1 (FTDI console) is the default implementation;
+  # other hardware revisions subclass this servicer and override the hooks.
+  # Label of the MCU console USB endpoint in summaries.
+  CONSOLE_USB_LABEL = "FTDI"
+  # Expected `hwrev` shown in the device logs.
+  EXPECTED_HWREV_TEXT = "2"
+  # True when the MCU console is a /dev/ttyUSB* node (used by the CCD fallback).
+  MCU_CONSOLE_IS_TTYUSB = True
+
   def __init__(self):
     super().__init__()
-    logging.info("MauiStation2Servicer initialized.")
+    logging.info("%s initialized.", type(self).__name__)
+
+  def _make_console_tester(self, port_node: str) -> MauiConsoleTester:
+    """Returns the console tester used for the MCU console on |port_node|."""
+    return MauiConsoleTester(port_node=port_node, timeout=0.5)
+
+  def _find_unit_serial(self) -> str:
+    """Returns the unit serial (H2H iSerial, else MCU console iSerial)."""
+    for dev in maui_common.scan_usb_devices():
+      if dev.vid == 0x18D1 and dev.pid in (0x506D, 0x5084) and dev.serial:
+        return dev.serial
+      elif dev.vid == 0x0403 and dev.serial:
+        return dev.serial
+    return ""
+
+  def _find_real_h2h_serial(self) -> str:
+    """Returns the serial used for the Station 3 serial match."""
+    for dev in maui_common.scan_usb_devices():
+      if dev.vid in (maui_common.PROLIFIC_VID, 0x0403, 0x067B) and dev.serial:
+        return dev.serial
+    return ""
+
+  def _resolve_console_port(self, dev_port: str) -> str:
+    """Returns |dev_port| if it exists, else the discovered MCU console node."""
+    if not dev_port or not os.path.exists(dev_port):
+      for dev in maui_common.scan_usb_devices():
+        if dev.vid == 0x0403 and dev.dev_node and os.path.exists(dev.dev_node):
+          dev_port = dev.dev_node
+          break
+      if not dev_port or not os.path.exists(dev_port):
+        tty_nodes = sorted(glob.glob("/dev/ttyUSB*"))
+        dev_port = tty_nodes[0] if tty_nodes else "/dev/ttyUSB0"
+    return dev_port
+
+  def _fallback_console_port(self, dev_port: str) -> str:
+    """Quick console lookup (no USB scan) used by the button tests."""
+    if not dev_port or not os.path.exists(dev_port):
+      tty_nodes = glob.glob("/dev/ttyUSB*")
+      dev_port = tty_nodes[0] if tty_nodes else "/dev/ttyUSB0"
+    return dev_port
+
+  def _rediscover_console_port(self, dev_port: str) -> str:
+    """Re-resolves the console after a reset; keeps |dev_port| if none found."""
+    if not os.path.exists(dev_port):
+      tty_nodes = glob.glob("/dev/ttyUSB*")
+      dev_port = tty_nodes[0] if tty_nodes else dev_port
+    return dev_port
+
+  def _gpio_ok_text(self) -> str:
+    """Returns the GPIO details text of a passing GPIO check."""
+    return f"All {len(EXPECTED_HOST_GPIOS)} GPIOs verified"
 
   def _check_host_usb_topology(self) -> Tuple[bool, bool, bool, bool]:
     """Checks presence of Hub2, Hub3, FTDI (0x6002), and H2H (18d1:506d/5084) using sysfs scanning."""
@@ -101,29 +163,16 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     dev_port = request.device_port or ""
 
     if not serial_no:
-      for dev in maui_common.scan_usb_devices():
-        if dev.vid == 0x18D1 and dev.pid in (0x506D, 0x5084) and dev.serial:
-          serial_no = dev.serial
-          break
-        elif dev.vid == 0x0403 and dev.serial:
-          serial_no = dev.serial
-          break
+      serial_no = self._find_unit_serial()
 
-    if not dev_port or not os.path.exists(dev_port):
-      for dev in maui_common.scan_usb_devices():
-        if dev.vid == 0x0403 and dev.dev_node and os.path.exists(dev.dev_node):
-          dev_port = dev.dev_node
-          break
-      if not dev_port or not os.path.exists(dev_port):
-        tty_nodes = sorted(glob.glob("/dev/ttyUSB*"))
-        dev_port = tty_nodes[0] if tty_nodes else "/dev/ttyUSB0"
+    dev_port = self._resolve_console_port(dev_port)
 
     logging.info("Running Host Re-plug & 180° Flip Verification for serial: %s (port: %s)", serial_no, dev_port)
 
     hub_usb2_ok, hub_usb3_ok, ftdi_ok, h2h_ok = self._check_host_usb_topology()
 
     port_node = dev_port
-    tester = MauiConsoleTester(port_node=port_node, timeout=0.5)
+    tester = self._make_console_tester(port_node)
     console_results = {}
     adc_status = {}
     hwrev_ok = False
@@ -165,7 +214,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     host_vbus_mv = adc_status.get("host_vbus_mv", 0)
     chg_adc_vbus_mv = adc_status.get("chg_vbus_mv", 0)
 
-    gpio_details = "; ".join(gpio_mismatches) if gpio_mismatches else f"All {len(EXPECTED_HOST_GPIOS)} GPIOs verified"
+    gpio_details = "; ".join(gpio_mismatches) if gpio_mismatches else self._gpio_ok_text()
     voltage_details = (
         "; ".join(voltage_mismatches)
         if voltage_mismatches
@@ -215,7 +264,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
 
     status_msg = (
         f"Host 180° Flip: {flip_status_str} | Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, "
-        f"FTDI={ftdi_ok}, H2H={h2h_ok}, Console={mcu_msg}, "
+        f"{self.CONSOLE_USB_LABEL}={ftdi_ok}, H2H={h2h_ok}, Console={mcu_msg}, "
         f"HWRev={detected_hwrev} ({'PASS' if hwrev_ok else 'FAIL'}), "
         f"Temp={temp_c:.1f}°C ({'PASS' if temp_ok else 'FAIL'}), "
         f"GPIOs={'PASS' if gpios_ok else 'FAIL (' + gpio_details + ')'}, "
@@ -227,7 +276,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         "host_replug_test",
         f"ALL_PASSED={all_passed}\n{status_msg}\nHost CC1: {cc1_mv} mV, Host CC2: {cc2_mv} mV\n"
         f"Orientation: {curr_orientation}\n"
-        f"HWRev: {detected_hwrev} (Expected: 2)\n"
+        f"HWRev: {detected_hwrev} (Expected: {self.EXPECTED_HWREV_TEXT})\n"
         f"Temperature: {temp_c:.2f} 'C (Limits: 20-65 'C)\n"
         f"GPIO Status: {'PASS' if gpios_ok else 'FAIL'}\n"
         f"GPIO Details: {gpio_details}\n"
@@ -274,11 +323,9 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     action = request.action or "check_initial_uptime"
     initial_uptime_ms = int(request.initial_uptime_ms or 0)
 
-    if not dev_port or not os.path.exists(dev_port):
-      tty_nodes = glob.glob("/dev/ttyUSB*")
-      dev_port = tty_nodes[0] if tty_nodes else "/dev/ttyUSB0"
+    dev_port = self._fallback_console_port(dev_port)
 
-    tester = MauiConsoleTester(port_node=dev_port, timeout=0.5)
+    tester = self._make_console_tester(dev_port)
 
     if action in ("check_initial_uptime", "baseline", "capture_baseline"):
       logging.info("Step A: Querying baseline kernel uptime on %s...", dev_port)
@@ -321,11 +368,9 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
       raw_out = ""
 
       for attempt in range(1, max_attempts + 1):
-        if not os.path.exists(dev_port):
-          tty_nodes = glob.glob("/dev/ttyUSB*")
-          dev_port = tty_nodes[0] if tty_nodes else dev_port
+        dev_port = self._rediscover_console_port(dev_port)
 
-        tester = MauiConsoleTester(port_node=dev_port, timeout=0.5)
+        tester = self._make_console_tester(dev_port)
         read_uptime, out = tester.read_kernel_uptime()
         raw_out = out
         logging.info("[RESET Poll %d/%d] Read kernel uptime: %d ms (Initial was %d ms)",
@@ -395,11 +440,9 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
   ) -> maui_manufacturing_pb2.MauiBslButtonTestResponse:
     """Automated BSL button test sampling ADC status over console (expected BSL >= 2500mV)."""
     dev_port = request.device_port or ""
-    if not dev_port or not os.path.exists(dev_port):
-      tty_nodes = glob.glob("/dev/ttyUSB*")
-      dev_port = tty_nodes[0] if tty_nodes else "/dev/ttyUSB0"
+    dev_port = self._fallback_console_port(dev_port)
 
-    tester = MauiConsoleTester(port_node=dev_port, timeout=0.5)
+    tester = self._make_console_tester(dev_port)
     duration = request.max_sample_duration_sec or 3.0
     logging.info("Sampling BSL button ADC status on %s for %.1fs...", dev_port, duration)
 
@@ -440,22 +483,9 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     dev_port = request.device_port or ""
 
     if not serial_no:
-      for dev in maui_common.scan_usb_devices():
-        if dev.vid == 0x18D1 and dev.pid in (0x506D, 0x5084) and dev.serial:
-          serial_no = dev.serial
-          break
-        elif dev.vid == 0x0403 and dev.serial:
-          serial_no = dev.serial
-          break
+      serial_no = self._find_unit_serial()
 
-    if not dev_port or not os.path.exists(dev_port):
-      for dev in maui_common.scan_usb_devices():
-        if dev.vid == 0x0403 and dev.dev_node and os.path.exists(dev.dev_node):
-          dev_port = dev.dev_node
-          break
-      if not dev_port or not os.path.exists(dev_port):
-        tty_nodes = sorted(glob.glob("/dev/ttyUSB*"))
-        dev_port = tty_nodes[0] if tty_nodes else "/dev/ttyUSB0"
+    dev_port = self._resolve_console_port(dev_port)
 
     logging.info("Running Host-Only Verification for serial %s (port: %s)...", serial_no, dev_port)
 
@@ -467,7 +497,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
 
     # 2. Maui Console Tester Commands in a single serial session
     port_node = dev_port
-    tester = MauiConsoleTester(port_node=port_node, timeout=0.5)
+    tester = self._make_console_tester(port_node)
     results = {}
     pdc_chg = {"success": False, "plug_present": False, "voltage_v": 0.0, "measured_vbus_mv": 0, "raw_output": ""}
     adc_status = {"chg_vbus_mv": 0, "dut_vbus_mv": 0, "sbu1_mv": 0, "sbu2_mv": 0, "bsl_mv": 0, "orientation": "Unknown"}
@@ -531,7 +561,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     pp5000_mv = adc_status.get("pp5000_mv", 0)
     host_vbus_mv = adc_status.get("host_vbus_mv", 0)
 
-    gpio_details = "; ".join(gpio_mismatches) if gpio_mismatches else f"All {len(EXPECTED_HOST_GPIOS)} GPIOs verified"
+    gpio_details = "; ".join(gpio_mismatches) if gpio_mismatches else self._gpio_ok_text()
     voltage_details = (
         "; ".join(voltage_mismatches)
         if voltage_mismatches
@@ -552,7 +582,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         and voltages_ok
     )
     summary = (
-        f"USB: Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, FTDI={ftdi_ok}, H2H={h2h_ok} | "
+        f"USB: Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, {self.CONSOLE_USB_LABEL}={ftdi_ok}, H2H={h2h_ok} | "
         f"Console: Version={mcu_version_msg}, PDC={pdc_info_msg}, "
         f"HWRev={detected_hwrev} ({'PASS' if hwrev_ok else 'FAIL'}), "
         f"Temp={temp_c:.1f}°C ({'PASS' if temp_ok else 'FAIL'}), "
@@ -567,7 +597,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         "host_only_tests",
         f"ALL_PASSED={all_passed}\n{summary}\n"
         f"Host Orientation: {host_orientation}\nHost CC1: {cc1_mv} mV, Host CC2: {cc2_mv} mV\n"
-        f"HWRev: {detected_hwrev} (Expected: 2)\n"
+        f"HWRev: {detected_hwrev} (Expected: {self.EXPECTED_HWREV_TEXT})\n"
         f"Temperature: {temp_c:.2f} 'C (Limits: 20-65 'C)\n"
         f"GPIO Status: {'PASS' if gpios_ok else 'FAIL'}\n"
         f"GPIO Details: {gpio_details}\n"
@@ -666,7 +696,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     # Standard order: 1st = GSC (Cr50), 2nd = AP (Android shell), 3rd = EC
     if ccd_present and len(ccd_nodes) < 3:
       non_ftdi = [t for t in candidate_ttys if t != ftdi_port]
-      if not ftdi_port and candidate_ttys:
+      if not ftdi_port and candidate_ttys and self.MCU_CONSOLE_IS_TTYUSB:
         # Default ttyUSB0 is FTDI MCU console
         non_ftdi = candidate_ttys[1:]
 
@@ -769,6 +799,56 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
 
     return adb_ok, dut_speed_5gbps, dut_speed_str, "\n".join(logs)
 
+  def run_adb_transfer_test(
+      self,
+      request: maui_manufacturing_pb2.MauiAdbTransferTestRequest,
+      unused_context: grpc.ServicerContext,
+  ) -> maui_manufacturing_pb2.MauiAdbTransferTestResponse:
+    """Pushes/pulls two random files to the DUT over ADB and verifies SHA-1."""
+    serial_no = request.serial_number or self._find_unit_serial()
+    size_mib = request.size_mb or maui_adb_transfer.get_size_mib()
+    logging.info("Running ADB transfer test (%s MiB + 1-16 MiB) for %s...",
+                 size_mib, serial_no)
+    res = maui_adb_transfer.run_adb_transfer_test(
+        preferred_serial=request.adb_serial,
+        size_mib=size_mib,
+    )
+    logging.info("ADB transfer test: %s (%.1f s)", res.message, res.total_s)
+    log_text = "\n".join(res.log)
+    write_device_log(
+        serial_no,
+        "adb_transfer_test",
+        f"ALL_PASSED={res.success}\n"
+        f"RESULT: {'PASSED' if res.success else 'FAILED'}\n"
+        f"{res.message}\n"
+        f"ADB Serial: {res.adb_serial}\n"
+        f"File Size: {res.file_size_bytes} B\n"
+        f"Push: {res.push_s:.2f} s, {res.push_mb_s:.1f} MB/s\n"
+        f"Pull: {res.pull_s:.2f} s, {res.pull_mb_s:.1f} MB/s\n"
+        f"Host SHA-1: {res.host_sha1}\n"
+        f"DUT SHA-1: {res.dut_sha1}\n"
+        f"Pulled SHA-1: {res.pulled_sha1}\n"
+        f"Transfer: {res.transfer_s:.2f} s (deadline {res.deadline_s:g} s)\n"
+        f"Total: {res.total_s:.2f} s\n\n{log_text}",
+    )
+    return maui_manufacturing_pb2.MauiAdbTransferTestResponse(
+        success=res.success,
+        message=res.message,
+        adb_serial=res.adb_serial,
+        file_size_bytes=res.file_size_bytes,
+        push_seconds=res.push_s,
+        pull_seconds=res.pull_s,
+        push_mb_per_s=res.push_mb_s,
+        pull_mb_per_s=res.pull_mb_s,
+        host_sha1=res.host_sha1,
+        dut_sha1=res.dut_sha1,
+        pulled_sha1=res.pulled_sha1,
+        total_seconds=res.total_s,
+        log=log_text,
+        transfer_seconds=res.transfer_s,
+        deadline_seconds=res.deadline_s,
+    )
+
   def run_host_dut_tests(
       self,
       request: maui_manufacturing_pb2.MauiHostDutTestRequest,
@@ -777,27 +857,16 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
     """Runs verification tests for Station 3 (Host+DUT) with guaranteed fast non-blocking return."""
     expected_serial = request.expected_serial or request.serial_number
     stage = request.stage or "all"
-    real_h2h_serial = ""
-    for dev in maui_common.scan_usb_devices():
-      if dev.vid in (maui_common.PROLIFIC_VID, 0x0403, 0x067B) and dev.serial:
-        real_h2h_serial = dev.serial
-        break
+    real_h2h_serial = self._find_real_h2h_serial()
 
     expected_serial_norm = (expected_serial or "").strip().upper()
     real_serial_norm = (real_h2h_serial or "").strip().upper()
     detected_serial = real_h2h_serial or expected_serial or "UNKNOWN"
     serial_matched = bool(real_serial_norm and (not expected_serial_norm or real_serial_norm == expected_serial_norm))
 
-    dev_port = ""
-    for dev in maui_common.scan_usb_devices():
-      if dev.vid == 0x0403 and dev.dev_node and os.path.exists(dev.dev_node):
-        dev_port = dev.dev_node
-        break
-    if not dev_port or not os.path.exists(dev_port):
-      tty_nodes = sorted(glob.glob("/dev/ttyUSB*"))
-      dev_port = tty_nodes[0] if tty_nodes else "/dev/ttyUSB0"
+    dev_port = self._resolve_console_port("")
 
-    tester = MauiConsoleTester(port_node=dev_port, timeout=0.5)
+    tester = self._make_console_tester(dev_port)
 
     # 1. Open a single fast serial session for MCU console operations
     pdc_dut = {"success": False, "plug_present": False, "voltage_v": 0.0, "max_current_a": 0.0, "op_current_a": 0.0, "measured_vbus_mv": 0, "orientation": "Unknown", "raw_output": ""}

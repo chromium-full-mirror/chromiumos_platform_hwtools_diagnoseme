@@ -23,7 +23,9 @@ RUN npm install --ignore-scripts --legacy-peer-deps
 COPY src/ui/ /app/
 
 WORKDIR /app
-RUN ng build --output-path=dist --output-hashing=all --configuration=production
+# DiagnoseMe edition (see editions.json and angular.json configurations).
+ARG EDITION=all
+RUN ng build --output-path=dist --output-hashing=all --configuration=production,${EDITION}
 
 #####################################################################
 

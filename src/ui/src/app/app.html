@@ -8,19 +8,15 @@
     <mat-icon>menu</mat-icon>
   </button>
   <mat-menu #menu="matMenu">
-    <!-- Disabled legacy cards for Maui deployment
-    <button mat-menu-item routerLink="/dolos-rework">Dolos Rework</button>
-    <button mat-menu-item routerLink="/servo-v4p1-manufacturing">Servo Manufacturing</button>
-    <button mat-menu-item routerLink="/servo-micro-manufacturing">Servo Micro Manufacturing</button>
-    <mat-divider></mat-divider>
-    -->
-    <button mat-menu-item routerLink="/maui-step1">SMT Step 1: MCU & FTDI Provisioning + PDC Flashing</button>
-    <button mat-menu-item routerLink="/maui-step2">SMT Step 2: SMT Functional Verification</button>
-    <mat-divider></mat-divider>
-    <button mat-menu-item routerLink="/maui-step3">FATP Step 3: Final Provisioning & Label Printing</button>
-    <button mat-menu-item routerLink="/maui-step4">FATP Step 4: Full-Unit Quick Test (QT0)</button>
+    @for (item of edition.menu; track $index) {
+      @if (item.divider) {
+        <mat-divider></mat-divider>
+      } @else {
+        <button mat-menu-item [routerLink]="item.route">{{item.label}}</button>
+      }
+    }
   </mat-menu>
-  <span>HW Tools Diagnose Me</span>
+  <span>HW Tools Diagnose Me – {{edition.title}}</span>
   <span class="spacer"></span>
   @if (buildInfo) {
     <span class="build-info">
@@ -31,6 +27,13 @@
     <mat-icon>file_download</mat-icon>
   </button>
 </mat-toolbar>
+
+@if (serverEditionMismatch) {
+  <div class="edition-mismatch" role="alert">
+    Edition mismatch: this UI is "{{edition.id}}" but the station backend runs
+    "{{serverEditionMismatch}}". Please reinstall or update the station.
+  </div>
+}
 
 <div class="top-level">
   <router-outlet></router-outlet>

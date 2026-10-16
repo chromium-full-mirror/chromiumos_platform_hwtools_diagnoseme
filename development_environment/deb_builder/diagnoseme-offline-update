@@ -27,6 +27,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Bundle directory: the first argument (install-update.sh passes it), else
+# BUNDLE_DIR from the environment.
+BUNDLE_DIR="${1:-${BUNDLE_DIR:-}}"
+
 # If no path provided, search for mounted removable drives containing diagnoseme-update or .zip
 if [ -z "$BUNDLE_DIR" ]; then
     echo "Scanning mounted storage for update bundle..."
@@ -188,8 +192,12 @@ if manifest:
         if not os.path.exists(rel_path):
             print(f"Error: Missing bundle file {rel_path}")
             sys.exit(1)
+        # Stream in 8 MB chunks: image tars and the deb are several GB.
+        sha = hashlib.sha256()
         with open(rel_path, "rb") as f:
-            computed = hashlib.sha256(f.read()).hexdigest()
+            for chunk in iter(lambda: f.read(8 * 1024 * 1024), b""):
+                sha.update(chunk)
+        computed = sha.hexdigest()
         if computed != expected_sha:
             print(f"Checksum mismatch for {rel_path}!")
             print(f"  Expected: {expected_sha}")
@@ -224,16 +232,17 @@ fi
 
 # 3. Update Offline Firmware Cache if provided
 FW_TARGET="/var/lib/diagnoseme/firmware"
-mkdir -p "$FW_TARGET/mcu" "$FW_TARGET/pdc"
+mkdir -p "$FW_TARGET"
 
 if [ -d "firmware" ]; then
     echo "Updating offline Maui firmware cache in $FW_TARGET..."
-    if [ -d "firmware/mcu" ]; then
-        cp -v firmware/mcu/* "$FW_TARGET/mcu/" 2>/dev/null || true
-    fi
-    if [ -d "firmware/pdc" ]; then
-        cp -v firmware/pdc/* "$FW_TARGET/pdc/" 2>/dev/null || true
-    fi
+    # One directory per component (mcu, pdc, ...; see editions.json).
+    for COMP_DIR in firmware/*/; do
+        [ -d "$COMP_DIR" ] || continue
+        COMP="$(basename "$COMP_DIR")"
+        mkdir -p "$FW_TARGET/$COMP"
+        cp -v "$COMP_DIR"* "$FW_TARGET/$COMP/" 2>/dev/null || true
+    done
 fi
 
 # 4. Restart Services

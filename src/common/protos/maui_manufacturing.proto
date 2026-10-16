@@ -61,6 +61,10 @@ service MauiStation2FunctionalTesting {
   // Card B: Host + DUT Verification (5Gbps H2H Link, 20V/100W PD Contract, CCD via servod, SBU Flip)
   rpc run_host_dut_tests(MauiHostDutTestRequest) returns (MauiHostDutTestResponse) {}
 
+  // ADB data transfer reliability: push + pull of a random file to the DUT
+  // through the H2H bridge, SHA-1 verified, rates logged (~30 s max).
+  rpc run_adb_transfer_test(MauiAdbTransferTestRequest) returns (MauiAdbTransferTestResponse) {}
+
   // Interactive Visual Tests (LEDs)
   rpc run_interactive_test(MauiInteractiveTestRequest) returns (MauiInteractiveTestResponse) {}
 
@@ -225,6 +229,33 @@ message MauiHostOnlyTestResponse {
   int32 chg_vbus_mv = 26;
   string gpio_details = 27;
   string voltage_details = 28;
+}
+
+message MauiAdbTransferTestRequest {
+  string serial_number = 1;  // Maui serial (log directory)
+  string adb_serial = 2;     // Preferred DUT ADB serial (default: first device)
+  uint32 size_mb = 3;        // Size of the first test file in MiB (default:
+                             // 400); the second one is 1-16 MiB larger
+}
+
+// The test pushes two random files, hashes them on the DUT and pulls them
+// back; sizes, times and rates below cover both files.
+message MauiAdbTransferTestResponse {
+  bool success = 1;
+  string message = 2;
+  string adb_serial = 3;
+  uint64 file_size_bytes = 4;  // Both files
+  double push_seconds = 5;     // Both pushes
+  double pull_seconds = 6;     // Both pulls
+  double push_mb_per_s = 7;  // MB = 10^6 bytes
+  double pull_mb_per_s = 8;
+  string host_sha1 = 9;      // Per-file SHA-1s separated by ", "
+  string dut_sha1 = 10;
+  string pulled_sha1 = 11;
+  double total_seconds = 12;  // Whole test, including generating the files
+  string log = 13;
+  double transfer_seconds = 14;  // Push + DUT SHA-1 + pull phase
+  double deadline_seconds = 15;  // Limit of transfer_seconds
 }
 
 message MauiHostDutTestRequest {

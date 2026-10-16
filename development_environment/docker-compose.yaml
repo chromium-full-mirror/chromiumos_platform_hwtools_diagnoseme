@@ -31,6 +31,12 @@ services:
       - TEST_DUT=brya
       - TEST_MODEL=banshee
       - RESULTS_SERVER=${RESULTS_SERVER:-}
+      # Optional maui-utils image override (default: the image's pin).
+      - MAUI_UTILS_IMAGE
+      # Optional ADB transfer test overrides (passed through when set).
+      - MAUI_ADB_SIZE_MB
+      - MAUI_ADB_DEADLINE_S
+      - MAUI_ADB_MIN_RATE_MB_S
 
     volumes:
       - logs:/var/log/rpcserver

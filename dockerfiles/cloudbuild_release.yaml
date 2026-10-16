@@ -1,13 +1,24 @@
 # Copyright 2026 The ChromiumOS Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+#
+# Release build of a single DiagnoseMe edition. Create one Cloud Build trigger
+# per shipped edition (see editions.json) and set the _EDITION substitution,
+# e.g. _EDITION=maui-v1.1. Images are tagged <edition>-<commit>; use
+# tools/promote.sh to move the :<edition> tag (and aliases such as :maui).
+# COMMIT_SHA is set by repository triggers; for a manual run use e.g.
+#   gcloud builds submit --config=dockerfiles/cloudbuild_release.yaml \
+#     --substitutions=_EDITION=maui-v1.1,COMMIT_SHA=$(git rev-parse HEAD) .
+
+substitutions:
+  _EDITION: 'maui-v1.1'
 
 steps:
 
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'envoy'
   args:
-  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/envoy:$_COMMIT_SHA
+  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/envoy:${_EDITION}-${COMMIT_SHA}
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/envoy/Dockerfile
@@ -42,13 +53,14 @@ steps:
   - '-c'
   - |
     mkdir -p /workspace/src/ui/src/assets
-    echo "{\"buildDate\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\", \"commitSha\": \"$_COMMIT_SHA\"}" > /workspace/src/ui/src/assets/build_info.json
+    echo "{\"buildDate\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\", \"commitSha\": \"${COMMIT_SHA}\", \"edition\": \"${_EDITION}\"}" > /workspace/src/ui/src/assets/build_info.json
   waitFor: ['-']
 
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'server-base'
   args:
-  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server-base:$_COMMIT_SHA
+  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server-base:${_EDITION}-${COMMIT_SHA}
+  - --target=base-${_EDITION}
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/rpcserver/Dockerfile.base
@@ -57,12 +69,13 @@ steps:
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'server'
   args:
-  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server:$_COMMIT_SHA
-  - --build-arg=BASE_IMAGE=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server-base:$_COMMIT_SHA
+  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server:${_EDITION}-${COMMIT_SHA}
+  - --build-arg=BASE_IMAGE=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/server-base:${_EDITION}-${COMMIT_SHA}
+  - --build-arg=EDITION=${_EDITION}
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/rpcserver/Dockerfile
-  waitFor: ['copy-python-protos', 'server-base']
+  waitFor: ['copy-python-protos', 'server-base', 'fetch-dist-blobs']
 
 - name: 'node:24'
   id: 'ui-lint'
@@ -80,7 +93,8 @@ steps:
 - name: 'gcr.io/kaniko-project/executor:latest'
   id: 'ui'
   args:
-  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/ui:$_COMMIT_SHA
+  - --destination=us-docker.pkg.dev/$PROJECT_ID/diagnoseme/ui:${_EDITION}-${COMMIT_SHA}
+  - --build-arg=EDITION=${_EDITION}
   - --cache=true
   - --cache-ttl=96h
   - -f=/workspace/dockerfiles/ui/Dockerfile
@@ -119,9 +133,14 @@ steps:
   args:
   - '-c'
   - |
-    mkdir -p dist
+    # The deb builder COPYs these; they must exist even when empty.
+    mkdir -p dist/firmware dist/maui-utils
     gcloud storage cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar.bz2" "dist/rtunicpg.tar.bz2" || true
-    gcloud storage cp "gs://rtk-tools/r8152-2.21.4.tar.bz2" "dist/r8152.tar.bz2" || true
+    gcloud storage cp "gs://rtk-tools/r8152-2.21.4.tar.bz2" "dist/r8152-2.21.4.tar.bz2" || true
+    # Maui editions bundle the stable maui-utils release (stable.dockertag).
+    if [ "$(python3 tools/edition_info.py get "${_EDITION}" maui_utils)" = "true" ]; then
+      tools/fetch_maui_utils.sh
+    fi
   waitFor: ['-']
 
 - name: 'gcr.io/cloud-builders/docker'
@@ -130,7 +149,7 @@ steps:
   args:
   - '-c'
   - |
-    docker build --build-arg DEB_VERSION="1.0.$(date +%s)" -t deb-builder -f development_environment/deb_builder/Dockerfile .
+    docker build --build-arg DEB_VERSION="1.0.$(date +%s)" --build-arg EDITION="${_EDITION}" -t deb-builder -f development_environment/deb_builder/Dockerfile .
   waitFor: ['fetch-dist-blobs']
 
 - name: 'gcr.io/cloud-builders/docker'
@@ -162,10 +181,20 @@ steps:
   args:
   - '-c'
   - |
-    apt-get update && apt-get install -y libarchive-tools xorriso isolinux syslinux-common
-    cd test_server
-    ./build_iso.sh
-  waitFor: ['-']
+    set -e
+    # build_iso.sh needs the docker CLI (the worker's docker socket is
+    # available to every step) plus the ISO tools.
+    apt-get update -qq
+    apt-get install -y -qq libarchive-tools xorriso isolinux syslinux-common curl
+    command -v docker > /dev/null || apt-get install -y -qq docker.io
+    gcloud auth configure-docker us-docker.pkg.dev --quiet
+    # Package the images pushed by this build; the ISO tags them as
+    # :<edition> for the station (see build_iso.sh).
+    test_server/build_iso.sh \
+      --edition "${_EDITION}" \
+      --tag "${_EDITION}-${COMMIT_SHA}" \
+      --output "custom-debian-preseed-${_EDITION}.iso"
+  waitFor: ['server', 'ui', 'envoy', 'fetch-dist-blobs']
 
 - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
   id: 'upload-iso'
@@ -173,8 +202,16 @@ steps:
   args:
     - '-c'
     - |
-      gcloud storage cp test_server/custom-debian-preseed.iso gs://diagnoseme_iso/custom-debian-preseed-${_COMMIT_SHA}.iso
-      gcloud storage cp test_server/custom-debian-preseed.iso gs://diagnoseme_iso/custom-debian-preseed-latest.iso
+      ISO="test_server/custom-debian-preseed-${_EDITION}.iso"
+      # TODO(editions): move to gs://diagnoseme_iso/<edition>/<version>/ with a
+      # stable.isotag marker (the gs://maui-firmware layout) once promote.sh
+      # handles ISOs.
+      gcloud storage cp "$${ISO}" gs://diagnoseme_iso/custom-debian-preseed-${_EDITION}-${COMMIT_SHA}.iso
+      gcloud storage cp "$${ISO}" gs://diagnoseme_iso/custom-debian-preseed-${_EDITION}-latest.iso
+      if [ "${_EDITION}" = "maui-v1.1" ]; then
+        # Legacy name used by existing Maui v1.1 install instructions.
+        gcloud storage cp "$${ISO}" gs://diagnoseme_iso/custom-debian-preseed-latest.iso
+      fi
   waitFor: ['build-iso']
 
 options:

@@ -15,6 +15,8 @@ import {
   MauiBslButtonTestResponse,
   MauiHostDutTestRequest,
   MauiHostDutTestResponse,
+  MauiAdbTransferTestRequest,
+  MauiAdbTransferTestResponse,
 } from '../../proto/maui-manufacturing.pb';
 import {Observable} from 'rxjs';
 
@@ -84,5 +86,18 @@ export class MauiStation2Service {
     request.stage = stage;
     request.previousOrientation = previousOrientation;
     return this.client.runHostDutTests(request);
+  }
+
+  /** Pushes/pulls two ~400 MB random files to the DUT over ADB (60 s max). */
+  runAdbTransferTest(
+    serialNumber = '',
+    adbSerial = '',
+    sizeMb = 0,
+  ): Observable<MauiAdbTransferTestResponse> {
+    const request = new MauiAdbTransferTestRequest();
+    request.serialNumber = serialNumber;
+    request.adbSerial = adbSerial;
+    request.sizeMb = sizeMb;
+    return this.client.runAdbTransferTest(request);
   }
 }
