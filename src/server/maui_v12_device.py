@@ -63,6 +63,16 @@ ADC_CHANNELS = (
 )
 _ANSI_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 _PROMPT_RE = re.compile(r"(?:^|\n)\s*\S*\$ ?")
+# Zephyr log output that the App prints asynchronously into the shell, e.g.
+# "[00:00:00.003,265] <inf> gpio: Initialized GPIOs" (also mid-line, when a
+# message interrupts a command reply) and "--- 16 messages dropped ---".
+_ZEPHYR_LOG_RE = re.compile(
+    r"\[\d{2}:\d{2}:\d{2}\.\d{3},\d{3}\]\s*<(?:inf|wrn|err|dbg)>[^\r\n]*(?:\r\n|\r|\n)?"
+)
+_DROPPED_RE = re.compile(r"-{3} \d+ messages dropped -{3}[ \t]*(?:\r\n|\r|\n)?")
+_BOOT_BANNER_RE = re.compile(
+    r"\*{3} Booting Zephyr OS[^\r\n]*?\*{3}[ \t]*(?:\r\n|\r|\n)?"
+)
 
 
 @dataclasses.dataclass
@@ -399,6 +409,50 @@ def strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text or "")
 
 
+def clean_console_output(text: str) -> str:
+    """Removes ANSI escapes and asynchronous Zephyr output from a reply.
+
+    Zephyr log lines ("[hh:mm:ss.mmm,uuu] <inf> ..."), "--- N messages
+    dropped ---" notes and the boot banner are removed. Every v1.2 parser
+    works on the cleaned reply, so asynchronous boot / log output of the App
+    cannot end up in a parsed value.
+    """
+    text = strip_ansi(text)
+    for pattern in (_ZEPHYR_LOG_RE, _DROPPED_RE, _BOOT_BANNER_RE):
+        text = pattern.sub("", text)
+    return text
+
+
+def drain_input(
+    ser: serial.Serial,
+    idle_s: float = profile.CONSOLE_DRAIN_IDLE_S,
+    max_s: float = profile.CONSOLE_DRAIN_MAX_S,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> bytes:
+    """Reads and returns pending console output until it is idle for |idle_s|.
+
+    Stops after |max_s| even if the App keeps printing. Errors (e.g. the
+    console disappeared) end the drain; the command itself reports them.
+    """
+    drained = bytearray()
+    start = last_data = clock()
+    try:
+        while True:
+            now = clock()
+            if now - last_data >= idle_s or now - start >= max_s:
+                break
+            waiting = ser.in_waiting
+            if waiting:
+                drained += ser.read(waiting)
+                last_data = clock()
+            else:
+                sleep(profile.CONSOLE_DRAIN_POLL_S)
+    except (OSError, ValueError, TypeError, serial.SerialException) as e:
+        logging.debug("Console drain stopped: %s", e)
+    return bytes(drained)
+
+
 def gpio_missing(output: str, name: str) -> bool:
     """True if the shell answered `gpio get <name>` without listing |name|.
 
@@ -456,7 +510,7 @@ def verify_host_adc(
 
     Used instead of verify_host_adc_voltages(): host connected (exactly one
     active host CC line), nothing on the DUT port and, if |charger_connected|,
-    the charger plugged in (vSafe5V or a 20 V PD contract on CHG VBUS), else
+    the charger plugged in (5 V or a 20 V PD contract on CHG VBUS), else
     vSafe0V there. The limits are USB Type-C / PD spec values (see the
     profile). Any channel that prints `error` fails.
     """
@@ -508,7 +562,7 @@ def verify_host_adc(
         for low, high in (profile.CHG_VBUS_5V_MV, profile.CHG_VBUS_20V_MV)
     ):
         mismatches.append(
-            f"PPVAR_USB_CHG_VBUS: {chg} mV is neither vSafe5V "
+            f"PPVAR_USB_CHG_VBUS: {chg} mV is neither 5 V "
             f"[{profile.CHG_VBUS_5V_MV[0]}, {profile.CHG_VBUS_5V_MV[1]}] mV nor a "
             f"20 V contract [{profile.CHG_VBUS_20V_MV[0]}, "
             f"{profile.CHG_VBUS_20V_MV[1]}] mV (is the charger plugged in?)"
@@ -543,6 +597,38 @@ class MauiV12ConsoleTester(MauiConsoleTester):
             )
         )
 
+    # Injectable for tests (console drain).
+    _clock = staticmethod(time.monotonic)
+    _sleep = staticmethod(time.sleep)
+
+    def send_command(  # pylint: disable=too-many-arguments
+        self,
+        ser: serial.Serial,
+        command: str,
+        timeout: float = 1.0,
+        first_byte_timeout: float = 0.8,
+        inter_byte_timeout: float = 0.08,
+    ) -> str:
+        """Sends |command| and returns its cleaned reply.
+
+        Pending output (e.g. boot messages of the App) is drained first until
+        the console is idle, and Zephyr log lines, "messages dropped" notes
+        and ANSI escapes are removed from the reply (clean_console_output).
+        """
+        stale = drain_input(ser, clock=self._clock, sleep=self._sleep)
+        if stale:
+            logging.debug(
+                "Drained %d byte(s) before '%s': %r", len(stale), command, stale[:200]
+            )
+        raw = super().send_command(
+            ser,
+            command,
+            timeout=timeout,
+            first_byte_timeout=first_byte_timeout,
+            inter_byte_timeout=inter_byte_timeout,
+        )
+        return clean_console_output(raw)
+
     @contextlib.contextmanager
     def _session(self, ser: Optional[serial.Serial]) -> Iterator[serial.Serial]:
         if ser is not None:
@@ -550,6 +636,10 @@ class MauiV12ConsoleTester(MauiConsoleTester):
             return
         with open_serial_port(self.port_node, self.baudrate, timeout=self.timeout) as s:
             yield s
+
+    def session(self) -> serial.Serial:
+        """Opens the console for several commands (use it in a with block)."""
+        return open_serial_port(self.port_node, self.baudrate, timeout=self.timeout)
 
     def read_hwrev(self, ser: Optional[serial.Serial] = None) -> Tuple[bool, int, str]:
         """Reads `hwrev`; any revision of profile.valid_hwrevs() passes."""
@@ -593,35 +683,6 @@ class MauiV12ConsoleTester(MauiConsoleTester):
             output,
         )
         return (int(m.group(1)) if m else -1), output
-
-    def sample_bsl_gpio(
-        self,
-        max_duration_sec: float = 3.0,
-        interval_sec: float = profile.BSL_POLL_INTERVAL_S,
-    ) -> Tuple[bool, int, str]:
-        """Polls the BSL button GPIO until it reads pressed.
-
-        Stops at once if the firmware has no such GPIO (see gpio_missing()).
-        Returns (pressed, last_level, last_raw_output).
-        """
-        last_level = -1
-        last_output = ""
-        start = time.time()
-        try:
-            with self._session(None) as s:
-                while (time.time() - start) < max_duration_sec:
-                    last_level, last_output = self.read_gpio(
-                        profile.BSL_GPIO_NAME, ser=s
-                    )
-                    if last_level == profile.BSL_GPIO_PRESSED:
-                        return True, last_level, last_output
-                    if gpio_missing(last_output, profile.BSL_GPIO_NAME):
-                        break
-                    time.sleep(interval_sec)
-        except Exception as e:  # pylint: disable=broad-except
-            logging.warning("Failed to sample BSL GPIO on %s: %s", self.port_node, e)
-            return False, -1, f"Error: {e}"
-        return False, last_level, last_output
 
     def serial_get(self, ser: Optional[serial.Serial] = None) -> Tuple[str, str]:
         """Returns (serial_number, raw_output) from `serial get`."""

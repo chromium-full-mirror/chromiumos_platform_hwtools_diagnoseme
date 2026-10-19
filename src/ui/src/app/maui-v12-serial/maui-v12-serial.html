@@ -176,22 +176,19 @@
               r.ftdiMatches ? 'Match' : 'Mismatch'
             }}</span>
           </div>
-          @if (!enumerationOk) {
-            <div class="operator-warning-banner">
-              <mat-icon>warning</mat-icon>
-              <span>Enumeration check failed (see card 0).</span>
-            </div>
-          }
           <div class="status-note" [class.note-fail]="!barcodePassed">{{ r.message }}</div>
         }
         @if (submitting) {
           <div class="status-note">Submitting logs...</div>
         } @else if (submitted) {
-          <div class="operator-ready-banner" id="v12-submit-done">
-            <mat-icon>check_circle</mat-icon>
+          <div
+            id="v12-submit-done"
+            [class.operator-ready-banner]="barcodePassed"
+            [class.operator-warning-banner]="!barcodePassed">
+            <mat-icon>{{ barcodePassed ? 'check_circle' : 'warning' }}</mat-icon>
             <span
-              ><strong>{{ overallPassed ? 'PASS' : 'FAIL' }} logs submitted.</strong> Disconnect the unit and
-              connect the next one.</span
+              ><strong>Barcode {{ barcodePassed ? 'PASS' : 'FAIL' }}, logs submitted.</strong> Disconnect the unit
+              and connect the next one.</span
             >
           </div>
         } @else if (submitError) {

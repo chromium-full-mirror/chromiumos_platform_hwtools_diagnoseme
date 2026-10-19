@@ -76,7 +76,7 @@ describe('MauiV12TestingComponent', () => {
     expect(suite().hwRev).toBe('v1.2');
     expect(suite().isFatpMode).toBe(false);
     expect(suite().rev.consoleLabel).toBe('MCU');
-    expect(suite().bslReadLabel).toBe('Read BSL Button');
+    expect(suite().bslReadLabel).toBe('Start BSL Check');
   });
 
   it('gates the tests on serial number provisioning', () => {

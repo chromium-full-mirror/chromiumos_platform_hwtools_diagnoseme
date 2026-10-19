@@ -122,11 +122,24 @@ EXPECTED_HOST_GPIOS = {
     "pp1100_pg_od": 1,
 }
 
-# `adc status` limits of the host-only cards (USB Type-C / PD spec values).
+# `adc status` limits of the host-only cards. Every "expected value" check
+# uses the nominal value +-10 % (VOLTAGE_TOLERANCE_PCT); the idle and CC
+# thresholds below are not expected-value checks.
 # PP5000 and the host VBUS are read through 1:2 dividers (5 V reads about
 # 2500 mV); CHG/DUT VBUS are reported in mV of the rail by the firmware.
-PP5000_MV = (2375, 2625)  # 5 V +-5 %.
-HOST_VBUS_MV = (2375, 2750)  # vSafe5V, 4.75-5.5 V.
+VOLTAGE_TOLERANCE_PCT = 10
+
+
+def expected_range(
+    nominal_mv: int, tolerance_pct: int = VOLTAGE_TOLERANCE_PCT
+) -> Tuple[int, int]:
+    """Returns (low, high) mV of |nominal_mv| +- |tolerance_pct| %."""
+    delta = nominal_mv * tolerance_pct // 100
+    return nominal_mv - delta, nominal_mv + delta
+
+
+PP5000_MV = expected_range(2500)  # 5 V rail through 1:2: 2250-2750 mV.
+HOST_VBUS_MV = expected_range(2500)  # Host VBUS 5 V through 1:2: 2250-2750 mV.
 # Exactly one host CC line sees the host Rp (about 420 mV for a default-USB
 # Rp, about 1700 mV for a 3.0 A Rp); the other one stays idle.
 HOST_CC_ACTIVE_MV = (250, 2200)
@@ -134,10 +147,10 @@ HOST_CC_IDLE_MAX_MV = 150
 # Nothing is connected to the DUT port during the host-only cards.
 SBU_IDLE_MAX_MV = 100
 VSAFE0V_MAX_MV = 800  # Idle DUT / CHG VBUS (vSafe0V).
-# CHG VBUS with the charger plugged in: vSafe5V without a PD contract, or a
-# 20 V PD contract (+-5 %).
-CHG_VBUS_5V_MV = (4750, 5500)
-CHG_VBUS_20V_MV = (19000, 21000)
+# CHG VBUS with the charger plugged in: 5 V without a PD contract, or a
+# 20 V PD contract (both +-10 %).
+CHG_VBUS_5V_MV = expected_range(5000)  # 4500-5500 mV.
+CHG_VBUS_20V_MV = expected_range(20000)  # 18000-22000 mV.
 
 # `pdc info` of the PDC image flashed on v1.2 boards (v20_0325_100W).
 EXPECTED_PDC_APP_CONFIG_VER = "00000325"
@@ -152,10 +165,28 @@ USB_TOPOLOGY_POLL_S = 0.25
 # BSL ADC channel. Firmware without that GPIO node prints nothing for it.
 BSL_GPIO_NAME = "ec_bsl_invoke"
 BSL_GPIO_PRESSED = 1
-BSL_POLL_INTERVAL_S = 0.15
+BSL_GPIO_RELEASED = 0
+# Guided 3-phase check (one console session, see maui_v12_bsl):
+# 1. Not touched: every sample of BSL_IDLE_S must read released (catches a
+#    floating line, e.g. without the R0714 pull-down).
+# 2. Press and hold: a press within BSL_PRESS_TIMEOUT_S, then pressed for
+#    BSL_HOLD_S of consecutive samples.
+# 3. Release: released within BSL_RELEASE_TIMEOUT_S, then for
+#    BSL_RELEASED_STABLE_S of consecutive samples.
+BSL_POLL_INTERVAL_S = 0.12
+BSL_IDLE_S = 2.0
+BSL_PRESS_TIMEOUT_S = 10.0
+BSL_HOLD_S = 1.5
+BSL_RELEASE_TIMEOUT_S = 5.0
+BSL_RELEASED_STABLE_S = 1.0
 
 # Console timeouts (CDC-ACM is fast; keep the v1.1 values).
 CONSOLE_TIMEOUT_S = 0.5
+# Before every command, pending console output is read until the console was
+# idle for CONSOLE_DRAIN_IDLE_S (at most CONSOLE_DRAIN_MAX_S).
+CONSOLE_DRAIN_IDLE_S = 0.05
+CONSOLE_DRAIN_MAX_S = 0.5
+CONSOLE_DRAIN_POLL_S = 0.01
 
 # Directories searched for station firmware (see deb_builder/start-diagnoseme).
 FIRMWARE_ROOTS = (

@@ -5,10 +5,11 @@
 
 Generates two random files with independent content (DEFAULT_SIZE_MIB and
 1-16 MiB more), pushes both to the DUT, hashes both on the DUT, pulls both
-back and compares every SHA-1 (host original, DUT copy, pulled copy). The
-transfer phase (push, DUT SHA-1, pull) must finish within a deadline (60 s
-by default, ~35 s at the expected ~50 MB/s); generating the files is not
-counted but capped. Shared by all Maui revisions.
+back and compares every SHA-1 (host original, DUT copy, pulled copy). Before
+that, the H2H link must run at USB 3 speed on both the host and the DUT side.
+The transfer phase (push, DUT SHA-1, pull) must finish within a deadline (40 s
+by default as a backstop, ~25-35 s on a USB 3 link); generating the files is
+not counted but capped. Shared by all Maui revisions.
 """
 
 import dataclasses
@@ -39,7 +40,7 @@ MAX_SIZE_MIB = 2048
 EXTRA_MIB_RANGE = (1, 16)
 # Limit of the transfer phase: push both files, SHA-1 both on the DUT and
 # pull both back.
-DEFAULT_DEADLINE_S = 60.0
+DEFAULT_DEADLINE_S = 40.0
 # Generating the random files is not part of the deadline but must not take
 # longer than this.
 GENERATION_LIMIT_S = 30.0
@@ -55,9 +56,29 @@ MIN_RATE_MB_S = 0.0
 SIZE_ENV = "MAUI_ADB_SIZE_MB"  # Size of the first file in MiB.
 DEADLINE_ENV = "MAUI_ADB_DEADLINE_S"
 MIN_RATE_ENV = "MAUI_ADB_MIN_RATE_MB_S"
+# Minimum USB link speed (Mb/s) of the H2H on the host and on the DUT side
+# before the transfer; 0 disables the check (station override, e.g. a USB 2.0
+# test setup).
+MIN_LINK_MBPS = 5000
+MIN_LINK_ENV = "MAUI_ADB_MIN_LINK_MBPS"
+# USB IDs (VID, PID) of the H2H bridge (ADB function / Prolific).
+H2H_USB_IDS = (("18d1", "506d"), ("18d1", "5084"), ("067b", "27a1"))
+SYSFS_USB_DIR = "/sys/bus/usb/devices"
+# Lists "vid:pid serial=<iSerial> speed=<Mb/s>" of every USB device on the DUT.
+DUT_USB_LIST_CMD = (
+    "for d in /sys/bus/usb/devices/*; do if [ -f $d/idVendor ]; then "
+    "echo $(cat $d/idVendor 2>/dev/null):$(cat $d/idProduct 2>/dev/null) "
+    "serial=$(cat $d/serial 2>/dev/null) speed=$(cat $d/speed 2>/dev/null); "
+    "fi; done"
+)
+LINK_HINT = "use USB 3 cables and a USB 3 host port"
 
 _CHUNK = 4 * MIB
 _SHA1_LINE_RE = re.compile(r"^\s*([0-9a-f]{40})\s+\*?(\S+)", re.MULTILINE)
+_DUT_USB_LINE_RE = re.compile(
+    r"^\s*([0-9a-fA-F]{4}):([0-9a-fA-F]{4})\s+serial=(.*?)\s*speed=(\S*)\s*$",
+    re.MULTILINE,
+)
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -115,6 +136,9 @@ class AdbTransferResult:  # pylint: disable=too-many-instance-attributes
     transfer_s: float = 0.0
     deadline_s: float = 0.0
     files: List[AdbFileResult] = dataclasses.field(default_factory=list)
+    # USB link speed of the H2H in Mb/s on the host / DUT side (0: unknown).
+    host_link_mbps: int = 0
+    dut_link_mbps: int = 0
 
 
 class _Deadline:  # pylint: disable=too-few-public-methods
@@ -234,13 +258,91 @@ def get_size_mib() -> int:
 
 
 def get_deadline_s() -> float:
-    """Returns the transfer deadline in seconds (MAUI_ADB_DEADLINE_S, else 60)."""
+    """Returns the transfer deadline in seconds (MAUI_ADB_DEADLINE_S, else 40)."""
     return _env_number(DEADLINE_ENV, DEFAULT_DEADLINE_S, 1.0)
 
 
 def get_min_rate_mb_s() -> float:
     """Returns the minimum push / pull rate in MB/s (0: only logged)."""
     return _env_number(MIN_RATE_ENV, MIN_RATE_MB_S, 0.0)
+
+
+def get_min_link_mbps() -> int:
+    """Returns the minimum H2H link speed in Mb/s (0: not checked)."""
+    return int(_env_number(MIN_LINK_ENV, MIN_LINK_MBPS, 0.0))
+
+
+def _parse_speed(value: str) -> Optional[int]:
+    """Returns the USB `speed` sysfs value in Mb/s (None if not a number)."""
+    try:
+        return int(float(value))
+    except ValueError:
+        return None
+
+
+def _pick_h2h_speed(
+    devices: List[Tuple[str, str, str, str]], serial: str
+) -> Tuple[Optional[int], str]:
+    """Returns (speed, description) of the H2H in (vid, pid, serial, speed) list.
+
+    Prefers the device whose iSerial is |serial|; speed is None if no H2H was
+    found or its speed is unreadable.
+    """
+    h2hs = [d for d in devices if (d[0].lower(), d[1].lower()) in H2H_USB_IDS]
+    if not h2hs:
+        return None, "no H2H device"
+    matching = [d for d in h2hs if serial and d[2].strip().upper() == serial.upper()]
+    vid, pid, dev_serial, speed = (matching or h2hs)[0]
+    desc = f"{vid}:{pid} serial={dev_serial or '-'} speed={speed or '-'}"
+    if not matching and serial:
+        desc += f" (no H2H with serial {serial}; {len(h2hs)} found)"
+    return _parse_speed(speed), desc
+
+
+def _read_sysfs(path: str) -> str:
+    """Returns the stripped content of a sysfs attribute, '' if unreadable."""
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as attr:
+            text = attr.read()
+    except OSError:
+        text = ""
+    return text.strip()
+
+
+def list_host_usb_devices(
+    sysfs_dir: str = SYSFS_USB_DIR,
+) -> List[Tuple[str, str, str, str]]:
+    """Returns (vid, pid, serial, speed) of the USB devices in sysfs."""
+    devices = []
+    try:
+        names = sorted(os.listdir(sysfs_dir))
+    except OSError:
+        return devices
+    for name in names:
+        if ":" in name:  # Interfaces.
+            continue
+        path = os.path.join(sysfs_dir, name)
+        vid = _read_sysfs(os.path.join(path, "idVendor"))
+        pid = _read_sysfs(os.path.join(path, "idProduct"))
+        if vid and pid:
+            devices.append(
+                (
+                    vid,
+                    pid,
+                    _read_sysfs(os.path.join(path, "serial")),
+                    _read_sysfs(os.path.join(path, "speed")),
+                )
+            )
+    return devices
+
+
+def parse_dut_usb_list(output: str) -> List[Tuple[str, str, str, str]]:
+    """Returns (vid, pid, serial, speed) of DUT_USB_LIST_CMD output."""
+    return [m.groups() for m in _DUT_USB_LINE_RE.finditer(output or "")]
+
+
+def _mbps_text(speed: Optional[int]) -> str:
+    return "unknown" if speed is None else f"{speed} Mb/s"
 
 
 def _join(values: List[str]) -> str:
@@ -313,6 +415,42 @@ class _TransferTest:  # pylint: disable=too-many-instance-attributes
         if not self.res.adb_serial:
             raise _Failure("No ADB device (DUT) found. Check the H2H link and DUT.")
         self._no_compress = ["-Z"] if supports_no_compression(self._run) else []
+
+    def check_link(self, sysfs_dir: str, min_mbps: int) -> None:
+        """Fails unless the H2H runs at >= |min_mbps| on the host and the DUT."""
+        serial = self.res.adb_serial
+        host, host_desc = _pick_h2h_speed(list_host_usb_devices(sysfs_dir), serial)
+        self.log(f"Host USB (H2H): {host_desc}")
+        try:
+            proc = self.adb(["shell", DUT_USB_LIST_CMD], 5.0)
+            dut_devices = parse_dut_usb_list(proc.stdout or "")
+        except (OSError, subprocess.SubprocessError) as e:
+            self.log(f"DUT USB query failed: {e}")
+            dut_devices = []
+        dut, dut_desc = _pick_h2h_speed(dut_devices, serial)
+        self.log(f"DUT USB (H2H): {dut_desc}")
+        self.res.host_link_mbps = host or 0
+        self.res.dut_link_mbps = dut or 0
+        self.log(
+            f"H2H USB link: host {_mbps_text(host)}, DUT {_mbps_text(dut)} "
+            + (f"(required >= {min_mbps} Mb/s)" if min_mbps else "(not checked)")
+        )
+        if not min_mbps:
+            return
+        if host is not None and dut is not None and min(host, dut) >= min_mbps:
+            return
+        message = (
+            f"H2H link is not USB 3 (host {_mbps_text(host)}, DUT "
+            f"{_mbps_text(dut)}) - {LINK_HINT}."
+        )
+        if host is None:
+            message += (
+                " The H2H USB speed could not be read on the host "
+                f"({host_desc} in {sysfs_dir})."
+            )
+        if dut is None:
+            message += f" The H2H USB speed could not be read on the DUT ({dut_desc})."
+        raise _Failure(message)
 
     def generate(self, tmp_dir: str, sizes: List[int], limit_s: float) -> None:
         """Writes the random files; fails if that takes longer than |limit_s|."""
@@ -487,7 +625,7 @@ class _TransferTest:  # pylint: disable=too-many-instance-attributes
             logging.warning("Failed to remove %s on the DUT: %s", self._remote, e)
 
 
-def run_adb_transfer_test(  # pylint: disable=too-many-arguments
+def run_adb_transfer_test(  # pylint: disable=too-many-arguments,too-many-locals
     preferred_serial: str = "",
     size_mib: Optional[int] = None,
     deadline_s: Optional[float] = None,
@@ -498,6 +636,8 @@ def run_adb_transfer_test(  # pylint: disable=too-many-arguments
     min_rate_mb_s: Optional[float] = None,
     extra_mib: Optional[int] = None,
     generation_limit_s: float = GENERATION_LIMIT_S,
+    sysfs_dir: str = SYSFS_USB_DIR,
+    min_link_mbps: Optional[int] = None,
 ) -> AdbTransferResult:
     """Pushes and pulls two random files over ADB and verifies them.
 
@@ -513,6 +653,9 @@ def run_adb_transfer_test(  # pylint: disable=too-many-arguments
       min_rate_mb_s: minimum push and pull rate; None: get_min_rate_mb_s().
       extra_mib: the second file is this much larger; None: random 1-16.
       generation_limit_s: limit of generating the random files.
+      sysfs_dir: host USB devices in sysfs (tests).
+      min_link_mbps: minimum H2H link speed on the host and the DUT side
+        (0: not checked); None: get_min_link_mbps().
     """
     start = clock()
     deadline_s = deadline_s or get_deadline_s()
@@ -522,12 +665,15 @@ def run_adb_transfer_test(  # pylint: disable=too-many-arguments
     sizes = [size_mib * MIB, (size_mib + extra_mib) * MIB]
     if min_rate_mb_s is None:
         min_rate_mb_s = get_min_rate_mb_s()
+    if min_link_mbps is None:
+        min_link_mbps = get_min_link_mbps()
     test = _TransferTest(run, clock, deadline_s)
     res = test.res
     res.file_size_bytes = sum(sizes)
     tmp_dir = tempfile.mkdtemp(prefix="maui_adb_", dir=work_dir)
     try:
         test.select_device(preferred_serial)
+        test.check_link(sysfs_dir, min_link_mbps)
         test.log(
             f"Test files: {size_mib} MiB + {size_mib + extra_mib} MiB "
             f"({res.file_size_bytes} B) -> {res.adb_serial}:{DUT_DIR}; transfer "
@@ -547,9 +693,11 @@ def run_adb_transfer_test(  # pylint: disable=too-many-arguments
         test.summarize()
         res.success = True
         res.message = (
-            f"ADB transfer OK: {size_mib} + {size_mib + extra_mib} MiB in "
-            f"{res.transfer_s:.1f} s (limit {deadline_s:g} s), push "
-            f"{res.push_mb_s:.1f} MB/s, pull {res.pull_mb_s:.1f} MB/s, SHA-1 match."
+            f"ADB transfer OK: transfer {res.transfer_s:.1f} s / limit "
+            f"{deadline_s:g} s, {size_mib} + {size_mib + extra_mib} MiB, push "
+            f"{res.push_mb_s:.1f} MB/s, pull {res.pull_mb_s:.1f} MB/s, SHA-1 "
+            f"match, USB link host {res.host_link_mbps} / DUT "
+            f"{res.dut_link_mbps} Mb/s."
         )
         test.log(res.message)
     except _Failure as e:

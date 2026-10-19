@@ -1263,6 +1263,70 @@ V11_STAGE_LOG_MAPPING = (
     ("adb_transfer_test", "adb_transfer_test.log", "ADB Transfer Reliability"),
 )
 
+# Per-stage logs of the Host + DUT verification (cards with/without charger,
+# SBU flip), written by run_host_dut_tests in both card orders.
+HOST_DUT_STAGE_LOGS = (
+    "host_dut_stage1_with_charger.log",
+    "host_dut_stage2_sbu_flip.log",
+    "host_dut_stage3_no_charger.log",
+    "host_dut_stage1_no_charger.log",
+    "host_dut_stage2_with_charger.log",
+    "host_dut_stage3_sbu_flip.log",
+)
+
+# Logs written by the barcode / label pages (the only source of label_verified).
+LABEL_LOGS = ("serial_label_check.log", "label_verification.log")
+
+
+def _classify_stage_log(content_lower: str) -> Tuple[str, str]:
+  """Returns (verdict, details) of a non-empty stage log (lower-cased content)."""
+  if "status=bypassed" in content_lower or "bypassed by operator" in content_lower or "overall_dut_status: bypassed" in content_lower or "overall_host_status: bypassed" in content_lower:
+    return "BYPASSED", "Bypassed by operator"
+  if "bypassed" in content_lower and "all_passed=true" not in content_lower:
+    return "BYPASSED", "Bypassed by operator"
+  if "all_passed=false" in content_lower or "result: failed" in content_lower or "overall_host_status: failed" in content_lower or "overall_dut_status: failed" in content_lower or "mcu bsl flashing failed" in content_lower or "mcu firmware update failed" in content_lower or "status: failed" in content_lower:
+    return "FAILED", "Stage reported test/command failure"
+  if "mcu firmware update successful" in content_lower or "completed successfully" in content_lower or "100 %" in content_lower or "all_passed=true" in content_lower or "result: passed" in content_lower or "status: success" in content_lower or "success:" in content_lower or "passed" in content_lower:
+    return "PASSED", "Completed successfully"
+  if "skipped" in content_lower or "already matched" in content_lower:
+    return "PASSED (SKIPPED)", "Already configured with matching serial (Skipped)"
+  if "failed" in content_lower or "exception" in content_lower:
+    return "FAILED", "Stage reported test/command failure"
+  return "PASSED", "Log recorded"
+
+
+def _read_log_lower(path: str) -> str:
+  """Returns the lower-cased content of a log file ("" if missing / empty)."""
+  try:
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+      with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        return f.read().lower()
+  except OSError:
+    pass
+  return ""
+
+
+def _label_verdict_from_logs(dir_path: str) -> str:
+  """label_verified from the barcode page logs (NOT_RUN when none exists)."""
+  for log_name in LABEL_LOGS:
+    content = _read_log_lower(os.path.join(dir_path, log_name))
+    if not content:
+      continue
+    # v1.2 serial page: the barcode has its own line (RESULT also covers enumeration).
+    m = re.search(r"barcode matches[^:\n]*:\s*(pass|fail)", content)
+    if m:
+      return "PASSED" if m.group(1) == "pass" else "FAILED"
+    if "label verification result: passed" in content:
+      return "PASSED"
+    if "label verification result: failed" in content:
+      return "FAILED"
+    if "bypassed" in content:
+      return "BYPASSED"
+    if "passed" in content:
+      return "PASSED"
+    return "FAILED"
+  return "NOT_RUN"
+
 
 def analyze_device_manufacturing_logs(
     serial_number: str,
@@ -1318,32 +1382,11 @@ def analyze_device_manufacturing_logs(
       except Exception:
         pass
 
-    content_lower = content.lower()
-
     if not exists or size == 0:
       verdict = "NOT_RUN"
       details = "Log file not found (stage not executed)"
-    elif "status=bypassed" in content_lower or "bypassed by operator" in content_lower or "overall_dut_status: bypassed" in content_lower or "overall_host_status: bypassed" in content_lower:
-      verdict = "BYPASSED"
-      details = "Bypassed by operator"
-    elif "bypassed" in content_lower and "all_passed=true" not in content_lower:
-      verdict = "BYPASSED"
-      details = "Bypassed by operator"
-    elif "all_passed=false" in content_lower or "result: failed" in content_lower or "overall_host_status: failed" in content_lower or "overall_dut_status: failed" in content_lower or "mcu bsl flashing failed" in content_lower or "mcu firmware update failed" in content_lower or "status: failed" in content_lower:
-      verdict = "FAILED"
-      details = "Stage reported test/command failure"
-    elif "mcu firmware update successful" in content_lower or "completed successfully" in content_lower or "100 %" in content_lower or "all_passed=true" in content_lower or "result: passed" in content_lower or "status: success" in content_lower or "success:" in content_lower or "passed" in content_lower:
-      verdict = "PASSED"
-      details = "Completed successfully"
-    elif "skipped" in content_lower or "already matched" in content_lower:
-      verdict = "PASSED (SKIPPED)"
-      details = "Already configured with matching serial (Skipped)"
-    elif "failed" in content_lower or "exception" in content_lower:
-      verdict = "FAILED"
-      details = "Stage reported test/command failure"
     else:
-      verdict = "PASSED"
-      details = "Log recorded"
+      verdict, details = _classify_stage_log(content.lower())
 
     stage_statuses[stage_key] = verdict
     log_file_infos.append(
@@ -1375,41 +1418,58 @@ def analyze_device_manufacturing_logs(
         except Exception:
           pass
 
-  # Check auxiliary subtest logs for Host+DUT Verification
-  if stage_statuses.get("host_dut_verification") != "FAILED":
-    for aux_log in ("host_dut_stage1_with_charger.log", "host_dut_stage2_sbu_flip.log", "host_dut_stage3_no_charger.log", "host_dut_stage1_no_charger.log", "host_dut_stage2_with_charger.log", "host_dut_stage3_sbu_flip.log"):
-      aux_path = os.path.join(dir_path, aux_log)
-      if os.path.exists(aux_path) and os.path.getsize(aux_path) > 0:
-        try:
-          with open(aux_path, "r", encoding="utf-8", errors="ignore") as f:
-            aux_c = f.read().lower()
-          if "all_passed=false" in aux_c or "result: failed" in aux_c or "fail (" in aux_c:
-            stage_statuses["host_dut_verification"] = "FAILED"
-            for info in log_file_infos:
-              if info.log_name == "host_dut_tests.log":
-                info.stage_verdict = "FAILED"
-                info.details = f"DUT subtest failed in {aux_log}"
-            break
-        except Exception:
-          pass
-
-  # Check label_verification.log if present
-  lbl_path = os.path.join(dir_path, "label_verification.log")
-  lbl_exists = os.path.exists(lbl_path) and os.path.getsize(lbl_path) > 0
-  if lbl_exists:
-    try:
-      with open(lbl_path, "r", encoding="utf-8", errors="ignore") as f:
-        lbl_c = f.read().lower()
-      if "passed" in lbl_c:
-        stage_statuses["label_verified"] = "PASSED"
-      elif "bypassed" in lbl_c:
-        stage_statuses["label_verified"] = "BYPASSED"
+  # Host+DUT Verification: per-stage logs (cards with/without charger, SBU flip).
+  # Without host_dut_tests.log the stage verdict is derived from them.
+  stage_infos = []
+  for aux_log in HOST_DUT_STAGE_LOGS:
+    aux_path = os.path.join(dir_path, aux_log)
+    aux_c = _read_log_lower(aux_path)
+    if not aux_c:
+      continue
+    present_count += 1
+    verdict, details = _classify_stage_log(aux_c)
+    if "fail (" in aux_c and verdict != "BYPASSED":
+      verdict, details = "FAILED", "Stage reported test/command failure"
+    stage_infos.append(
+        maui_manufacturing_pb2.MauiLogFileInfo(
+            log_name=aux_log,
+            file_path=aux_path,
+            file_size_bytes=os.path.getsize(aux_path),
+            is_present=True,
+            stage_verdict=verdict,
+            details=details,
+        )
+    )
+  if stage_infos:
+    failed_logs = [i.log_name for i in stage_infos if i.stage_verdict == "FAILED"]
+    bypassed_logs = [i.log_name for i in stage_infos if "BYPASSED" in i.stage_verdict]
+    host_dut_idx = next((n for n, i in enumerate(log_file_infos) if i.log_name == "host_dut_tests.log"), None)
+    host_dut_status = stage_statuses.get("host_dut_verification", "NOT_RUN")
+    if host_dut_status == "NOT_RUN":
+      if failed_logs:
+        host_dut_status = "FAILED"
+      elif bypassed_logs:
+        host_dut_status = "BYPASSED"
       else:
-        stage_statuses["label_verified"] = "FAILED"
-    except Exception:
-      stage_statuses["label_verified"] = "NOT_RUN"
-  else:
-    stage_statuses["label_verified"] = "NOT_RUN"
+        host_dut_status = "PASSED"
+      # Replace the missing host_dut_tests.log entry by the stage logs.
+      if host_dut_idx is not None:
+        del log_file_infos[host_dut_idx]
+        log_file_infos[host_dut_idx:host_dut_idx] = stage_infos
+      else:
+        log_file_infos.extend(stage_infos)
+    else:
+      if failed_logs and host_dut_status != "FAILED":
+        host_dut_status = "FAILED"
+        if host_dut_idx is not None:
+          log_file_infos[host_dut_idx].stage_verdict = "FAILED"
+          log_file_infos[host_dut_idx].details = f"DUT subtest failed in {failed_logs[0]}"
+      insert_at = len(log_file_infos) if host_dut_idx is None else host_dut_idx + 1
+      log_file_infos[insert_at:insert_at] = stage_infos
+    stage_statuses["host_dut_verification"] = host_dut_status
+
+  # label_verified comes only from the barcode / label pages.
+  stage_statuses["label_verified"] = _label_verdict_from_logs(dir_path)
 
   # Result is evaluated strictly from available logs (missing stages are acceptable)
   has_failed = any(v == "FAILED" for v in stage_statuses.values())
@@ -1657,16 +1717,17 @@ class MauiDeviceManagementServicer(
     # Authoritatively analyze real log files from the device log directory
     stage_statuses, overall_status, log_infos, present_count = analyze_device_manufacturing_logs(serial_no, self.STAGE_LOG_MAPPING)
 
-    # If label verification was explicitly provided in request, update label_verified status
-    if request.label_verified:
-      stage_statuses["label_verified"] = "PASSED"
-    elif request.scanned_barcode:
-      if request.adb_serial and request.scanned_barcode.upper() == request.adb_serial.upper():
+    # label_verified is only set by a barcode page: its log (see
+    # analyze_device_manufacturing_logs) or a submission carrying the scanned
+    # barcode. Without either (e.g. SMT functional) it stays NOT_RUN, even when
+    # the USB serials match.
+    if request.scanned_barcode:
+      if request.label_verified:
         stage_statuses["label_verified"] = "PASSED"
-      else:
-        stage_statuses["label_verified"] = stage_statuses.get("label_verified", "BYPASSED")
-    else:
-      stage_statuses["label_verified"] = stage_statuses.get("label_verified", "BYPASSED")
+      elif stage_statuses.get("label_verified", "NOT_RUN") == "NOT_RUN":
+        scan_ok = bool(request.adb_serial and request.scanned_barcode.upper() == request.adb_serial.upper())
+        stage_statuses["label_verified"] = "PASSED" if scan_ok else "FAILED"
+    stage_statuses.setdefault("label_verified", "NOT_RUN")
 
     # Re-evaluate overall verdict based on available stage_statuses (missing sections acceptable)
     has_failures = any(s == "FAILED" for s in stage_statuses.values())

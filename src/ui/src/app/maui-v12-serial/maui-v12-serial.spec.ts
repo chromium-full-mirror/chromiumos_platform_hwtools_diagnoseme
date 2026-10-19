@@ -11,7 +11,7 @@ import {
 } from '@angular/core/testing';
 import {NoopAnimationsModule} from '@angular/platform-browser/animations';
 import {provideRouter} from '@angular/router';
-import {of, throwError} from 'rxjs';
+import {Subject, of, throwError} from 'rxjs';
 import {
   MauiV12SerialComponent,
   SERIAL_LABEL_LOG,
@@ -47,6 +47,13 @@ describe('MauiV12SerialComponent', () => {
   };
 
   let mockDeviceMgmt: {[name: string]: jasmine.Spy};
+
+  const noUnit = {
+    mcuDetected: false,
+    h2hDetected: false,
+    h2hSerial: '',
+    message: 'No unit',
+  };
 
   function verifyResponse(matches: boolean) {
     return {
@@ -183,10 +190,88 @@ describe('MauiV12SerialComponent', () => {
     expect(submitArgs[2]).toBe(SERIAL_LABEL_STATION_ID);
     expect(submitArgs[8]).toBeTrue();
     expect(component.submitted).toBeTrue();
-    expect(component.overallPassed).toBeTrue();
+    expect(component.barcodePassed).toBeTrue();
     expect(
       fixture.nativeElement.querySelector('#v12-submit-done').textContent,
-    ).toContain('PASS logs submitted');
+    ).toContain('Barcode PASS, logs submitted');
+    fixture.destroy();
+    discardPeriodicTasks();
+  }));
+
+  it('redraws itself when the RPC replies arrive (zoneless)', fakeAsync(() => {
+    startWithUnit();
+    const verify = new Subject<ReturnType<typeof verifyResponse>>();
+    const submit = new Subject<{success: boolean; message: string}>();
+    mockDeviceMgmt['verifyScannedLabel'].and.returnValue(verify);
+    mockDeviceMgmt['submitFinalManufacturingResults'].and.returnValue(submit);
+    scan('MAUIV12H26010001');
+    tick();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector('#v12-barcode-result')).toBeNull();
+
+    // No fixture.detectChanges() from here on: like in the browser, nothing
+    // but the component itself redraws the page after an RPC reply.
+    verify.next(verifyResponse(true));
+    verify.complete();
+    expect(el.querySelector('#v12-barcode-result')?.textContent).toContain(
+      'MAUIV12H26010001',
+    );
+    expect(el.textContent).toContain('Submitting logs...');
+
+    submit.next({success: true, message: 'Results recorded'});
+    submit.complete();
+    expect(el.textContent).not.toContain('Submitting logs...');
+    expect(el.querySelector('#v12-submit-done')?.textContent).toContain(
+      'Barcode PASS, logs submitted',
+    );
+    fixture.destroy();
+    discardPeriodicTasks();
+  }));
+
+  it('redraws the enumeration status on every poll (zoneless)', fakeAsync(() => {
+    const next = {
+      ...status,
+      mcu: {...status.mcu, serialNumber: 'MAUIV12H26010002'},
+    };
+    mockMcu = {
+      getUnitStatus: jasmine.createSpy().and.returnValues(of(status), of(next)),
+    };
+    setup();
+    fixture.detectChanges();
+    tick();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector('#v12-mcu-serial')?.textContent).toContain(
+      'MAUIV12H26010001',
+    );
+    tick(UNIT_STATUS_POLL_MS);
+    expect(el.querySelector('#v12-mcu-serial')?.textContent).toContain(
+      'MAUIV12H26010002',
+    );
+    fixture.destroy();
+    discardPeriodicTasks();
+  }));
+
+  it('keeps the barcode verdict when the unit is unplugged', fakeAsync(() => {
+    mockMcu = {
+      getUnitStatus: jasmine
+        .createSpy()
+        .and.returnValues(of(status), of(noUnit), of(noUnit)),
+    };
+    setup();
+    fixture.detectChanges();
+    tick();
+    scan('MAUIV12H26010001');
+    tick();
+    expect(component.submitted).toBeTrue();
+
+    tick(UNIT_STATUS_POLL_MS);
+    const done = fixture.nativeElement.querySelector('#v12-submit-done');
+    expect(done.textContent).toContain('Barcode PASS, logs submitted');
+    expect(done.classList).toContain('operator-ready-banner');
+    expect(mockDeviceMgmt['saveCardLog']).toHaveBeenCalledTimes(1);
+    expect(
+      mockDeviceMgmt['submitFinalManufacturingResults'],
+    ).toHaveBeenCalledTimes(1);
     fixture.destroy();
     discardPeriodicTasks();
   }));
@@ -283,13 +368,6 @@ describe('MauiV12SerialComponent', () => {
     discardPeriodicTasks();
   }));
 
-  const noUnit = {
-    mcuDetected: false,
-    h2hDetected: false,
-    h2hSerial: '',
-    message: 'No unit',
-  };
-
   it('arms the barcode check when a unit is connected', fakeAsync(() => {
     mockMcu = {
       getUnitStatus: jasmine
@@ -351,6 +429,9 @@ describe('MauiV12SerialComponent', () => {
     expect(serial).toBe('MAUIV12H26010001');
     expect(content).toContain('ALL_PASSED=false');
     expect(component.submitted).toBeTrue();
+    const done = fixture.nativeElement.querySelector('#v12-submit-done');
+    expect(done.textContent).toContain('Barcode FAIL, logs submitted');
+    expect(done.classList).toContain('operator-warning-banner');
     fixture.destroy();
     discardPeriodicTasks();
   }));

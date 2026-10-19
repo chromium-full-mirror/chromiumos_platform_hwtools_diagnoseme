@@ -13,6 +13,7 @@ import {
   MauiResetButtonTestResponse,
   MauiBslButtonTestRequest,
   MauiBslButtonTestResponse,
+  MauiBslButtonProgress,
   MauiHostDutTestRequest,
   MauiHostDutTestResponse,
   MauiAdbTransferTestRequest,
@@ -74,6 +75,20 @@ export class MauiStation2Service {
     return this.client.testBslButton(request);
   }
 
+  /**
+   * Guided 3-phase BSL button check (Maui v1.2): streams the live prompt
+   * and countdown; the last message has done set.
+   */
+  streamBslButtonTest(
+    serialNumber = '',
+    devicePort = '',
+  ): Observable<MauiBslButtonProgress> {
+    const request = new MauiBslButtonTestRequest();
+    request.serialNumber = serialNumber;
+    request.devicePort = devicePort;
+    return this.client.streamBslButtonTest(request);
+  }
+
   runHostDutTests(
     serialNumber = '',
     expectedSerial = '',
@@ -88,7 +103,7 @@ export class MauiStation2Service {
     return this.client.runHostDutTests(request);
   }
 
-  /** Pushes/pulls two ~400 MB random files to the DUT over ADB (60 s max). */
+  /** Pushes/pulls two ~400 MB random files to the DUT over ADB (40 s max). */
   runAdbTransferTest(
     serialNumber = '',
     adbSerial = '',

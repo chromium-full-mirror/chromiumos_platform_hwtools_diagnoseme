@@ -230,6 +230,16 @@
     font-size: 13px;
     color: #3c4043;
   }
+
+  &.hero-fail {
+    background: linear-gradient(135deg, #fce8e6 0%, #fad2cf 100%);
+    border-color: #d93025;
+    color: #a50e0e;
+
+    .hero-icon {
+      color: #c5221f;
+    }
+  }
 }
 
 // Status badges of the standalone Maui cards (serial provisioning, H2H SPI

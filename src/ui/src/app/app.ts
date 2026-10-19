@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {Component, OnInit} from '@angular/core';
+import {ChangeDetectorRef, Component, OnInit} from '@angular/core';
 import {HttpClient, HttpClientModule} from '@angular/common/http';
 import {MatMenuModule} from '@angular/material/menu';
 import {MatToolbarModule} from '@angular/material/toolbar';
@@ -50,6 +50,7 @@ export class AppComponent implements OnInit {
   constructor(
     private diagnoseMeService: DiagnoseMeService,
     private http: HttpClient,
+    private cdr: ChangeDetectorRef,
     iconRegistry: MatIconRegistry,
   ) {
     // Pages use Material Symbols ligatures (was set in the former AppModule).
@@ -60,6 +61,8 @@ export class AppComponent implements OnInit {
     this.http.get<BuildInfo>('/assets/build_info.json').subscribe({
       next: data => {
         this.buildInfo = data;
+        // The app is zoneless: RPC / HTTP replies do not redraw by themselves.
+        this.cdr.markForCheck();
       },
       error: err => {
         console.error('Failed to load build_info.json:', err);
@@ -74,6 +77,7 @@ export class AppComponent implements OnInit {
           config.edition !== this.edition.id
         ) {
           this.serverEditionMismatch = config.edition;
+          this.cdr.markForCheck();
         }
       },
       error: err => {

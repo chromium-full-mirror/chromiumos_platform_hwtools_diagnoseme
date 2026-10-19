@@ -169,3 +169,54 @@
     }
   }
 }
+
+// Guided v1.2 BSL check: live prompt and the state of its three steps.
+.bsl-step {
+  transition:
+    background-color 0.2s,
+    border-color 0.2s;
+}
+
+.bsl-step-active {
+  background-color: #e8f0fe;
+  border-left: 4px solid #1a73e8;
+  font-weight: 600;
+}
+
+.bsl-step-done {
+  background-color: #e6f4ea;
+}
+
+.bsl-step-failed {
+  background-color: #fce8e6;
+  border-left: 4px solid #c5221f;
+}
+
+.bsl-live-prompt {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background-color: #e8f0fe;
+  color: #174ea6;
+
+  .bsl-live-step {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .bsl-live-text {
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .bsl-live-countdown {
+    margin-left: auto;
+    font-family: monospace;
+    font-size: 18px;
+  }
+}

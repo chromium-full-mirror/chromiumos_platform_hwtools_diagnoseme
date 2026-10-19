@@ -376,24 +376,6 @@ class TestV12Servicers(unittest.TestCase):
                 servicer._check_host_usb_topology(), (True, True, False, True)
             )
 
-    @mock.patch.object(maui_v12_services, "write_device_log")
-    def test_bsl_button_uses_gpio(self, mock_log):
-        servicer = maui_v12_services.MauiV12Station2Servicer()
-        with mock.patch.object(
-            device.MauiV12ConsoleTester,
-            "sample_bsl_gpio",
-            return_value=(True, 1, "[ ec_bsl_invoke ] I = 1"),
-        ):
-            resp = servicer.test_bsl_button(
-                maui_manufacturing_pb2.MauiBslButtonTestRequest(
-                    device_port="/dev/null", serial_number=SN
-                ),
-                None,
-            )
-        self.assertTrue(resp.success)
-        self.assertIn("ec_bsl_invoke", resp.message)
-        mock_log.assert_called_once()
-
     def test_console_port_resolution(self):
         servicer = maui_v12_services.MauiV12Station2Servicer()
         with mock.patch.object(

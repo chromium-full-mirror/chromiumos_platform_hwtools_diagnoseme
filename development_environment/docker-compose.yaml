@@ -41,6 +41,7 @@ services:
       - MAUI_ADB_SIZE_MB
       - MAUI_ADB_DEADLINE_S
       - MAUI_ADB_MIN_RATE_MB_S
+      - MAUI_ADB_MIN_LINK_MBPS
 
     volumes:
       - logs:/var/log/rpcserver

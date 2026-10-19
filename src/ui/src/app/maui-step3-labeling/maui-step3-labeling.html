@@ -116,7 +116,7 @@
             <div class="endpoints-grid">
               @if (adbSerial) {
                 <div class="info-row">
-                  <span class="label">ADB Serial:</span>
+                  <span class="label">{{ rev.serialTexts.h2hSerialLabel }}:</span>
                   <span class="value code">{{ adbSerial }} ({{ adbConnected ? 'Connected' : 'Offline' }})</span>
                 </div>
               }
@@ -127,12 +127,16 @@
                 </div>
               }
               <div class="info-row">
-                <span class="label">Endpoint Sync:</span>
+                <span class="label">{{ rev.serialTexts.syncLabel }}:</span>
                 <span
                   class="badge"
                   [class.badge-active]="dualEndpointsMatch"
                   [class.badge-warn]="!dualEndpointsMatch">
-                  {{ dualEndpointsMatch ? 'Dual Endpoints Matched' : 'Single/Unsynced Endpoint' }}
+                  {{
+                    dualEndpointsMatch
+                      ? rev.serialTexts.matchedText
+                      : rev.serialTexts.unmatchedText
+                  }}
                 </span>
               </div>
             </div>
@@ -153,7 +157,7 @@
             </div>
           }
 
-          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+          <div class="actions-wrapper serial-actions">
             <button
               mat-raised-button
               color="primary"
@@ -164,8 +168,10 @@
               Copy Serial Number
             </button>
             <button
+              id="step3-refresh-btn"
               mat-stroked-button
               color="accent"
+              class="action-btn-wide"
               [disabled]="readingSerial"
               (click)="pollElectronicSerial()">
               <mat-icon>refresh</mat-icon>

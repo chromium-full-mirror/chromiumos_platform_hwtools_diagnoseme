@@ -17,6 +17,7 @@ import os
 import time
 from typing import Any
 from typing import Dict
+from typing import Iterator
 from typing import List
 from typing import Tuple
 
@@ -24,6 +25,7 @@ from google.protobuf import empty_pb2
 import grpc
 
 from server import maui_common
+from server import maui_v12_bsl as bsl
 from server import maui_v12_device as device
 from server import maui_v12_profile as profile
 from server.generated import maui_manufacturing_pb2
@@ -133,53 +135,104 @@ class MauiV12Station2Servicer(MauiStation2Servicer):
                 return found
             self._sleep(profile.USB_TOPOLOGY_POLL_S)
 
+    def _bsl_check_updates(
+        self, request: maui_manufacturing_pb2.MauiBslButtonTestRequest
+    ) -> Iterator[maui_manufacturing_pb2.MauiBslButtonProgress]:
+        """Runs the guided 3-phase BSL check and writes bsl_button_test.log.
+
+        The GPIO is polled in one console session. Yields one progress
+        message per sample; the last one has done=True.
+        """
+        dev_port = self._fallback_console_port(request.device_port or "")
+        tester = self._make_console_tester(dev_port)
+        console: Dict[str, Any] = {}
+
+        def read_level() -> Tuple[int, str]:
+            return tester.read_gpio(profile.BSL_GPIO_NAME, ser=console["ser"])
+
+        check = bsl.BslButtonCheck(
+            read_level,
+            is_missing=lambda raw: device.gpio_missing(raw, profile.BSL_GPIO_NAME),
+            clock=self._clock,
+            sleep=self._sleep,
+        )
+        logging.info(
+            "Guided BSL button check on %s (GPIO %s)...",
+            dev_port,
+            profile.BSL_GPIO_NAME,
+        )
+        final = None
+        try:
+            with tester.session() as ser:
+                console["ser"] = ser
+                for update in check.run():
+                    if update.done:
+                        final = update
+                    yield _bsl_progress(update)
+        except Exception as e:  # pylint: disable=broad-except
+            logging.warning("BSL check on %s failed: %s", dev_port, e)
+            check.success = False
+            check.message = (
+                f"BSL Button Test FAILED: cannot use the MCU console {dev_port}: {e}"
+            )
+            final = bsl.BslUpdate(
+                phase=check.failed_phase,
+                prompt=check.message,
+                done=True,
+                message=check.message,
+                failed_phase=check.failed_phase or bsl.PHASE_IDLE,
+            )
+            yield _bsl_progress(final)
+        finally:
+            if final is not None:
+                serial_no = request.serial_number or self._find_unit_serial()
+                write_device_log(
+                    serial_no,
+                    "bsl_button_test",
+                    f"ALL_PASSED={check.success}\n"
+                    f"RESULT: {'PASSED' if check.success else 'FAILED'}\n"
+                    f"{check.message}\n\n{check.summary()}\n\n"
+                    f"Last raw GPIO output:\n{check.last_raw}",
+                )
+
+    def stream_bsl_button_test(
+        self,
+        request: maui_manufacturing_pb2.MauiBslButtonTestRequest,
+        unused_context: grpc.ServicerContext,
+    ) -> Iterator[maui_manufacturing_pb2.MauiBslButtonProgress]:
+        """Guided BSL button check with live operator prompts."""
+        yield from self._bsl_check_updates(request)
+
     def test_bsl_button(
         self,
         request: maui_manufacturing_pb2.MauiBslButtonTestRequest,
         unused_context: grpc.ServicerContext,
     ) -> maui_manufacturing_pb2.MauiBslButtonTestResponse:
-        """BSL button test polling the ec_bsl_invoke GPIO (no BSL ADC on v1.2)."""
-        dev_port = self._fallback_console_port(request.device_port or "")
-        tester = self._make_console_tester(dev_port)
-        duration = request.max_sample_duration_sec or 3.0
-        logging.info(
-            "Polling BSL GPIO %s on %s for %.1fs...",
-            profile.BSL_GPIO_NAME,
-            dev_port,
-            duration,
-        )
-        passed, level, raw = tester.sample_bsl_gpio(max_duration_sec=duration)
-        serial_no = request.serial_number or self._find_unit_serial()
-
-        if passed:
-            msg = (
-                f"BSL Button Test PASSED! GPIO {profile.BSL_GPIO_NAME} "
-                f"read {level} (pressed)."
-            )
-        elif device.gpio_missing(raw, profile.BSL_GPIO_NAME):
-            msg = (
-                "BSL Button Test FAILED. This MCU firmware has no "
-                f"'{profile.BSL_GPIO_NAME}' GPIO - update the MCU App."
-            )
-        else:
-            msg = (
-                f"BSL Button Test FAILED. GPIO {profile.BSL_GPIO_NAME} did not read "
-                f"{profile.BSL_GPIO_PRESSED} within {duration:.1f}s (last: {level})."
-            )
-        write_device_log(
-            serial_no,
-            "bsl_button_test",
-            f"ALL_PASSED={passed}\n"
-            f"RESULT: {'PASSED' if passed else 'FAILED'}\n{msg}\n\n"
-            f"Raw GPIO Output:\n{raw}",
-        )
+        """The guided BSL check without live prompts (final verdict only)."""
+        final = maui_manufacturing_pb2.MauiBslButtonProgress()
+        for final in self._bsl_check_updates(request):
+            pass
         return maui_manufacturing_pb2.MauiBslButtonTestResponse(
-            success=passed,
-            peak_bsl_mv=max(level, 0),
+            success=final.success,
+            peak_bsl_mv=max(final.level, 0),
             threshold_mv=profile.BSL_GPIO_PRESSED,
-            message=msg,
-            raw_adc_table=raw,
+            message=final.message,
         )
+
+
+def _bsl_progress(
+    update: bsl.BslUpdate,
+) -> maui_manufacturing_pb2.MauiBslButtonProgress:
+    return maui_manufacturing_pb2.MauiBslButtonProgress(
+        phase=update.phase,
+        prompt=update.prompt,
+        seconds_left=round(update.seconds_left, 1),
+        level=update.level,
+        done=update.done,
+        success=update.success,
+        message=update.message,
+        failed_phase=update.failed_phase,
+    )
 
 
 class MauiV12PdcServicer(MauiPdcServicer):

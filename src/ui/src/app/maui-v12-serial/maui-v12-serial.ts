@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import {
+  ChangeDetectorRef,
   Component,
   ElementRef,
   OnDestroy,
@@ -112,6 +113,7 @@ export class MauiV12SerialComponent implements OnInit, OnDestroy {
   constructor(
     private mcuService: MauiMcuService,
     private deviceMgmt: MauiDeviceMgmtService,
+    private cdr: ChangeDetectorRef,
   ) {}
 
   ngOnInit(): void {
@@ -123,6 +125,7 @@ export class MauiV12SerialComponent implements OnInit, OnDestroy {
           this.mcuService.getUnitStatus().pipe(
             catchError(err => {
               this.error = `Failed to read unit status: ${err?.message ?? err}`;
+              this.cdr.detectChanges();
               return EMPTY;
             }),
           ),
@@ -133,6 +136,7 @@ export class MauiV12SerialComponent implements OnInit, OnDestroy {
         this.error = '';
         this.onUnitChanged();
         this.updateStatusIcons();
+        this.cdr.detectChanges();
         this.focusBarcodeInput();
       });
   }
@@ -190,10 +194,6 @@ export class MauiV12SerialComponent implements OnInit, OnDestroy {
     return !!this.barcodeResult?.matches;
   }
 
-  get overallPassed(): boolean {
-    return this.enumerationOk && this.barcodePassed;
-  }
-
   // ---- Barcode input: scanner / keyboard only ----
 
   /** Blocks paste, drop and the context menu on the barcode field. */
@@ -249,6 +249,7 @@ export class MauiV12SerialComponent implements OnInit, OnDestroy {
     this.checkedUnitSerial = this.unitSerial;
     this.checkedStatus = this.status;
     this.updateStatusIcons();
+    this.cdr.detectChanges();
     this.subs.add(
       this.deviceMgmt
         .verifyScannedLabel(
@@ -265,11 +266,13 @@ export class MauiV12SerialComponent implements OnInit, OnDestroy {
               this.submitLogs();
             }
             this.updateStatusIcons();
+            this.cdr.detectChanges();
           },
           error: err => {
             this.barcodeChecking = false;
             this.inputWarning = `Barcode check failed: ${err?.message ?? err}`;
             this.updateStatusIcons();
+            this.cdr.detectChanges();
           },
         }),
     );
@@ -360,7 +363,7 @@ export class MauiV12SerialComponent implements OnInit, OnDestroy {
       this.barcodeStatus?.showWorking();
     } else if (!this.barcodeResult) {
       this.barcodeStatus?.hide();
-    } else if (this.overallPassed) {
+    } else if (this.barcodePassed) {
       this.barcodeStatus?.showPassed();
     } else {
       this.barcodeStatus?.showFailed();
@@ -439,11 +442,13 @@ export class MauiV12SerialComponent implements OnInit, OnDestroy {
             this.submitted = true;
             this.submitMessage = res.message || 'Results submitted.';
             this.updateStatusIcons();
+            this.cdr.detectChanges();
           },
           error: err => {
             this.submitting = false;
             this.submitError = `Failed to submit logs: ${err?.message ?? err}`;
             this.updateStatusIcons();
+            this.cdr.detectChanges();
           },
         }),
     );

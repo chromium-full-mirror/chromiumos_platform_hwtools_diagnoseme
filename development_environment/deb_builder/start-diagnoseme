@@ -38,6 +38,18 @@ if [ -z "${MAUI_DEVICE:-}" ]; then
     esac
 fi
 MAUI_DEVICE="${MAUI_DEVICE:-}"
+# Home of the desktop user. The results live there, also when this runs as
+# root (e.g. from diagnoseme-offline-update via sudo).
+STATION_HOME="${HOME:-/home/diagnoseme}"
+if [ "$(id -u)" -eq 0 ]; then
+    if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+        STATION_HOME=$(getent passwd "${SUDO_USER}" | cut -d: -f6)
+    elif [ -d /home/diagnoseme ]; then
+        STATION_HOME=/home/diagnoseme
+    fi
+fi
+STATION_HOME="${STATION_HOME:-/home/diagnoseme}"
+DIAGNOSEME_RESULTS_DIR="${STATION_HOME}/diagnoseme_results"
 
 # Fetches the current Maui firmware of the edition from the public GCS bucket
 # into ${FW_ROOT} (see maui_fw_fetch.py). Failures only print a warning.
@@ -109,6 +121,7 @@ echo "=================================================="
 export DOCKER_TAG="${DOCKER_TAG:-maui}"
 export STATION_ID="${STATION_ID:-}"
 export RESULTS_SERVER="${RESULTS_SERVER:-}"
+export DIAGNOSEME_RESULTS_DIR
 if [ -n "${MAUI_UTILS_IMAGE:-}" ]; then
     export MAUI_UTILS_IMAGE
 fi
@@ -116,7 +129,8 @@ fi
 # the server only when they are exported).
 for VAR in MAUI_V12_APPROVED_FW MAUI_V12_HWREVS \
            MAUI_ITE_NO_OUTPUT_TIMEOUT_S \
-           MAUI_ADB_SIZE_MB MAUI_ADB_DEADLINE_S MAUI_ADB_MIN_RATE_MB_S; do
+           MAUI_ADB_SIZE_MB MAUI_ADB_DEADLINE_S MAUI_ADB_MIN_RATE_MB_S \
+           MAUI_ADB_MIN_LINK_MBPS; do
     if [ -n "${!VAR:-}" ]; then
         export "${VAR?}"
     fi
@@ -174,8 +188,15 @@ FW_DIRS=()
 for COMP in ${FIRMWARE_COMPONENTS}; do
     FW_DIRS+=("${FW_ROOT}/${COMP}")
 done
-mkdir -p /var/log/diagnoseme/nginx /var/log/diagnoseme/rpcserver /var/log/diagnoseme/envoy "${FW_DIRS[@]}" "${HOME:-/home/diagnoseme}/diagnoseme_results/highlevel" "${HOME:-/home/diagnoseme}/diagnoseme_results/detailed" 2>/dev/null || true
+mkdir -p /var/log/diagnoseme/nginx /var/log/diagnoseme/rpcserver /var/log/diagnoseme/envoy "${FW_DIRS[@]}" "${DIAGNOSEME_RESULTS_DIR}/highlevel" "${DIAGNOSEME_RESULTS_DIR}/detailed" 2>/dev/null || true
 chmod -R 777 /var/log/diagnoseme "${HOME:-/home/diagnoseme}/diagnoseme_results" 2>/dev/null || true
+if [ "$(id -u)" -eq 0 ] && [ "${STATION_HOME}" != "${HOME:-}" ]; then
+    # Running as root for the desktop user: the results stay theirs.
+    RESULTS_OWNER=$(stat -c %U:%G "${STATION_HOME}" 2>/dev/null || true)
+    if [ -n "${RESULTS_OWNER}" ]; then
+        chown -R "${RESULTS_OWNER}" "${DIAGNOSEME_RESULTS_DIR}" 2>/dev/null || true
+    fi
+fi
 
 PROFILE_ARGS=""
 if [ "$MODE" == "online" ]; then

@@ -37,6 +37,7 @@ import {MauiDeviceMgmtService} from '../../services/maui-device-mgmt.service';
 import {TestPassFailButton} from '../../test-pass-fail-button/test-pass-fail-button';
 import {
   MauiAdbTransferTestResponse,
+  MauiBslButtonProgress,
   MauiLogFileInfo,
 } from '../../../proto/maui-manufacturing.pb';
 import {MauiHwRev, MauiHwRevProfile, mauiHwRevProfile} from '../maui-hw-rev';
@@ -96,7 +97,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
 
   get canSaveLogs(): boolean {
     return (
-      this.adbPassed &&
+      this.stage3Passed &&
       !this.deviceConnected &&
       !this.savingLogs &&
       !this.logsSaved
@@ -111,6 +112,8 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
   private lastBarcodeKeyTime = 0;
   scannedBarcode = '';
   barcodeMatches = false;
+  /** The operator bypassed the barcode check (barcodeMatches only unlocks). */
+  barcodeBypassed = false;
   barcodeCheckInProgress = false;
   barcodeCheckFailed = false;
   barcodeMessage = '';
@@ -168,12 +171,22 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
   resetStatusValue: 'NOT_RUN' | 'PASSED' | 'FAILED' | 'BYPASSED' = 'NOT_RUN';
   resetMessage = '';
 
-  // Card 4: BSL Button Test (ADC Status)
+  // Card 4: BSL Button Test (v1.1 ADC Status, v1.2 guided GPIO check)
   bslAdcInProgress = false;
   bslPassed = false;
   bslStatusValue: 'NOT_RUN' | 'PASSED' | 'FAILED' | 'BYPASSED' = 'NOT_RUN';
   peakBslMv = 0;
   bslMessage = '';
+  /** v1.2 guided check: running step (1-3), 0 when not running. */
+  bslPhase = 0;
+  /** v1.2 guided check: live operator prompt. */
+  bslPrompt = '';
+  /** v1.2 guided check: countdown of the running step. */
+  bslSecondsLeft = 0;
+  /** v1.2 guided check: last GPIO level (-1 unknown). */
+  bslLevel = -1;
+  /** v1.2 guided check: step that failed (0: none). */
+  bslFailedPhase = 0;
 
   // Card 5: Visual LED Check
   ledAmberChecked = false;
@@ -207,7 +220,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
   stage2StatusValue: 'NOT_RUN' | 'PASSED' | 'FAILED' | 'BYPASSED' = 'NOT_RUN';
   dutOrientation = '';
 
-  // Card 8: Charger Disconnect Verification (No Charger)
+  // Card 9: Charger Disconnect Verification (No Charger, after the ADB card)
   stage3InProgress = false;
 
   /** True while any card of the suite is running. */
@@ -231,7 +244,8 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
   stage3StatusValue: 'NOT_RUN' | 'PASSED' | 'FAILED' | 'BYPASSED' = 'NOT_RUN';
   chargerDisconnected = false;
 
-  // Card 9: ADB Data Transfer Reliability (DUT through the H2H bridge)
+  // Card 8: ADB Data Transfer Reliability (DUT through the H2H bridge, right
+  // after the SBU flip card with Host + DUT + charger connected)
   adbInProgress = false;
   adbPassed = false;
   adbStatusValue: 'NOT_RUN' | 'PASSED' | 'FAILED' | 'BYPASSED' = 'NOT_RUN';
@@ -247,6 +261,10 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
   inspectingLogs = false;
   finalMesTrackingId = '';
   finalSummaryPath = '';
+  /** Verdict of the saved run: every card PASSED (bypassed = not passed). */
+  finalPassed = false;
+  /** Cards that did not pass, as shown on the final card ("<card>: <status>"). */
+  finalNotPassedCards: string[] = [];
 
   @ViewChild('barcodeStatus') barcodeStatus?: TestPassFailButton;
   @ViewChild('usbCheckStatus') usbCheckStatus!: TestPassFailButton;
@@ -348,7 +366,61 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
   }
 
   get bslReadLabel(): string {
-    return this.rev.bslMethod === 'gpio' ? 'Read BSL Button' : 'Read BSL ADC';
+    return this.rev.bslMethod === 'gpio' ? 'Start BSL Check' : 'Read BSL ADC';
+  }
+
+  /** CSS state of step |n| (1-3) of the guided v1.2 BSL check. */
+  bslStepState(n: number): 'active' | 'done' | 'failed' | '' {
+    if (this.bslFailedPhase) {
+      return n === this.bslFailedPhase
+        ? 'failed'
+        : n < this.bslFailedPhase
+          ? 'done'
+          : '';
+    }
+    if (this.bslPassed && this.bslStatusValue === 'PASSED') {
+      return 'done';
+    }
+    if (!this.bslAdcInProgress || !this.bslPhase) {
+      return '';
+    }
+    return n === this.bslPhase ? 'active' : n < this.bslPhase ? 'done' : '';
+  }
+
+  /**
+   * One-line result of the ADB transfer card, e.g. "transfer 25.1 s / limit
+   * 40 s, 2 files 800 MiB, push 57.0 MB/s, pull 88.0 MB/s, link host/DUT
+   * 5000 Mb/s". Fields missing in older backends are left out.
+   */
+  adbSummary(t: MauiAdbTransferTestResponse): string {
+    const link = t as unknown as {
+      hostLinkMbps?: number | string;
+      dutLinkMbps?: number | string;
+    };
+    const parts: string[] = [];
+    if (t.transferSeconds) {
+      parts.push(
+        `transfer ${t.transferSeconds.toFixed(1)} s` +
+          (t.deadlineSeconds
+            ? ` / limit ${t.deadlineSeconds.toFixed(0)} s`
+            : ''),
+      );
+    }
+    const bytes = Number(t.fileSizeBytes) || 0;
+    if (bytes > 0) {
+      parts.push(`2 files ${(bytes / 2 ** 20).toFixed(0)} MiB`);
+    }
+    parts.push(
+      `push ${(t.pushMbPerS || 0).toFixed(1)} MB/s`,
+      `pull ${(t.pullMbPerS || 0).toFixed(1)} MB/s`,
+    );
+    const host = Number(link.hostLinkMbps) || 0;
+    const dut = Number(link.dutLinkMbps) || 0;
+    if (host || dut) {
+      const speeds = host === dut ? `${host}` : `${host || '?'}/${dut || '?'}`;
+      parts.push(`link host/DUT ${speeds} Mb/s`);
+    }
+    return parts.join(', ');
   }
 
   onSerialProvisionStatus(event: {
@@ -533,6 +605,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
               () => this.verifyBarcode(),
               () => {
                 this.barcodeMatches = true;
+                this.barcodeBypassed = true;
                 this.barcodeMessage =
                   'Barcode verification bypassed by operator.';
                 this.barcodeStatus?.showBypassed();
@@ -553,6 +626,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
             () => this.verifyBarcode(),
             () => {
               this.barcodeMatches = true;
+              this.barcodeBypassed = true;
               this.barcodeStatus?.showBypassed();
               autoAdvanceToCard('func-card-1', this.runUsbCheckBtn);
               this.cdr.detectChanges();
@@ -566,6 +640,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
 
   bypassBarcode(): void {
     this.barcodeMatches = true;
+    this.barcodeBypassed = true;
     this.barcodeMessage = 'Barcode verification bypassed by operator.';
     this.barcodeStatus?.showBypassed();
     autoAdvanceToCard('func-card-1', this.runUsbCheckBtn);
@@ -881,6 +956,10 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
 
   // Card 4: BSL Button Test
   readBslButton(): void {
+    if (this.rev.bslMethod === 'gpio') {
+      this.runGuidedBslCheck();
+      return;
+    }
     this.bslAdcInProgress = true;
     this.bslStatus.showWorking();
     this.cdr.detectChanges();
@@ -891,54 +970,97 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
         next: res => {
           this.bslAdcInProgress = false;
           this.peakBslMv = res.peakBslMv;
-          this.bslPassed = res.success;
-          this.bslMessage = res.message || '';
+          this.onBslResult(
+            res.success,
+            res.message || 'BSL ADC voltage did not rise above threshold.',
+          );
+        },
+        error: err => this.onBslError(err),
+      });
+    this.subs.add(sub);
+  }
 
-          if (res.success) {
-            this.bslStatusValue = 'PASSED';
-            this.bslStatus.showPassed();
-            autoAdvanceToCard('func-card-5', this.confirmLedsBtn);
-          } else {
-            this.bslStatusValue = 'FAILED';
-            this.bslStatus.showFailed();
-            this.dialogService.openFailure(
-              'BSL Button Test Failed',
-              res.message ||
-                (this.rev.bslMethod === 'gpio'
-                  ? 'BSL button GPIO did not read pressed.'
-                  : 'BSL ADC voltage did not rise above threshold.'),
-              () => this.readBslButton(),
-              () => {
-                this.bslPassed = true;
-                this.bslStatusValue = 'BYPASSED';
-                this.bslStatus.showBypassed();
-                autoAdvanceToCard('func-card-5', this.confirmLedsBtn);
-                this.cdr.detectChanges();
-              },
-            );
+  /**
+   * v1.2: guided check (not touched -> press and hold -> release) with the
+   * live prompt and countdown streamed by the server.
+   */
+  private runGuidedBslCheck(): void {
+    this.bslAdcInProgress = true;
+    this.bslMessage = '';
+    this.bslFailedPhase = 0;
+    this.bslPhase = 1;
+    this.bslPrompt = 'Do not touch the BSL button';
+    this.bslSecondsLeft = 0;
+    this.bslLevel = -1;
+    this.bslStatus.showWorking();
+    this.cdr.detectChanges();
+
+    let final: MauiBslButtonProgress | null = null;
+    const sub = this.mauiService
+      .streamBslButtonTest(this.serialNumber, this.devicePort)
+      .subscribe({
+        next: p => {
+          this.bslPhase = p.phase;
+          this.bslPrompt = p.prompt;
+          this.bslSecondsLeft = p.secondsLeft;
+          this.bslLevel = p.level;
+          if (p.done) {
+            final = p;
           }
           this.cdr.detectChanges();
         },
         error: err => {
+          this.bslPhase = 0;
+          this.onBslError(err);
+        },
+        complete: () => {
           this.bslAdcInProgress = false;
-          this.bslStatusValue = 'FAILED';
-          this.bslStatus.showFailed();
-          this.dialogService.openFailure(
-            'BSL Button Test Error',
-            err,
-            () => this.readBslButton(),
-            () => {
-              this.bslPassed = true;
-              this.bslStatusValue = 'BYPASSED';
-              this.bslStatus.showBypassed();
-              autoAdvanceToCard('func-card-5', this.confirmLedsBtn);
-              this.cdr.detectChanges();
-            },
+          this.bslPhase = 0;
+          const result = final as MauiBslButtonProgress | null;
+          this.peakBslMv = Math.max(result?.level ?? 0, 0);
+          this.bslFailedPhase = result?.success ? 0 : result?.failedPhase || 0;
+          this.onBslResult(
+            !!result?.success,
+            result?.message ||
+              'BSL check ended without a result (MCU console lost?).',
           );
-          this.cdr.detectChanges();
         },
       });
     this.subs.add(sub);
+  }
+
+  private onBslResult(success: boolean, message: string): void {
+    this.bslAdcInProgress = false;
+    this.bslPassed = success;
+    this.bslMessage = message;
+    if (success) {
+      this.bslStatusValue = 'PASSED';
+      this.bslStatus.showPassed();
+      autoAdvanceToCard('func-card-5', this.confirmLedsBtn);
+    } else {
+      this.bslStatusValue = 'FAILED';
+      this.bslStatus.showFailed();
+      this.dialogService.openFailure(
+        'BSL Button Test Failed',
+        message,
+        () => this.readBslButton(),
+        () => this.bypassBsl(),
+      );
+    }
+    this.cdr.detectChanges();
+  }
+
+  private onBslError(err: unknown): void {
+    this.bslAdcInProgress = false;
+    this.bslStatusValue = 'FAILED';
+    this.bslStatus.showFailed();
+    this.dialogService.openFailure(
+      'BSL Button Test Error',
+      err,
+      () => this.readBslButton(),
+      () => this.bypassBsl(),
+    );
+    this.cdr.detectChanges();
   }
 
   bypassBsl(): void {
@@ -1108,7 +1230,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           if (res.allPassed) {
             this.stage2StatusValue = 'PASSED';
             this.stage2Status.showPassed();
-            autoAdvanceToCard('func-card-8', this.stage3Btn);
+            autoAdvanceToCard('func-card-adb', this.adbTransferBtn);
           } else {
             this.stage2StatusValue = 'FAILED';
             this.stage2Status.showFailed();
@@ -1120,7 +1242,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
                 this.stage2Passed = true;
                 this.stage2StatusValue = 'BYPASSED';
                 this.stage2Status.showBypassed();
-                autoAdvanceToCard('func-card-8', this.stage3Btn);
+                autoAdvanceToCard('func-card-adb', this.adbTransferBtn);
                 this.cdr.detectChanges();
               },
             );
@@ -1139,7 +1261,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
               this.stage2Passed = true;
               this.stage2StatusValue = 'BYPASSED';
               this.stage2Status.showBypassed();
-              autoAdvanceToCard('func-card-8', this.stage3Btn);
+              autoAdvanceToCard('func-card-adb', this.adbTransferBtn);
               this.cdr.detectChanges();
             },
           );
@@ -1153,11 +1275,11 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     this.stage2Passed = true;
     this.stage2StatusValue = 'BYPASSED';
     this.stage2Status.showBypassed();
-    autoAdvanceToCard('func-card-8', this.stage3Btn);
+    autoAdvanceToCard('func-card-adb', this.adbTransferBtn);
     this.cdr.detectChanges();
   }
 
-  // Card 8: Charger Disconnect Test
+  // Card 9: Charger Disconnect Test (after the ADB transfer)
   runStage3(): void {
     this.stage3InProgress = true;
     this.stage3Status.showWorking();
@@ -1182,7 +1304,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           if (res.allPassed) {
             this.stage3StatusValue = 'PASSED';
             this.stage3Status.showPassed();
-            autoAdvanceToCard('func-card-adb', this.adbTransferBtn);
+            this.advanceToLogs();
           } else {
             this.stage3StatusValue = 'FAILED';
             this.stage3Status.showFailed();
@@ -1194,7 +1316,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
                 this.stage3Passed = true;
                 this.stage3StatusValue = 'BYPASSED';
                 this.stage3Status.showBypassed();
-                autoAdvanceToCard('func-card-adb', this.adbTransferBtn);
+                this.advanceToLogs();
                 this.cdr.detectChanges();
               },
             );
@@ -1213,7 +1335,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
               this.stage3Passed = true;
               this.stage3StatusValue = 'BYPASSED';
               this.stage3Status.showBypassed();
-              autoAdvanceToCard('func-card-adb', this.adbTransferBtn);
+              this.advanceToLogs();
               this.cdr.detectChanges();
             },
           );
@@ -1227,11 +1349,11 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     this.stage3Passed = true;
     this.stage3StatusValue = 'BYPASSED';
     this.stage3Status.showBypassed();
-    autoAdvanceToCard('func-card-adb', this.adbTransferBtn);
+    this.advanceToLogs();
     this.cdr.detectChanges();
   }
 
-  // Card 9: ADB Data Transfer Reliability
+  // Card 8: ADB Data Transfer Reliability (after the SBU flip card)
   runAdbTransfer(): void {
     this.adbInProgress = true;
     this.adbTransfer = null;
@@ -1248,7 +1370,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
           if (res.success) {
             this.adbStatusValue = 'PASSED';
             this.adbStatus.showPassed();
-            this.advanceToLogs();
+            autoAdvanceToCard('func-card-charger', this.stage3Btn);
           } else {
             this.adbStatusValue = 'FAILED';
             this.adbStatus.showFailed();
@@ -1285,8 +1407,8 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
       'adb_transfer_test',
       'ADB Data Transfer Reliability',
       this.adbTransfer?.message ?? '',
-      () => this.advanceToLogs(),
     );
+    autoAdvanceToCard('func-card-charger', this.stage3Btn);
     this.cdr.detectChanges();
   }
 
@@ -1317,7 +1439,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
 
   private advanceToLogs(): void {
     this.inspectLogs();
-    autoAdvanceToCard('func-card-9', this.saveLogsBtn);
+    autoAdvanceToCard('func-card-logs', this.saveLogsBtn);
   }
 
   inspectLogs(): void {
@@ -1343,7 +1465,51 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     this.subs.add(sub);
   }
 
-  // Card 10: Save Logs & Export
+  /**
+   * Cards of this run that did not pass, as "<card>: <status>". A bypass only
+   * unlocks the next card: bypassed cards are listed here and fail the unit.
+   */
+  get notPassedCards(): string[] {
+    const cards: Array<[string, string]> = [];
+    if (this.isFatpMode) {
+      cards.push([
+        'Barcode',
+        this.barcodeBypassed
+          ? 'BYPASSED'
+          : this.barcodeMatches
+            ? 'PASSED'
+            : 'NOT_RUN',
+      ]);
+    }
+    if (this.rev.requiresSerialProvisioning) {
+      cards.push([
+        `Card ${this.cardNo(-1)} (Serial Provisioning)`,
+        this.serialProvisionStatus,
+      ]);
+    }
+    if (this.rev.requiresH2hSpiCheck) {
+      cards.push([
+        `Card ${this.cardNo(0)} (H2H SPI Flash Access)`,
+        this.h2hSpiStatus,
+      ]);
+    }
+    cards.push(
+      [`Card ${this.cardNo(1)} (Host USB & Console)`, this.usbStatusValue],
+      [`Card ${this.cardNo(2)} (Host 180° Flip)`, this.replugStatusValue],
+      [`Card ${this.cardNo(3)} (RESET Button)`, this.resetStatusValue],
+      [`Card ${this.cardNo(4)} (BSL Button)`, this.bslStatusValue],
+      [`Card ${this.cardNo(5)} (Visual LEDs)`, this.ledStatusValue],
+      [`Card ${this.cardNo(6)} (Host+DUT+Charger)`, this.stage1StatusValue],
+      [`Card ${this.cardNo(7)} (180° SBU Flip)`, this.stage2StatusValue],
+      [`Card ${this.cardNo(8)} (ADB Transfer)`, this.adbStatusValue],
+      [`Card ${this.cardNo(9)} (Charger Disconnected)`, this.stage3StatusValue],
+    );
+    return cards
+      .filter(([, status]) => status !== 'PASSED')
+      .map(([card, status]) => `${card}: ${status}`);
+  }
+
+  // Card 10: Save Logs & Export (after the charger disconnect card)
   saveLogs(): void {
     if (this.deviceConnected) {
       this.dialogService.openFailure(
@@ -1360,23 +1526,13 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
     const targetSerial =
       this.lastTestedSerial || this.serialNumber || 'UNKNOWN';
     const phaseTag = this.isFatpMode ? 'FATP_QT0' : 'SMT_FUNCTIONAL';
-    const allPassed =
-      (!this.isFatpMode || this.barcodeMatches) &&
-      this.serialCardsDone &&
-      this.usbCheckPassed &&
-      this.replugPassed &&
-      this.resetPassed &&
-      this.bslPassed &&
-      this.ledPassed &&
-      this.stage1Passed &&
-      this.stage2Passed &&
-      this.stage3Passed &&
-      this.adbPassed;
+    const notPassed = this.notPassedCards;
+    const allPassed = notPassed.length === 0;
+    this.finalPassed = allPassed;
+    this.finalNotPassedCards = notPassed;
 
-    const t = this.adbTransfer;
-    const adbDetails = t
-      ? `push ${t.pushMbPerS.toFixed(1)} MB/s, pull ${t.pullMbPerS.toFixed(1)} MB/s, ` +
-        `${(Number(t.fileSizeBytes) / 1e6).toFixed(0)} MB, ${t.totalSeconds.toFixed(1)} s`
+    const adbDetails = this.adbTransfer
+      ? this.adbSummary(this.adbTransfer)
       : 'no data';
 
     const summaryContent =
@@ -1406,13 +1562,18 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
       `  Voltage Verification: ${this.card2VoltagesOk ? 'PASS' : 'FAIL (' + this.card2VoltageDetails + ')'}\n` +
       `Card ${this.cardNo(3)} (RESET Button): ${this.resetStatusValue}\n` +
       (this.rev.bslMethod === 'gpio'
-        ? `Card ${this.cardNo(4)} (BSL Button GPIO): ${this.bslStatusValue} (BSL GPIO: ${this.peakBslMv})\n`
+        ? `Card ${this.cardNo(4)} (BSL Button GPIO, released -> pressed and held -> released): ${this.bslStatusValue}` +
+          (this.bslFailedPhase
+            ? ` (failed at step ${this.bslFailedPhase})`
+            : '') +
+          '\n'
         : `Card ${this.cardNo(4)} (BSL Button ADC): ${this.bslStatusValue} (Peak BSL: ${this.peakBslMv} mV)\n`) +
       `Card ${this.cardNo(5)} (Visual LEDs): ${this.ledStatusValue} (Amber=${this.ledAmberChecked}, Green_1Hz=${this.ledGreenChecked})\n` +
       `Card ${this.cardNo(6)} (Host+DUT+Charger): ${this.stage1StatusValue} (H2H=${this.h2hLinkSpeed}, PD=${this.negotiatedVoltage}V/${this.calculatedPowerW}W, CCD EC/GSC=${this.ecUartOk && this.gscUartOk})\n` +
       `Card ${this.cardNo(7)} (180° SBU Flip): ${this.stage2StatusValue} (DUT SBU Orientation=${this.dutOrientation})\n` +
-      `Card ${this.cardNo(8)} (Charger Disconnected): ${this.stage3StatusValue} (Disconnected=${this.chargerDisconnected})\n` +
-      `Card ${this.cardNo(9)} (ADB Transfer, two ~400 MB random files, must finish within 60 s): ${this.adbStatusValue} (${adbDetails})\n` +
+      `Card ${this.cardNo(8)} (ADB Transfer, two ~400 MB random files): ${this.adbStatusValue} (${adbDetails})\n` +
+      `Card ${this.cardNo(9)} (Charger Disconnected): ${this.stage3StatusValue} (Disconnected=${this.chargerDisconnected})\n` +
+      (allPassed ? '' : `Not passed: ${notPassed.join(', ')}\n`) +
       `OVERALL RESULT: ${allPassed ? 'PASS' : 'FAIL'}\n`;
 
     const logFileName = this.isFatpMode
@@ -1433,7 +1594,7 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
               true,
               this.usbCheckPassed && this.replugPassed && this.resetPassed,
               this.stage1Passed && this.stage2Passed && this.stage3Passed,
-              this.isFatpMode ? this.barcodeMatches : true,
+              this.isFatpMode && this.barcodeMatches,
               undefined,
               this.adbSerial,
               this.ftdiSerial,
@@ -1441,41 +1602,42 @@ export class MauiFunctionalSuiteComponent implements OnInit, OnDestroy {
             )
             .subscribe({
               next: res => {
-                this.savingLogs = false;
-                this.logsSaved = true;
                 this.finalMesTrackingId = res.mesTrackingId || '';
                 this.finalSummaryPath = res.summaryFilePath || '';
-                this.completeStatus.showPassed();
-                this.inspectLogs();
-                this.cdr.detectChanges();
-                // Auto refresh after 2.5s for next unit
-                this.subs.add(
-                  timer(2500).subscribe(() => this.reloadForNextUnit()),
-                );
+                this.finishRun();
               },
-              error: () => {
-                this.savingLogs = false;
-                this.logsSaved = true;
-                this.completeStatus.showPassed();
-                this.inspectLogs();
-                this.cdr.detectChanges();
-                this.subs.add(
-                  timer(2500).subscribe(() => this.reloadForNextUnit()),
-                );
-              },
+              error: () => this.finishRun(),
             });
           this.subs.add(submitSub);
         },
-        error: () => {
-          this.savingLogs = false;
-          this.logsSaved = true;
-          this.completeStatus.showPassed();
-          this.inspectLogs();
-          this.cdr.detectChanges();
-          this.subs.add(timer(2500).subscribe(() => this.reloadForNextUnit()));
-        },
+        error: () => this.finishRun(),
       });
     this.subs.add(sub);
+  }
+
+  /**
+   * Shows the verdict of the saved run. A passed unit reloads the page for
+   * the next unit after 2.5 s; a failed unit waits for "Next Unit" so that
+   * the operator sees the failure and puts the unit aside.
+   */
+  private finishRun(): void {
+    this.savingLogs = false;
+    this.logsSaved = true;
+    if (this.finalPassed) {
+      this.completeStatus.showPassed();
+    } else {
+      this.completeStatus.showFailed();
+    }
+    this.inspectLogs();
+    this.cdr.detectChanges();
+    if (this.finalPassed) {
+      this.subs.add(timer(2500).subscribe(() => this.reloadForNextUnit()));
+    }
+  }
+
+  /** "Next Unit" on the final card of a failed unit. */
+  nextUnit(): void {
+    this.reloadForNextUnit();
   }
 
   /** Reloads the page for the next unit (a method so that specs can stub it). */

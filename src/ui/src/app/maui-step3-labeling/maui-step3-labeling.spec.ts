@@ -81,6 +81,52 @@ describe('MauiStep3LabelingComponent', () => {
     discardPeriodicTasks();
   }));
 
+  function readoutText(hwRev: 'v1.1' | 'v1.2'): string {
+    fixture.destroy();
+    fixture = TestBed.createComponent(MauiStep3LabelingComponent);
+    component = fixture.componentInstance;
+    component.hwRev = hwRev;
+    fixture.detectChanges();
+    component.pollElectronicSerial();
+    tick();
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).querySelector(
+      '#step3-card-1',
+    )!.textContent!;
+    fixture.destroy();
+    discardPeriodicTasks();
+    return text;
+  }
+
+  it('uses the H2H wording on v1.2', fakeAsync(() => {
+    const text = readoutText('v1.2');
+    expect(text).toContain('H2H Serial:');
+    expect(text).toContain('MCU Serial:');
+    expect(text).toContain('MCU = H2H serial:');
+    expect(text).toContain('Matched');
+    expect(text).not.toContain('ADB Serial');
+    expect(text).not.toContain('Endpoint Sync');
+    expect(text).not.toContain('Dual Endpoints');
+  }));
+
+  it('keeps the v1.1 wording', fakeAsync(() => {
+    const text = readoutText('v1.1');
+    expect(text).toContain('ADB Serial:');
+    expect(text).toContain('FTDI Serial:');
+    expect(text).toContain('Endpoint Sync:');
+    expect(text).toContain('Dual Endpoints Matched');
+  }));
+
+  it('lets the Refresh Detection button wrap instead of clipping it', () => {
+    const button = (fixture.nativeElement as HTMLElement).querySelector(
+      '#step3-refresh-btn',
+    ) as HTMLElement;
+    expect(button.textContent).toContain('Refresh Detection');
+    expect(button.classList).toContain('action-btn-wide');
+    expect(getComputedStyle(button).whiteSpace).toBe('nowrap');
+    expect(getComputedStyle(button.parentElement!).flexWrap).toBe('wrap');
+  });
+
   it('should generate valid Code 128 barcode bars for any serial', () => {
     component.generateBarcode('ABC123456');
     expect(component.svgBarcodeBars.length).toBeGreaterThan(0);

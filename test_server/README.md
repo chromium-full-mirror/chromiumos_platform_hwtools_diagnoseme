@@ -63,7 +63,8 @@ After the first reboot, `diagnoseme-setup.service` performs one-time initializat
 * `start-diagnoseme [--offline | --online] [--no-browser]`: Starts DiagnoseMe testing containers and opens Google Chrome to Maui Station 1.
 * `stop-diagnoseme`: Stops all DiagnoseMe containers.
 * `diagnoseme-dashboard [--watch | --json | --all]`: Computes real-time Maui manufacturing statistics, pass/fail yields, and stage breakdowns.
-* `diagnoseme-logs [service | <SERIAL>]`: Follows container logs in real time or finds serial results.
+* `diagnoseme-logs [service | --device <SERIAL>]`: Follows container logs in real time or finds serial results.
+* `diagnoseme-logs --collect [SERIAL]`: Collects results, device and server logs, container logs, configuration, firmware versions, `lsusb` and `dmesg` into one `diagnoseme_logs_<station>_<SERIAL|all>_<date>_<time>.zip` in the current directory (send it with bug reports).
 * `sudo diagnoseme-offline-update [bundle_path]`: Updates Docker images, `.deb`, and Maui firmware from a USB stick.
 
 ### Building an Offline Update Bundle for Factory USBs

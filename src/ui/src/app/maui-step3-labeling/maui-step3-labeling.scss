@@ -139,3 +139,16 @@
   background-color: #fef7e0;
   color: #b06000;
 }
+
+// The two buttons wrap instead of clipping "Refresh Detection" in a narrow
+// status column.
+.serial-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  button {
+    flex: 0 0 auto;
+    max-width: 100%;
+  }
+}

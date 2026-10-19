@@ -512,34 +512,39 @@ class TestAdc(unittest.TestCase):
                 ],
             )
 
-    def test_rails_use_the_usb_spec_limits(self):
-        for pp5000, host in ((2375, 2375), (2625, 2750)):
+    def test_rails_use_expected_value_plus_minus_10_percent(self):
+        for pp5000, host in ((2250, 2250), (2500, 2500), (2750, 2750)):
             self.assertEqual(
                 self._verify(_adc(418, 5, pp5000=pp5000, host=host)), (True, [])
             )
-        ok, mismatches = self._verify(_adc(418, 5, pp5000=2626, host=2374))
+        ok, mismatches = self._verify(_adc(418, 5, pp5000=2751, host=2249))
         self.assertFalse(ok)
         self.assertEqual(
             mismatches,
             [
-                "PP5000: 2626 mV outside [2375, 2625] mV",
-                "PP5000_USB_HOST_VBUS: 2374 mV outside [2375, 2750] mV",
+                "PP5000: 2751 mV outside [2250, 2750] mV",
+                "PP5000_USB_HOST_VBUS: 2249 mV outside [2250, 2750] mV",
             ],
         )
-        self.assertFalse(self._verify(_adc(418, 5, pp5000=2374))[0])
+        self.assertFalse(self._verify(_adc(418, 5, pp5000=2249))[0])
         self.assertFalse(self._verify(_adc(418, 5, host=2751))[0])
 
-    def test_charger_vbus_is_vsafe5v_or_a_20v_contract(self):
-        for chg in (4750, 5021, 5500, 19000, 20000, 21000):
+    def test_expected_range(self):
+        self.assertEqual(profile.expected_range(2500), (2250, 2750))
+        self.assertEqual(profile.CHG_VBUS_5V_MV, (4500, 5500))
+        self.assertEqual(profile.CHG_VBUS_20V_MV, (18000, 22000))
+
+    def test_charger_vbus_is_5v_or_a_20v_contract(self):
+        for chg in (4500, 5021, 5500, 18000, 20000, 22000):
             self.assertEqual(self._verify(_adc(418, 5, chg=chg)), (True, []), chg)
-        for chg in (5, 536, 4749, 5501, 15000, 18999, 21001):
+        for chg in (5, 536, 4499, 5501, 15000, 17999, 22001):
             ok, mismatches = self._verify(_adc(418, 5, chg=chg))
             self.assertFalse(ok, chg)
             self.assertEqual(
                 mismatches,
                 [
-                    f"PPVAR_USB_CHG_VBUS: {chg} mV is neither vSafe5V [4750, 5500] "
-                    "mV nor a 20 V contract [19000, 21000] mV (is the charger "
+                    f"PPVAR_USB_CHG_VBUS: {chg} mV is neither 5 V [4500, 5500] "
+                    "mV nor a 20 V contract [18000, 22000] mV (is the charger "
                     "plugged in?)"
                 ],
             )
@@ -762,53 +767,6 @@ class TestBslGpio(unittest.TestCase):
             )
         )
         self.assertFalse(device.gpio_missing("", "ec_bsl_invoke"))
-
-    @mock.patch("server.maui_v12_device.time.sleep")
-    def test_sampling_stops_when_the_gpio_does_not_exist(self, unused_sleep):
-        tester = device.MauiV12ConsoleTester("/dev/ttyACM0")
-        with mock.patch.object(
-            tester, "send_command", return_value=self.MISSING
-        ) as send, mock.patch.object(device, "open_serial_port"):
-            self.assertEqual(tester.sample_bsl_gpio(), (False, -1, self.MISSING))
-        send.assert_called_once()
-
-    @mock.patch.object(maui_v12_services, "write_device_log")
-    def test_missing_gpio_message(self, mock_log):
-        servicer = maui_v12_services.MauiV12Station2Servicer()
-        with mock.patch.object(
-            device.MauiV12ConsoleTester,
-            "sample_bsl_gpio",
-            return_value=(False, -1, self.MISSING),
-        ):
-            resp = servicer.test_bsl_button(
-                maui_manufacturing_pb2.MauiBslButtonTestRequest(
-                    device_port="/dev/null", serial_number=SN
-                ),
-                None,
-            )
-        self.assertFalse(resp.success)
-        self.assertIn(
-            "This MCU firmware has no 'ec_bsl_invoke' GPIO - update the MCU App",
-            resp.message,
-        )
-        self.assertIn("ALL_PASSED=False", mock_log.call_args[0][2])
-
-    @mock.patch.object(maui_v12_services, "write_device_log")
-    def test_released_button_message(self, unused_log):
-        servicer = maui_v12_services.MauiV12Station2Servicer()
-        released = self.PRESSED.replace("I = 1", "I = 0")
-        with mock.patch.object(
-            device.MauiV12ConsoleTester,
-            "sample_bsl_gpio",
-            return_value=(False, 0, released),
-        ):
-            resp = servicer.test_bsl_button(
-                maui_manufacturing_pb2.MauiBslButtonTestRequest(
-                    device_port="/dev/null", serial_number=SN
-                ),
-                None,
-            )
-        self.assertIn("did not read 1 within 3.0s (last: 0)", resp.message)
 
 
 @mock.patch("server.maui_station2_service.write_device_log")

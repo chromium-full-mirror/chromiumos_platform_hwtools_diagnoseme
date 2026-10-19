@@ -20,6 +20,7 @@ import {MauiStation2Service} from '../../services/maui-station2.service';
 import {MauiDeviceMgmtService} from '../../services/maui-device-mgmt.service';
 import {MauiMcuService} from '../../services/maui-mcu.service';
 import {MauiDialogService} from '../maui-dialog.service';
+import {MauiBslButtonProgress} from '../../../proto/maui-manufacturing.pb';
 
 describe('MauiFunctionalSuiteComponent', () => {
   let component: MauiFunctionalSuiteComponent;
@@ -277,16 +278,30 @@ describe('MauiFunctionalSuiteComponent', () => {
   it('drops pending test results when the page is left', () => {
     const pending = new Subject<typeof adbTransferPassed>();
     mockMauiService.runAdbTransferTest.and.returnValue(pending);
-    component.stage3Passed = true;
+    component.stage2Passed = true;
     component.runAdbTransfer();
     expect(pending.observed).toBeTrue();
     fixture.destroy();
     expect(pending.observed).toBeFalse();
   });
 
+  /** Marks every card of a v1.1 SMT run as PASSED. */
+  function passAllCards(): void {
+    component.usbStatusValue = 'PASSED';
+    component.replugStatusValue = 'PASSED';
+    component.resetStatusValue = 'PASSED';
+    component.bslStatusValue = 'PASSED';
+    component.ledStatusValue = 'PASSED';
+    component.stage1StatusValue = 'PASSED';
+    component.stage2StatusValue = 'PASSED';
+    component.adbStatusValue = 'PASSED';
+    component.stage3StatusValue = 'PASSED';
+    component.stage3Passed = true;
+  }
+
   it('does not reload once the page was left', fakeAsync(() => {
     const reload = spyOn(component, 'reloadForNextUnit');
-    component.adbPassed = true;
+    passAllCards();
     component.deviceConnected = false;
     component.saveLogs();
     fixture.destroy();
@@ -296,7 +311,7 @@ describe('MauiFunctionalSuiteComponent', () => {
 
   it('logs a bypassed ADB transfer as BYPASSED', () => {
     component.serialNumber = 'MAUI-TEST-001'; // As reported by the device poll.
-    component.stage3Passed = true;
+    component.stage2Passed = true;
     component.bypassAdbTransfer();
     expect(component.adbStatusValue).toBe('BYPASSED');
     const [serial, step, content] =
@@ -305,7 +320,81 @@ describe('MauiFunctionalSuiteComponent', () => {
     expect(step).toBe('adb_transfer_test');
     expect(content).toContain('STATUS=BYPASSED');
     expect(content).toContain('Bypassed by operator.');
+  });
+
+  it('opens the charger card after the ADB card and the logs after it', () => {
+    fixture.detectChanges();
+    const disabled = (id: string) =>
+      !!(fixture.nativeElement as HTMLElement).querySelector(
+        `#${id} .disabled-card`,
+      );
+    expect(disabled('func-card-adb')).toBeTrue();
+    component.stage2Passed = true;
+    fixture.detectChanges();
+    expect(disabled('func-card-adb')).toBeFalse();
+    expect(disabled('func-card-charger')).toBeTrue();
+    component.bypassAdbTransfer();
+    fixture.detectChanges();
+    expect(disabled('func-card-charger')).toBeFalse();
+    expect(disabled('func-card-logs')).toBeTrue();
+    mockDeviceMgmtService.getDeviceLogsStatus.calls.reset();
+    component.bypassStage3();
+    fixture.detectChanges();
+    expect(disabled('func-card-logs')).toBeFalse();
     expect(mockDeviceMgmtService.getDeviceLogsStatus).toHaveBeenCalled();
+  });
+
+  it('asks to unplug all cables before the charger card', () => {
+    const text = (fixture.nativeElement as HTMLElement).querySelector(
+      '#func-card-charger',
+    )!.textContent!;
+    expect(text).toContain('Unplug ALL cables from Maui');
+    expect(text).toContain('connect only the Host and DUT cables again');
+    const ids = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll(
+        '[id^="func-card-"]',
+      ),
+    ).map(e => e.id);
+    expect(ids.indexOf('func-card-7')).toBeLessThan(
+      ids.indexOf('func-card-adb'),
+    );
+    expect(ids.indexOf('func-card-adb')).toBeLessThan(
+      ids.indexOf('func-card-charger'),
+    );
+    expect(ids.indexOf('func-card-charger')).toBeLessThan(
+      ids.indexOf('func-card-logs'),
+    );
+  });
+
+  it('summarizes the ADB transfer', () => {
+    const t = {
+      ...adbTransferPassed,
+      fileSizeBytes: '838860800',
+      pushMbPerS: 57.04,
+      pullMbPerS: 88.2,
+      transferSeconds: 25.13,
+      deadlineSeconds: 40,
+    } as never;
+    expect(component.adbSummary(t)).toBe(
+      'transfer 25.1 s / limit 40 s, 2 files 800 MiB, push 57.0 MB/s, pull 88.2 MB/s',
+    );
+    expect(
+      component.adbSummary({
+        ...(t as object),
+        hostLinkMbps: 5000,
+        dutLinkMbps: 5000,
+      } as never),
+    ).toContain('pull 88.2 MB/s, link host/DUT 5000 Mb/s');
+    expect(
+      component.adbSummary({
+        ...(t as object),
+        hostLinkMbps: 5000,
+        dutLinkMbps: 480,
+      } as never),
+    ).toContain('link host/DUT 5000/480 Mb/s');
+    expect(component.adbSummary({pushMbPerS: 0, pullMbPerS: 0} as never)).toBe(
+      'push 0.0 MB/s, pull 0.0 MB/s',
+    );
   });
 
   it('should run host USB check and record orientation', fakeAsync(() => {
@@ -328,9 +417,13 @@ describe('MauiFunctionalSuiteComponent', () => {
   it('should execute full test sequence and save logs', fakeAsync(() => {
     const reload = spyOn(component, 'reloadForNextUnit');
     component.usbCheckPassed = true;
+    component.usbStatusValue = 'PASSED';
     component.replugPassed = true;
+    component.replugStatusValue = 'PASSED';
     component.resetPassed = true;
+    component.resetStatusValue = 'PASSED';
     component.bslPassed = true;
+    component.bslStatusValue = 'PASSED';
     component.ledAmberChecked = true;
     component.ledGreenChecked = true;
     component.confirmLeds();
@@ -344,14 +437,16 @@ describe('MauiFunctionalSuiteComponent', () => {
     tick(3000);
     expect(component.stage2Passed).toBeTrue();
 
-    component.runStage3();
-    tick(3000);
-    expect(component.stage3Passed).toBeTrue();
-    expect(component.canSaveLogs).toBeFalse();
-
     component.runAdbTransfer();
     expect(mockMauiService.runAdbTransferTest).toHaveBeenCalled();
     expect(component.adbPassed).toBeTrue();
+    component.deviceConnected = false;
+    expect(component.canSaveLogs).toBeFalse();
+
+    component.runStage3();
+    tick(3000);
+    expect(component.stage3Passed).toBeTrue();
+    expect(component.canSaveLogs).toBeTrue();
 
     component.deviceConnected = false;
     component.saveLogs();
@@ -359,22 +454,81 @@ describe('MauiFunctionalSuiteComponent', () => {
     const summary = mockDeviceMgmtService.saveCardLog.calls.mostRecent()
       .args[2] as string;
     expect(summary).toContain(
-      'Card 9 (ADB Transfer, two ~400 MB random files, must finish within 60 s): PASSED',
+      'Card 8 (ADB Transfer, two ~400 MB random files): PASSED',
     );
     expect(summary).toContain('push 50.0 MB/s, pull 50.0 MB/s');
+    expect(summary).toContain('Card 9 (Charger Disconnected): PASSED');
+    expect(summary.indexOf('Card 8 (ADB')).toBeLessThan(
+      summary.indexOf('Card 9 (Charger'),
+    );
     expect(
       mockDeviceMgmtService.submitFinalManufacturingResults,
     ).toHaveBeenCalled();
+    expect(summary).toContain('OVERALL RESULT: PASS');
+    expect(summary).not.toContain('Not passed');
     expect(component.logsSaved).toBeTrue();
+    expect(component.finalPassed).toBeTrue();
+    fixture.detectChanges();
+    expect(
+      fixture.nativeElement.querySelector('#func-final-pass').textContent,
+    ).toContain('PASSED');
+    expect(fixture.nativeElement.querySelector('#func-next-unit')).toBeNull();
     tick(2500);
     expect(reload).toHaveBeenCalled();
   }));
+
+  it('fails a unit with a bypassed card and waits for Next Unit', fakeAsync(() => {
+    const reload = spyOn(component, 'reloadForNextUnit');
+    passAllCards();
+    component.bypassBsl();
+    component.deviceConnected = false;
+    component.saveLogs();
+    const summary = mockDeviceMgmtService.saveCardLog.calls.mostRecent()
+      .args[2] as string;
+    expect(summary).toContain('Card 4 (BSL Button ADC): BYPASSED');
+    expect(summary).toContain('Not passed: Card 4 (BSL Button): BYPASSED\n');
+    expect(summary).toContain('OVERALL RESULT: FAIL');
+    expect(component.finalPassed).toBeFalse();
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector('#func-final-pass')).toBeNull();
+    expect(el.querySelector('#func-final-fail')?.textContent).toContain(
+      'Card 4 (BSL Button): BYPASSED',
+    );
+    tick(2500);
+    expect(reload).not.toHaveBeenCalled();
+    (el.querySelector('#func-next-unit') as HTMLButtonElement).click();
+    expect(reload).toHaveBeenCalled();
+  }));
+
+  it('fails a unit with a card that was not run', fakeAsync(() => {
+    const reload = spyOn(component, 'reloadForNextUnit');
+    passAllCards();
+    component.ledStatusValue = 'NOT_RUN';
+    component.deviceConnected = false;
+    component.saveLogs();
+    expect(component.finalPassed).toBeFalse();
+    expect(component.finalNotPassedCards).toEqual([
+      'Card 5 (Visual LEDs): NOT_RUN',
+    ]);
+    tick(2500);
+    expect(reload).not.toHaveBeenCalled();
+  }));
+
+  it('fails a FATP unit with a bypassed barcode check', () => {
+    spyOn(component, 'reloadForNextUnit');
+    component.mode = 'fatp_qt0';
+    passAllCards();
+    component.bypassBarcode();
+    expect(component.barcodeMatches).toBeTrue();
+    expect(component.notPassedCards).toEqual(['Barcode: BYPASSED']);
+  });
 
   it('offers retry and bypass when the ADB transfer fails', () => {
     mockMauiService.runAdbTransferTest.and.returnValue(
       of({success: false, message: 'Data corrupted on pull'}),
     );
-    component.stage3Passed = true;
+    component.stage2Passed = true;
     component.runAdbTransfer();
     expect(component.adbPassed).toBeFalse();
     expect(component.adbStatusValue).toBe('FAILED');
@@ -436,6 +590,7 @@ describe('MauiFunctionalSuiteComponent hardware revisions', () => {
       'runHostOnlyTests',
       'testHostReplug',
       'testBslButton',
+      'streamBslButtonTest',
     ]);
     dialog = jasmine.createSpyObj('MauiDialogService', ['openFailure']);
     deviceMgmt = jasmine.createSpyObj('MauiDeviceMgmtService', [
@@ -578,9 +733,14 @@ describe('MauiFunctionalSuiteComponent hardware revisions', () => {
       '3. Host USB & Console Verification',
     );
     expect(text('#func-card-adb')).toContain(
-      '11. ADB Data Transfer Reliability',
+      '10. ADB Data Transfer Reliability',
     );
-    expect(text('#func-card-9')).toContain('12. SMT Log Completion & Archival');
+    expect(text('#func-card-charger')).toContain(
+      '11. Charger Disconnect Verification',
+    );
+    expect(text('#func-card-logs')).toContain(
+      '12. SMT Log Completion & Archival',
+    );
     expect(component.bslCardTitle).toBe(
       '6. Interactive BSL Button Test (GPIO)',
     );
@@ -592,9 +752,14 @@ describe('MauiFunctionalSuiteComponent hardware revisions', () => {
       '1. Host USB & Console Verification',
     );
     expect(text('#func-card-adb')).toContain(
-      '9. ADB Data Transfer Reliability',
+      '8. ADB Data Transfer Reliability',
     );
-    expect(text('#func-card-9')).toContain('10. SMT Log Completion & Archival');
+    expect(text('#func-card-charger')).toContain(
+      '9. Charger Disconnect Verification',
+    );
+    expect(text('#func-card-logs')).toContain(
+      '10. SMT Log Completion & Archival',
+    );
     expect(component.bslCardTitle).toBe(
       '4. Interactive BSL Button Test (ADC Status)',
     );
@@ -686,7 +851,7 @@ describe('MauiFunctionalSuiteComponent hardware revisions', () => {
     spyOn(component, 'reloadForNextUnit');
     component.onSerialProvisionStatus({status: 'PASSED', serial: SN});
     component.onH2hSpiStatus({status: 'PASSED', serial: SN});
-    component.adbPassed = true;
+    component.stage3Passed = true;
     component.deviceConnected = false;
     component.saveLogs();
     const summary = deviceMgmt.saveCardLog.calls.mostRecent().args[2];
@@ -696,16 +861,17 @@ describe('MauiFunctionalSuiteComponent hardware revisions', () => {
     );
     expect(summary).toContain('Card 3 (Host USB & Console): ');
     expect(summary).toContain(
-      'Card 6 (BSL Button GPIO): NOT_RUN (BSL GPIO: 0)',
+      'Card 6 (BSL Button GPIO, released -> pressed and held -> released): NOT_RUN\n',
     );
-    expect(summary).toContain('Card 11 (ADB Transfer, two ~400 MB');
+    expect(summary).toContain('Card 10 (ADB Transfer, two ~400 MB');
+    expect(summary).toContain('Card 11 (Charger Disconnected): ');
     expect(summary).not.toContain('Card 0');
   });
 
   it('keeps the v1.1 summary without serial cards', () => {
     create('v1.1');
     spyOn(component, 'reloadForNextUnit');
-    component.adbPassed = true;
+    component.stage3Passed = true;
     component.deviceConnected = false;
     component.saveLogs();
     const summary = deviceMgmt.saveCardLog.calls.mostRecent().args[2];
@@ -715,7 +881,8 @@ describe('MauiFunctionalSuiteComponent hardware revisions', () => {
     expect(summary).toContain(
       'Card 4 (BSL Button ADC): NOT_RUN (Peak BSL: 0 mV)',
     );
-    expect(summary).toContain('Card 9 (ADB Transfer, two ~400 MB');
+    expect(summary).toContain('Card 8 (ADB Transfer, two ~400 MB');
+    expect(summary).toContain('Card 9 (Charger Disconnected): ');
   });
 
   it('logs bypassed serial and H2H SPI cards as BYPASSED', () => {
@@ -745,21 +912,147 @@ describe('MauiFunctionalSuiteComponent hardware revisions', () => {
     expect(content).not.toContain('Last result');
   });
 
-  it('shows a BSL GPIO reading of 0 on v1.2', () => {
+  function bslProgress(
+    phase: number,
+    prompt: string,
+    extra: Record<string, unknown> = {},
+  ): MauiBslButtonProgress {
+    return {
+      phase,
+      prompt,
+      secondsLeft: 1.5,
+      level: 0,
+      done: false,
+      success: false,
+      message: '',
+      failedPhase: 0,
+      ...extra,
+    } as unknown as MauiBslButtonProgress;
+  }
+
+  function stepClasses(): string[] {
+    return Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll(
+        '#func-bsl-steps .bsl-step',
+      ),
+    ).map(
+      e =>
+        ['active', 'done', 'failed'].find(c =>
+          e.classList.contains(`bsl-step-${c}`),
+        ) ?? '',
+    );
+  }
+
+  it('shows the 3 BSL steps with the live prompt on v1.2', () => {
     create('v1.2');
-    station2.testBslButton.and.returnValue(
-      of({
-        success: false,
-        peakBslMv: 0,
-        thresholdMv: 1,
-        message: 'BSL Button Test FAILED. GPIO ec_bsl_invoke did not read 1.',
-      }) as never,
+    const stream = new Subject<MauiBslButtonProgress>();
+    station2.streamBslButtonTest.and.returnValue(stream);
+    component.serialNumber = SN;
+    component.devicePort = '/dev/ttyACM0';
+    component.resetPassed = true;
+    fixture.detectChanges();
+    expect(text('#func-card-4')).toContain('Start BSL Check');
+    expect(text('#func-card-4')).toContain('do NOT touch the BSL button');
+    component.readBslButton();
+    expect(station2.streamBslButtonTest).toHaveBeenCalledWith(
+      SN,
+      '/dev/ttyACM0',
+    );
+    expect(station2.testBslButton).not.toHaveBeenCalled();
+    stream.next(bslProgress(1, 'Do not touch the BSL button'));
+    fixture.detectChanges();
+    expect(text('#func-bsl-prompt')).toContain('Step 1 of 3');
+    expect(text('#func-bsl-prompt')).toContain('Do not touch the BSL button');
+    expect(text('#func-bsl-prompt')).toContain('1.5 s');
+    expect(stepClasses()).toEqual(['active', '', '']);
+    stream.next(
+      bslProgress(2, 'Press and HOLD the BSL button now', {secondsLeft: 7.25}),
+    );
+    fixture.detectChanges();
+    expect(text('#func-bsl-prompt')).toContain(
+      'Press and HOLD the BSL button now',
+    );
+    expect(text('#func-bsl-prompt')).toContain('7.3 s');
+    expect(stepClasses()).toEqual(['done', 'active', '']);
+    stream.next(bslProgress(3, 'Release the BSL button'));
+    stream.next(
+      bslProgress(0, 'BSL button OK', {
+        done: true,
+        success: true,
+        message: 'BSL Button Test PASSED!',
+      }),
+    );
+    stream.complete();
+    fixture.detectChanges();
+    expect(component.bslPassed).toBeTrue();
+    expect(component.bslStatusValue).toBe('PASSED');
+    expect(text('#func-card-4')).not.toContain('Step 1 of 3');
+    expect(stepClasses()).toEqual(['done', 'done', 'done']);
+    expect(dialog.openFailure).not.toHaveBeenCalled();
+  });
+
+  it('shows the failed BSL step and offers retry and bypass', () => {
+    create('v1.2');
+    const message =
+      'BSL Button Test FAILED (step 1, Do not touch): BSL signal reads 1 ' +
+      'without pressing - R0714 missing or line floating?';
+    station2.streamBslButtonTest.and.returnValue(
+      of(
+        bslProgress(1, 'BSL signal reads 1 without pressing', {
+          done: true,
+          level: 1,
+          failedPhase: 1,
+          message,
+        }),
+      ),
     );
     component.resetPassed = true;
     component.readBslButton();
     fixture.detectChanges();
-    expect(text('#func-card-4')).toContain('BSL GPIO:');
-    expect(text('#func-card-4')).toContain('0 (Expected 1)');
+    expect(component.bslPassed).toBeFalse();
+    expect(component.bslFailedPhase).toBe(1);
+    expect(text('#func-bsl-failed-step')).toContain('Step 1 of 3');
+    expect(text('#func-card-4')).toContain('R0714 missing or line floating?');
+    expect(stepClasses()).toEqual(['failed', '', '']);
+    expect(dialog.openFailure).toHaveBeenCalledWith(
+      'BSL Button Test Failed',
+      message,
+      jasmine.any(Function),
+      jasmine.any(Function),
+    );
+    const bypass = dialog.openFailure.calls.mostRecent().args[3]!;
+    bypass();
+    expect(component.bslPassed).toBeTrue();
+    expect(component.bslStatusValue).toBe('BYPASSED');
+  });
+
+  it('fails the BSL card when the stream ends without a result', () => {
+    create('v1.2');
+    station2.streamBslButtonTest.and.returnValue(
+      of(bslProgress(2, 'Press and HOLD the BSL button now')),
+    );
+    component.resetPassed = true;
+    component.readBslButton();
+    expect(component.bslPassed).toBeFalse();
+    expect(component.bslAdcInProgress).toBeFalse();
+    expect(dialog.openFailure.calls.mostRecent().args[1]).toContain(
+      'ended without a result',
+    );
+  });
+
+  it('keeps the v1.1 BSL ADC test', () => {
+    create('v1.1');
+    station2.testBslButton.and.returnValue(
+      of({success: true, peakBslMv: 3100, message: 'BSL ok'}) as never,
+    );
+    component.resetPassed = true;
+    component.readBslButton();
+    fixture.detectChanges();
+    expect(station2.streamBslButtonTest).not.toHaveBeenCalled();
+    expect(component.bslPassed).toBeTrue();
+    expect(text('#func-card-4')).toContain('Read BSL ADC');
+    expect(text('#func-card-4')).toContain('3100 mV');
+    expect(text('#func-card-4')).toContain('While holding, click');
   });
 
   it('keeps hiding a 0 mV BSL reading on v1.1', () => {

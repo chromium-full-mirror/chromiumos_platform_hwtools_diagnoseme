@@ -42,6 +42,20 @@ export interface MauiHwRevProfile {
   gpioOkText: (details: string) => string;
   /** Texts of the visual LED card. */
   leds: MauiLedTexts;
+  /** Texts of the serial readout (enumeration / serial / barcode pages). */
+  serialTexts: MauiSerialTexts;
+}
+
+/** How the serial pages name the unit endpoints and their serial match. */
+export interface MauiSerialTexts {
+  /** Label of the serial of the H2H / ADB endpoint (adb_* fields). */
+  h2hSerialLabel: string;
+  /** Label of the endpoint serial comparison. */
+  syncLabel: string;
+  /** Shown when both endpoints report the same serial. */
+  matchedText: string;
+  /** Shown otherwise. */
+  unmatchedText: string;
 }
 
 /** What the operator must see on the two LEDs of the board. */
@@ -79,6 +93,12 @@ export const MAUI_HW_REV_PROFILES: Record<MauiHwRev, MauiHwRevProfile> = {
       incompleteMessage:
         'Please visually inspect and confirm Amber LED is ON and Green LED is BLINKING at 1 Hz.',
     },
+    serialTexts: {
+      h2hSerialLabel: 'ADB Serial',
+      syncLabel: 'Endpoint Sync',
+      matchedText: 'Dual Endpoints Matched',
+      unmatchedText: 'Single/Unsynced Endpoint',
+    },
   },
   'v1.2': {
     rev: 'v1.2',
@@ -104,6 +124,12 @@ export const MAUI_HW_REV_PROFILES: Record<MauiHwRev, MauiHwRevProfile> = {
       greenCheckLabel: 'Green LED (MCU App) blinking at ~1 Hz',
       incompleteMessage:
         'Please confirm that the Amber LED is solid ON with the charger plugged in and that the Green LED blinks at about 1 Hz.',
+    },
+    serialTexts: {
+      h2hSerialLabel: 'H2H Serial',
+      syncLabel: 'MCU = H2H serial',
+      matchedText: 'Matched',
+      unmatchedText: 'Not matched (MCU serial not provisioned?)',
     },
   },
 };

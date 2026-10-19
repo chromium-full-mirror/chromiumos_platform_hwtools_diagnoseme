@@ -42,12 +42,14 @@ services:
       - MAUI_ADB_SIZE_MB
       - MAUI_ADB_DEADLINE_S
       - MAUI_ADB_MIN_RATE_MB_S
+      - MAUI_ADB_MIN_LINK_MBPS
 
     volumes:
       - /var/log/diagnoseme/rpcserver:/var/log/rpcserver
       - /tmp:/tmp
       - /home:/home
-      - ${HOME:-/home/diagnoseme}/diagnoseme_results:/root/diagnoseme_results
+      # Results of the desktop user (start-diagnoseme sets the directory).
+      - ${DIAGNOSEME_RESULTS_DIR:-/home/diagnoseme/diagnoseme_results}:/root/diagnoseme_results
       - /dev:/dev
       - /sys:/sys
       - /var/run/docker.sock:/var/run/docker.sock

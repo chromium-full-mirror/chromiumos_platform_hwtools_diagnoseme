@@ -3,21 +3,290 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-COMPOSE_FILE="/etc/diagnoseme/docker-compose.yaml"
+# Test hook: prefix of the system paths used by --collect (unset on stations).
+ROOT="${DIAGNOSEME_LOGS_ROOT:-}"
+COMPOSE_FILE="$ROOT/etc/diagnoseme/docker-compose.yaml"
+CONFIG_ENV="$ROOT/etc/diagnoseme/config.env"
+RPC_LOG_DIR="$ROOT/var/log/diagnoseme/rpcserver"
+FIRMWARE_DIR="$ROOT/var/lib/diagnoseme/firmware"
+TMP_DIR="$ROOT/tmp"
+
+usage() {
+    cat <<EOF
+Usage: diagnoseme-logs [SERVICE | all]
+       diagnoseme-logs --device|-d [SERIAL]
+       diagnoseme-logs --collect|-c [SERIAL]
+       diagnoseme-logs --help|-h
+
+  SERVICE | all      Follow the container logs (all services by default).
+  --device [SERIAL]  List the result files and the device log directory of
+                     SERIAL, or all device log / result directories.
+  --collect [SERIAL] Collect everything needed to debug a station into one
+                     zip in the current directory (or ~/ if not writable):
+                     diagnoseme_logs_<station>_<SERIAL|all>_<YYYYmmdd_HHMMSS>.zip
+                     with ~/diagnoseme_results and /tmp/*_diagnoseme_logs
+                     (only SERIAL's if given), the rpcserver logs, container
+                     status, images and logs, config.env, the firmware
+                     STABLE.json files, lsusb, dmesg, OS and package versions.
+  --help             Show this help.
+EOF
+}
+
+# Prints "$@" to stderr.
+note() {
+    echo "$@" >&2
+}
+
+# Copies file $1 to $2 (sudo -n if not readable). Returns 1 on failure.
+copy_file() {
+    mkdir -p "$(dirname "$2")"
+    # The copy must stay owned by the user (sudo only reads the source).
+    # shellcheck disable=SC2024
+    if cat "$1" >"$2" 2>/dev/null || sudo -n cat "$1" >"$2" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "$2"
+    echo "$1" >>"$SKIPPED"
+    return 1
+}
+
+# Lists the files below directory $1 (sudo -n if not readable).
+list_files() {
+    find "$1" -type f 2>/dev/null || sudo -n find "$1" -type f 2>/dev/null
+}
+
+# Copies the files below directory $1 matching *$3* (all if $3 is empty)
+# to directory $2, keeping the structure below $1.
+copy_tree() {
+    local src="$1" dst="$2" filter="${3:-}" f rel
+    [ -d "$src" ] || return 0
+    while IFS= read -r f; do
+        rel="${f#"$src"/}"
+        if [ -n "$filter" ] && [[ "$rel" != *"$filter"* ]]; then
+            continue
+        fi
+        copy_file "$f" "$dst/$rel"
+    done < <(list_files "$src")
+}
+
+# Runs command "${@:2}" (with a timeout) and appends the command line and
+# its output to file $1. Never fails.
+run_to() {
+    local out="$1"
+    shift
+    mkdir -p "$(dirname "$out")"
+    {
+        echo "\$ $*"
+        if command -v timeout >/dev/null 2>&1; then
+            timeout 300 "$@" 2>&1
+        else
+            "$@" 2>&1
+        fi
+        echo "[exit code: $?]"
+    } >>"$out"
+}
+
+# Sets DOCKER to the docker command (sudo -n docker if docker alone is not
+# allowed).
+set_docker() {
+    DOCKER=(docker)
+    if ! docker info >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+        DOCKER=(sudo -n docker)
+    fi
+}
+
+# Prints the station name: STATION_ID of config.env, else the host name.
+station_name() {
+    local name=""
+    if [ -r "$CONFIG_ENV" ]; then
+        name=$(sed -n 's/^[[:space:]]*STATION_ID=//p' "$CONFIG_ENV" | tail -n 1 |
+            tr -d "\"'")
+    fi
+    [ -n "$name" ] || name=$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null)
+    name=$(printf '%s' "${name:-station}" | tr -c 'A-Za-z0-9_.-' '_')
+    echo "${name:-station}"
+}
+
+# Prints the diagnoseme_results directories of the station, one per line:
+# all that contain files, of the desktop user (SUDO_USER under sudo), $HOME,
+# /home/* and /root (a station started as root, e.g. right after an offline
+# update, writes there). Prints the first existing one if none has files.
+results_dirs() {
+    local d real first="" sudo_home="" seen=" "
+    if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+        sudo_home=$(getent passwd "${SUDO_USER}" 2>/dev/null | cut -d: -f6)
+    fi
+    for d in ${sudo_home:+"$ROOT$sudo_home/diagnoseme_results"} \
+        "${HOME:-/home/diagnoseme}/diagnoseme_results" \
+        "$ROOT"/home/*/diagnoseme_results "$ROOT/root/diagnoseme_results" \
+        "$TMP_DIR/diagnoseme_results"; do
+        [ -d "$d" ] || continue
+        real=$(readlink -f "$d" 2>/dev/null || echo "$d")
+        case "$seen" in *" $real "*) continue ;; esac
+        seen="$seen$real "
+        [ -n "$first" ] || first="$d"
+        if [ -n "$(list_files "$d" | head -n 1)" ]; then
+            echo "$d"
+            first="-"
+        fi
+    done
+    if [ -n "$first" ] && [ "$first" != "-" ]; then
+        echo "$first"
+    fi
+}
+
+# Writes archive $1 of directory $3 inside directory $2. Prints its path
+# (.zip, or .tar.gz without zip and python3).
+make_archive() {
+    local zip_path="$1" parent="$2" name="$3"
+    if command -v zip >/dev/null 2>&1; then
+        (cd "$parent" && zip -qr "$zip_path" "$name") && echo "$zip_path" && return
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        (cd "$parent" && python3 -m zipfile -c "$zip_path" "$name") &&
+            echo "$zip_path" && return
+    fi
+    local tgz="${zip_path%.zip}.tar.gz"
+    tar -C "$parent" -czf "$tgz" "$name" && echo "$tgz"
+}
+
+collect_logs() {
+    local serial="${1:-}" station ts name stage out_dir dest d f archive images
+    serial=$(printf '%s' "$serial" | tr -cd 'A-Za-z0-9_-')
+    station=$(station_name)
+    ts=$(date +%Y%m%d_%H%M%S)
+    name="diagnoseme_logs_${station}_${serial:-all}_${ts}"
+    out_dir="$PWD"
+    if [ ! -w "$out_dir" ]; then
+        out_dir="${HOME:-/tmp}"
+    fi
+    stage=$(mktemp -d "${TMPDIR:-/tmp}/diagnoseme_collect.XXXXXX") || exit 1
+    # shellcheck disable=SC2064  # Expand $stage now.
+    trap "rm -rf '$stage'" EXIT
+    dest="$stage/$name"
+    mkdir -p "$dest/system" "$dest/docker"
+    SKIPPED="$dest/skipped_files.txt"
+    note "Collecting DiagnoseMe logs (serial: ${serial:-all})..."
+
+    {
+        echo "DiagnoseMe log collection"
+        echo "Date: $(date -Is 2>/dev/null || date)"
+        echo "Station: $station"
+        echo "Host: $(hostname 2>/dev/null)"
+        echo "Serial: ${serial:-all}"
+        echo "User: $(id -un 2>/dev/null)"
+    } >"$dest/README.txt"
+
+    # Results and device logs. The first results directory goes to
+    # diagnoseme_results/, others to diagnoseme_results_<path>/.
+    local results="" target
+    while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        if [ -z "$results" ]; then
+            target="$dest/diagnoseme_results"
+        else
+            target="$dest/diagnoseme_results_$(printf '%s' "${d#"$ROOT"}" |
+                sed 's#/diagnoseme_results$##; s#^/##' | tr -c 'A-Za-z0-9_.-' '_')"
+        fi
+        results="$results${results:+, }$d"
+        copy_tree "$d" "$target" "$serial"
+    done < <(results_dirs)
+    echo "Results: ${results:-none found}" >>"$dest/README.txt"
+    for d in "$TMP_DIR"/*_diagnoseme_logs; do
+        [ -d "$d" ] || continue
+        if [ -n "$serial" ] && [ "$(basename "$d")" != "${serial}_diagnoseme_logs" ]; then
+            continue
+        fi
+        copy_tree "$d" "$dest/device_logs/$(basename "$d")"
+    done
+
+    # Server logs, configuration and firmware.
+    copy_tree "$RPC_LOG_DIR" "$dest/rpcserver"
+    [ -e "$CONFIG_ENV" ] && copy_file "$CONFIG_ENV" "$dest/etc/config.env"
+    for f in "$FIRMWARE_DIR"/*/STABLE.json; do
+        [ -e "$f" ] || continue
+        copy_file "$f" "$dest/firmware/$(basename "$(dirname "$f")")/STABLE.json"
+    done
+
+    # Containers.
+    if command -v docker >/dev/null 2>&1; then
+        set_docker
+        if [ -f "$COMPOSE_FILE" ]; then
+            run_to "$dest/docker/compose_ps.txt" \
+                "${DOCKER[@]}" compose -f "$COMPOSE_FILE" ps -a
+            note "Collecting the container logs..."
+            run_to "$dest/docker/compose_logs.txt" "${DOCKER[@]}" compose \
+                -f "$COMPOSE_FILE" logs --no-color --timestamps
+        else
+            echo "$COMPOSE_FILE not found" >"$dest/docker/compose_ps.txt"
+        fi
+        images=$("${DOCKER[@]}" images --format \
+            '{{.Repository}}:{{.Tag}}  {{.ID}}  {{.CreatedSince}}  {{.Size}}' 2>&1)
+        if grep -qE 'diagnoseme|maui-utils' <<<"$images"; then
+            grep -E 'diagnoseme|maui-utils' <<<"$images" >"$dest/docker/images.txt"
+        else
+            printf 'No diagnoseme / maui-utils image.\n%s\n' "$images" \
+                >"$dest/docker/images.txt"
+        fi
+    else
+        echo "docker not installed" >"$dest/docker/compose_ps.txt"
+    fi
+
+    # Host.
+    run_to "$dest/system/lsusb.txt" lsusb
+    run_to "$dest/system/lsusb_tree.txt" lsusb -t
+    if dmesg >/dev/null 2>&1; then
+        dmesg 2>&1 | tail -n 300 >"$dest/system/dmesg_tail.txt"
+    elif sudo -n dmesg >/dev/null 2>&1; then
+        sudo -n dmesg 2>&1 | tail -n 300 >"$dest/system/dmesg_tail.txt"
+    else
+        echo "dmesg not readable (needs root); skipped" >"$dest/system/dmesg_tail.txt"
+    fi
+    run_to "$dest/system/uname.txt" uname -a
+    copy_file "$ROOT/etc/os-release" "$dest/system/os-release.txt"
+    if command -v dpkg-query >/dev/null 2>&1; then
+        for f in $(dpkg-query -W -f='${Package}\n' 'diagnoseme*' 2>/dev/null); do
+            run_to "$dest/system/dpkg_status.txt" dpkg -s "$f"
+        done
+    fi
+    [ -s "$dest/system/dpkg_status.txt" ] ||
+        echo "No diagnoseme package installed" >"$dest/system/dpkg_status.txt"
+
+    if [ -s "$SKIPPED" ]; then
+        note "Could not read $(wc -l <"$SKIPPED") file(s); see skipped_files.txt."
+    fi
+    archive=$(make_archive "$out_dir/$name.zip" "$stage" "$name")
+    if [ -z "$archive" ] || [ ! -s "$archive" ]; then
+        note "Error: failed to write the archive in $out_dir."
+        return 1
+    fi
+    echo "Logs collected: $archive"
+}
+
+case "${1:-}" in
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    -c | --collect)
+        collect_logs "${2:-}"
+        exit $?
+        ;;
+esac
 
 if [ "$1" == "--device" ] || [ "$1" == "-d" ]; then
     SERIAL="${2:-}"
-    HOME_DIR="${HOME:-/home/diagnoseme}"
+    mapfile -t RESULTS_DIRS < <(results_dirs)
     if [ -n "$SERIAL" ]; then
         FOUND=false
-        if [ -d "$HOME_DIR/diagnoseme_results" ]; then
-            MATCHES=$(find "$HOME_DIR/diagnoseme_results" -name "*${SERIAL}*" 2>/dev/null)
+        for RESULTS in "${RESULTS_DIRS[@]}"; do
+            MATCHES=$(find "$RESULTS" -name "*${SERIAL}*" 2>/dev/null)
             if [ -n "$MATCHES" ]; then
-                echo "Final results in $HOME_DIR/diagnoseme_results:"
+                echo "Final results in $RESULTS:"
                 echo "$MATCHES"
                 FOUND=true
             fi
-        fi
+        done
         if [ -d "/tmp/${SERIAL}_diagnoseme_logs" ]; then
             echo "Device logs in /tmp/${SERIAL}_diagnoseme_logs:"
             ls -la "/tmp/${SERIAL}_diagnoseme_logs"
@@ -30,7 +299,7 @@ if [ "$1" == "--device" ] || [ "$1" == "-d" ]; then
         echo "=================================================="
         echo " Available Device Log & Result Directories:"
         echo "=================================================="
-        find "$HOME_DIR/diagnoseme_results" /tmp -maxdepth 2 -type d \( -name "*diagnoseme_logs" -o -name "highlevel" -o -name "detailed" \) 2>/dev/null | sort -u
+        find "${RESULTS_DIRS[@]}" /tmp -maxdepth 2 -type d \( -name "*diagnoseme_logs" -o -name "highlevel" -o -name "detailed" \) 2>/dev/null | sort -u
     fi
     exit 0
 fi

@@ -29,8 +29,11 @@ class FakeAdb:  # pylint: disable=too-many-instance-attributes
         has_z=True,
         has_sha1sum=True,
         overshoot_s=0.0,
+        dut_speed="5000",
     ):
         self.devices = list(devices)
+        # `speed` of the H2H in the DUT's /sys/bus/usb/devices (None: absent).
+        self.dut_speed = dut_speed
         self.rate = rate_mb_s * adbt.MB
         # Remote paths containing these strings are corrupted.
         self.corrupt_push = corrupt_push
@@ -63,7 +66,13 @@ class FakeAdb:  # pylint: disable=too-many-instance-attributes
 
     def _shell(self, args):
         out, rc = "", 0
-        if args[1] == "sha1sum":
+        if args[1] == adbt.DUT_USB_LIST_CMD:
+            out = "1d6b:0003 serial=0000:00:0d.0 speed=20000\n"
+            if self.dut_speed is not None:
+                serial = self.devices[0] if self.devices else ""
+                out += f"18d1:506d serial={serial} speed={self.dut_speed}\n"
+            out += "3277:0099 serial= speed=480\n"
+        elif args[1] == "sha1sum":
             if not self.has_sha1sum:
                 return "/system/bin/sh: sha1sum: not found", 127
             out = "\n".join(
@@ -121,6 +130,23 @@ class NoPullFileAdb(FakeAdb):
         return super().__call__(cmd, timeout=timeout, **kwargs)
 
 
+def make_sysfs(root, devices):
+    """Creates fake /sys/bus/usb/devices entries {name: (vid, pid, serial, speed)}."""
+    for name, (vid, pid, serial, speed) in devices.items():
+        path = os.path.join(root, name)
+        os.makedirs(path)
+        for attr, value in (
+            ("idVendor", vid),
+            ("idProduct", pid),
+            ("serial", serial),
+            ("speed", speed),
+        ):
+            if value is not None:
+                with open(os.path.join(path, attr), "w", encoding="utf-8") as f:
+                    f.write(f"{value}\n")
+        os.makedirs(os.path.join(root, f"{name}:1.0"))
+
+
 def _calls(fake, verb):
     return [c for c in fake.calls if verb in c]
 
@@ -131,10 +157,22 @@ class TestAdbTransfer(unittest.TestCase):  # pylint: disable=too-many-public-met
     def setUp(self):
         self.work = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.work)
+        self.sysfs = self._sysfs({"2-2.3": ("18d1", "506d", "DUT123", "5000")})
+        patcher = mock.patch.dict(os.environ, {adbt.MIN_LINK_ENV: ""})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _sysfs(self, devices):
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root)
+        hub = {"usb2": ("1d6b", "0003", "0000:00:14.0", "10000")}
+        make_sysfs(root, {**hub, **devices})
+        return root
 
     def _run(self, fake, **kwargs):
         kwargs.setdefault("size_mib", 2)
         kwargs.setdefault("extra_mib", 3)
+        kwargs.setdefault("sysfs_dir", self.sysfs)
         return adbt.run_adb_transfer_test(
             run=fake, clock=fake.clock, work_dir=self.work, **kwargs
         )
@@ -164,6 +202,10 @@ class TestAdbTransfer(unittest.TestCase):  # pylint: disable=too-many-public-met
         self.assertEqual(res.deadline_s, adbt.DEFAULT_DEADLINE_S)
         self.assertGreaterEqual(res.total_s, res.transfer_s)
         self.assertIn("2 + 5 MiB", res.message)
+        self.assertTrue(res.message.startswith("ADB transfer OK: transfer "))
+        self.assertIn(" s / limit 40 s, ", res.message)
+        self.assertEqual((res.host_link_mbps, res.dut_link_mbps), (5000, 5000))
+        self.assertIn("H2H USB link: host 5000 Mb/s, DUT 5000 Mb/s", "\n".join(res.log))
         self.assertIn("Push file 2 (5 MiB): ", "\n".join(res.log))
         self.assertIn("Pull file 1 (2 MiB): ", "\n".join(res.log))
         self.assertEqual(fake.dut, {})  # Removed from the DUT.
@@ -197,7 +239,10 @@ class TestAdbTransfer(unittest.TestCase):  # pylint: disable=too-many-public-met
         self.assertIn("No ADB device", res.message)
 
     def test_preferred_serial(self):
-        res = self._run(FakeAdb(devices=("A", "B")), preferred_serial="B")
+        sysfs = self._sysfs({"2-1": ("18d1", "506d", "B", "5000")})
+        res = self._run(
+            FakeAdb(devices=("A", "B")), preferred_serial="B", sysfs_dir=sysfs
+        )
         self.assertEqual(res.adb_serial, "B")
 
     def test_multiple_devices_warns(self):
@@ -282,8 +327,100 @@ class TestAdbTransfer(unittest.TestCase):  # pylint: disable=too-many-public-met
     def test_default_sizes_fit_the_budget_at_50_mb_s(self):
         largest = (2 * adbt.DEFAULT_SIZE_MIB + adbt.EXTRA_MIB_RANGE[1]) * adbt.MIB
         transfer_s = 2 * largest / (50 * adbt.MB)
-        self.assertLess(transfer_s, adbt.DEFAULT_DEADLINE_S * 0.7)
-        self.assertEqual(adbt.DEFAULT_DEADLINE_S, 60.0)
+        self.assertLess(transfer_s, adbt.DEFAULT_DEADLINE_S)
+        self.assertEqual(adbt.DEFAULT_DEADLINE_S, 40.0)
+
+    def test_default_deadline_is_40_s(self):
+        with mock.patch.dict(os.environ, {adbt.DEADLINE_ENV: ""}):
+            self.assertEqual(adbt.get_deadline_s(), 40.0)
+            res = self._run(FakeAdb())
+        self.assertEqual(res.deadline_s, 40.0)
+        self.assertTrue(any("transfer deadline 40 s" in line for line in res.log))
+
+    def _assert_link_failure(self, res, fake, text):
+        self.assertFalse(res.success)
+        self.assertIn(text, res.message)
+        self.assertIn(adbt.LINK_HINT, res.message)
+        self.assertEqual(_calls(fake, "push"), [])  # No transfer.
+        self.assertEqual(os.listdir(self.work), [])
+
+    def test_host_link_at_480_fails(self):
+        sysfs = self._sysfs({"1-2.3": ("18d1", "506d", "DUT123", "480")})
+        fake = FakeAdb()
+        res = self._run(fake, sysfs_dir=sysfs)
+        self._assert_link_failure(
+            res, fake, "H2H link is not USB 3 (host 480 Mb/s, DUT 5000 Mb/s)"
+        )
+        self.assertEqual((res.host_link_mbps, res.dut_link_mbps), (480, 5000))
+
+    def test_dut_link_at_480_fails(self):
+        fake = FakeAdb(dut_speed="480")
+        res = self._run(fake)
+        self._assert_link_failure(
+            res, fake, "H2H link is not USB 3 (host 5000 Mb/s, DUT 480 Mb/s)"
+        )
+
+    def test_unknown_host_speed_fails_clearly(self):
+        sysfs = self._sysfs({"1-4": ("0403", "6001", "FT1", "12")})
+        fake = FakeAdb()
+        res = self._run(fake, sysfs_dir=sysfs)
+        self._assert_link_failure(
+            res, fake, "H2H link is not USB 3 (host unknown, DUT 5000 Mb/s)"
+        )
+        self.assertIn("could not be read on the host (no H2H device", res.message)
+        self.assertEqual(res.host_link_mbps, 0)
+
+    def test_unreadable_host_speed_fails(self):
+        sysfs = self._sysfs({"2-2": ("18d1", "506d", "DUT123", None)})
+        fake = FakeAdb()
+        res = self._run(fake, sysfs_dir=sysfs)
+        self._assert_link_failure(res, fake, "(host unknown, DUT 5000 Mb/s)")
+
+    def test_unknown_dut_speed_fails_clearly(self):
+        fake = FakeAdb(dut_speed=None)
+        res = self._run(fake)
+        self._assert_link_failure(res, fake, "(host 5000 Mb/s, DUT unknown)")
+        self.assertIn("could not be read on the DUT", res.message)
+
+    def test_link_prefers_the_h2h_with_the_adb_serial(self):
+        sysfs = self._sysfs(
+            {
+                "1-1": ("18d1", "506d", "OTHER", "480"),
+                "2-2": ("18d1", "506d", "DUT123", "5000"),
+            }
+        )
+        res = self._run(FakeAdb(), sysfs_dir=sysfs)
+        self.assertTrue(res.success, res.log)
+        self.assertEqual(res.host_link_mbps, 5000)
+
+    def test_prolific_h2h_and_faster_links_pass(self):
+        sysfs = self._sysfs({"2-2": ("067b", "27a1", "DUT123", "10000")})
+        res = self._run(FakeAdb(), sysfs_dir=sysfs)
+        self.assertTrue(res.success, res.log)
+        self.assertEqual(res.host_link_mbps, 10000)
+
+    def test_link_check_can_be_disabled_by_the_station(self):
+        sysfs = self._sysfs({"1-2": ("18d1", "506d", "DUT123", "480")})
+        with mock.patch.dict(os.environ, {adbt.MIN_LINK_ENV: "0"}):
+            self.assertEqual(adbt.get_min_link_mbps(), 0)
+            res = self._run(FakeAdb(dut_speed="480"), sysfs_dir=sysfs)
+        self.assertTrue(res.success, res.log)
+        self.assertEqual((res.host_link_mbps, res.dut_link_mbps), (480, 480))
+
+    def test_parse_dut_usb_list(self):
+        out = (
+            "18d1:506d serial=MAUIV12H26090104 speed=5000\n"
+            "3277:0099 serial= speed=480\n"
+            "1d6b:0002 serial=xhci-hcd.1.auto speed=480\n"
+        )
+        self.assertEqual(
+            adbt.parse_dut_usb_list(out),
+            [
+                ("18d1", "506d", "MAUIV12H26090104", "5000"),
+                ("3277", "0099", "", "480"),
+                ("1d6b", "0002", "xhci-hcd.1.auto", "480"),
+            ],
+        )
 
     def test_pull_without_file_fails(self):
         res = self._run(NoPullFileAdb())
@@ -310,7 +447,11 @@ class TestAdbTransfer(unittest.TestCase):  # pylint: disable=too-many-public-met
             self.assertEqual(adbt.get_size_mib(), 3)
             self.assertEqual(adbt.get_deadline_s(), 12.5)
             res = adbt.run_adb_transfer_test(
-                run=fake, clock=fake.clock, work_dir=self.work, extra_mib=1
+                run=fake,
+                clock=fake.clock,
+                work_dir=self.work,
+                extra_mib=1,
+                sysfs_dir=self.sysfs,
             )
         self.assertTrue(res.success, res.log)
         self.assertEqual(res.file_size_bytes, 7 * adbt.MIB)
@@ -374,7 +515,9 @@ class TestStation2AdbTransferRpc(unittest.TestCase):
         total_s=38.5,
         log=["line 1", "line 2"],
         transfer_s=35.0,
-        deadline_s=60.0,
+        deadline_s=40.0,
+        host_link_mbps=5000,
+        dut_link_mbps=5000,
     )
 
     def setUp(self):
@@ -404,7 +547,8 @@ class TestStation2AdbTransferRpc(unittest.TestCase):
         self.assertAlmostEqual(resp.pull_seconds, 18.0)
         self.assertAlmostEqual(resp.total_seconds, 38.5)
         self.assertAlmostEqual(resp.transfer_seconds, 35.0)
-        self.assertAlmostEqual(resp.deadline_seconds, 60.0)
+        self.assertAlmostEqual(resp.deadline_seconds, 40.0)
+        self.assertEqual((resp.host_link_mbps, resp.dut_link_mbps), (5000, 5000))
         self.assertEqual(resp.host_sha1, f"{'a' * 40}, {'b' * 40}")
         self.assertEqual(resp.pulled_sha1, f"{'a' * 40}, {'b' * 40}")
         self.assertEqual(resp.log, "line 1\nline 2")
@@ -412,7 +556,8 @@ class TestStation2AdbTransferRpc(unittest.TestCase):
         self.assertEqual((serial, step), ("MAUI123", "adb_transfer_test"))
         self.assertTrue(content.startswith("ALL_PASSED=True\nRESULT: PASSED\n"))
         self.assertIn("Push: 16.00 s, 52.9 MB/s", content)
-        self.assertIn("Transfer: 35.00 s (deadline 60 s)", content)
+        self.assertIn("Transfer: 35.00 s (deadline 40 s)", content)
+        self.assertIn("H2H USB link: host 5000 Mb/s, DUT 5000 Mb/s", content)
         self.assertTrue(content.endswith("line 1\nline 2"))
 
     def test_defaults_to_the_connected_unit(self):

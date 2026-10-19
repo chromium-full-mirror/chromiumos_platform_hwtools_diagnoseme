@@ -847,6 +847,7 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         f"DUT SHA-1: {res.dut_sha1}\n"
         f"Pulled SHA-1: {res.pulled_sha1}\n"
         f"Transfer: {res.transfer_s:.2f} s (deadline {res.deadline_s:g} s)\n"
+        f"H2H USB link: host {res.host_link_mbps} Mb/s, DUT {res.dut_link_mbps} Mb/s\n"
         f"Total: {res.total_s:.2f} s\n\n{log_text}",
     )
     return maui_manufacturing_pb2.MauiAdbTransferTestResponse(
@@ -865,6 +866,8 @@ class MauiStation2Servicer(maui_manufacturing_pb2_grpc.MauiStation2FunctionalTes
         log=log_text,
         transfer_seconds=res.transfer_s,
         deadline_seconds=res.deadline_s,
+        host_link_mbps=res.host_link_mbps,
+        dut_link_mbps=res.dut_link_mbps,
     )
 
   def run_host_dut_tests(
