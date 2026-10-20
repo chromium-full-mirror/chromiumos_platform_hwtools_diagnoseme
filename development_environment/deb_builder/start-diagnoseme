@@ -50,6 +50,9 @@ if [ "$(id -u)" -eq 0 ]; then
 fi
 STATION_HOME="${STATION_HOME:-/home/diagnoseme}"
 DIAGNOSEME_RESULTS_DIR="${STATION_HOME}/diagnoseme_results"
+# Station directory of the Maui v1.2 H2H firmware images (never bundled: the
+# operator copies them there); docker compose mounts it into the server.
+MAUI_H2H_FW_DIR="${MAUI_H2H_FW_DIR:-${STATION_HOME}/diagnoseme_h2h_firmware}"
 
 # Fetches the current Maui firmware of the edition from the public GCS bucket
 # into ${FW_ROOT} (see maui_fw_fetch.py). Failures only print a warning.
@@ -122,6 +125,7 @@ export DOCKER_TAG="${DOCKER_TAG:-maui}"
 export STATION_ID="${STATION_ID:-}"
 export RESULTS_SERVER="${RESULTS_SERVER:-}"
 export DIAGNOSEME_RESULTS_DIR
+export MAUI_H2H_FW_DIR
 if [ -n "${MAUI_UTILS_IMAGE:-}" ]; then
     export MAUI_UTILS_IMAGE
 fi
@@ -195,6 +199,16 @@ if [ "$(id -u)" -eq 0 ] && [ "${STATION_HOME}" != "${HOME:-}" ]; then
     RESULTS_OWNER=$(stat -c %U:%G "${STATION_HOME}" 2>/dev/null || true)
     if [ -n "${RESULTS_OWNER}" ]; then
         chown -R "${RESULTS_OWNER}" "${DIAGNOSEME_RESULTS_DIR}" 2>/dev/null || true
+    fi
+fi
+# The operator copies the H2H images there (the server only reads them);
+# create it before docker does (as root) and give it to the owner of the
+# home directory it is in.
+if [ ! -d "${MAUI_H2H_FW_DIR}" ] && mkdir -p "${MAUI_H2H_FW_DIR}" 2>/dev/null && \
+        [ "$(id -u)" -eq 0 ]; then
+    H2H_OWNER=$(stat -c %U:%G "$(dirname "${MAUI_H2H_FW_DIR}")" 2>/dev/null || true)
+    if [ -n "${H2H_OWNER}" ]; then
+        chown "${H2H_OWNER}" "${MAUI_H2H_FW_DIR}" 2>/dev/null || true
     fi
 fi
 

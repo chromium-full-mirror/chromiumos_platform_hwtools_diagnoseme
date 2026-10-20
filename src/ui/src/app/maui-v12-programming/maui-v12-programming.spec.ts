@@ -20,7 +20,16 @@ describe('MauiV12ProgrammingComponent', () => {
       'listFirmware',
       'listUartBridges',
       'updateMcuApp',
+      'listH2hFirmware',
     ]);
+    mcuService.listH2hFirmware.and.returnValue(
+      of({
+        directory: '/home/diagnoseme/diagnoseme_h2h_firmware',
+        directoryExists: true,
+        files: [],
+        message: 'No H2H image (*.bin)',
+      }) as never,
+    );
     mcuService.listUartBridges.and.returnValue(
       of({bridges: [], defaultPort: '', message: 'none'}) as never,
     );
@@ -124,6 +133,24 @@ describe('MauiV12ProgrammingComponent', () => {
     expect(fixture.nativeElement.textContent).toContain(
       'A full image flash is running.',
     );
+  });
+
+  it('hosts the H2H panel and locks the other steps while it flashes', () => {
+    const page: HTMLElement = fixture.nativeElement;
+    expect(page.querySelector('app-maui-v12-h2h-flash-panel')).toBeTruthy();
+    expect(mcuService.listH2hFirmware).toHaveBeenCalled();
+    expect(page.textContent).toContain(
+      '/home/diagnoseme/diagnoseme_h2h_firmware',
+    );
+    mcuService.getUnitStatus.calls.reset();
+    component.onH2hBusy(true);
+    component.updateMcuApp();
+    expect(mcuService.updateMcuApp).not.toHaveBeenCalled();
+    expect(page.textContent).toContain('An H2H firmware flash is running.');
+    component.onH2hBusy(false);
+    // The serial numbers may have changed: the unit status is read again.
+    expect(mcuService.getUnitStatus).toHaveBeenCalled();
+    expect(page.textContent).not.toContain('An H2H firmware flash is running.');
   });
 
   it('streams the MCU App update', () => {

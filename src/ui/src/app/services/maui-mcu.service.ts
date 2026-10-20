@@ -7,6 +7,10 @@ import {Empty} from '@ngx-grpc/well-known-types';
 import {Observable} from 'rxjs';
 import {MauiMcuServiceClient} from '../../proto/maui-manufacturing.pbsc';
 import {
+  MauiH2hFirmwareListRequest,
+  MauiH2hFirmwareListResponse,
+  MauiH2hFlashProgress,
+  MauiH2hFlashRequest,
   MauiH2hSpiCheckRequest,
   MauiH2hSpiCheckResponse,
   MauiListFirmwareRequest,
@@ -87,5 +91,35 @@ export class MauiMcuService {
     request.verify = verify;
     request.baud = baud;
     return this.client.updateMcuFullImage(request);
+  }
+
+  /**
+   * H2H (PL27A1) images in the H2H firmware directory of the station, and
+   * the MCU App build of the console compared with the stable one.
+   */
+  listH2hFirmware(devicePort = ''): Observable<MauiH2hFirmwareListResponse> {
+    const request = new MauiH2hFirmwareListRequest();
+    request.devicePort = devicePort;
+    return this.client.listH2hFirmware(request);
+  }
+
+  /**
+   * Flashes the H2H bridge with maui-flash h2h; a non-empty newSerial is
+   * patched into a copy of the image first.
+   */
+  flashH2hFirmware(
+    devicePort: string,
+    fileName: string,
+    expectedSha256: string,
+    newSerial: string,
+    readBack: boolean,
+  ): Observable<MauiH2hFlashProgress> {
+    const request = new MauiH2hFlashRequest();
+    request.devicePort = devicePort;
+    request.fileName = fileName;
+    request.expectedSha256 = expectedSha256;
+    request.newSerial = newSerial;
+    request.readBack = readBack;
+    return this.client.flashH2hFirmware(request);
   }
 }

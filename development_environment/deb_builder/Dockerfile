@@ -175,6 +175,8 @@ if [ -d /home/diagnoseme ]; then\n\
     mkdir -p /home/diagnoseme/diagnoseme_results/highlevel /home/diagnoseme/diagnoseme_results/detailed\n\
     chmod -R 777 /home/diagnoseme/diagnoseme_results 2>/dev/null || true\n\
     chown -R diagnoseme:diagnoseme /home/diagnoseme/diagnoseme_results 2>/dev/null || true\n\
+    mkdir -p /home/diagnoseme/diagnoseme_h2h_firmware\n\
+    chown diagnoseme:diagnoseme /home/diagnoseme/diagnoseme_h2h_firmware 2>/dev/null || true\n\
 fi\n\
 " > DEBIAN/postinst
 RUN chmod 755 DEBIAN/postinst

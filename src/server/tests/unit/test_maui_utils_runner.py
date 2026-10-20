@@ -106,6 +106,21 @@ class TestMauiUtilsRunner(unittest.TestCase):
             with self.assertRaises(maui_utils_runner.MauiUtilsError):
                 session.stage(os.path.join(self.tmp.name, "missing.bin"))
 
+    def test_stage_data_and_local_path(self):
+        """Generated files are staged by name; tool outputs are found there."""
+        with self.runner.session() as session:
+            path = session.stage_data("h2h_patched.bin", b"\x7b\x06")
+            self.assertEqual(path, "/mnt/firmware_dir/h2h_patched.bin")
+            local = session.local_path("h2h_patched.bin")
+            self.assertEqual(os.path.dirname(local), session.staging_dir)
+            with open(local, "rb") as f:
+                self.assertEqual(f.read(), b"\x7b\x06")
+            for name in ("", "..", "../x.bin", "a/b.bin"):
+                with self.assertRaises(maui_utils_runner.MauiUtilsError):
+                    session.stage_data(name, b"")
+                with self.assertRaises(maui_utils_runner.MauiUtilsError):
+                    session.local_path(name)
+
     def test_every_command_gets_a_fresh_container_name(self):
         with self.runner.session() as session:
             first = session.command(maui_utils_runner.TOOL_MAUI_FLASH, ["--help"])

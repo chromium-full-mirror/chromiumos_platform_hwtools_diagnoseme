@@ -122,7 +122,9 @@
     </span>
   </div>
   @if (locked && !inProgress) {
-    <div class="hint">Wait until the MCU App update has finished.</div>
+    <div class="hint">
+      Wait until the other MCU programming step has finished.
+    </div>
   }
 
   @if (inProgress || result !== 'NONE') {

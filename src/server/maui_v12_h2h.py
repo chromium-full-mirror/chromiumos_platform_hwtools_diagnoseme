@@ -62,13 +62,24 @@ REENUM_POLL_S = 0.1
 # Bus GPIOs while the PL27A1 runs from its flash (logical levels).
 IDLE_BUS_GPIOS = {"h2h_reset_l": 0, "ec_mem_sel": 0, "ec_mem_oe_l": 1}
 
+# Size of a whole PL27A1 SPI image (0x000-0x1FF descriptors and settings,
+# 0x200-0x21FF Prolific firmware); `maui-flash h2h --read` dumps this much.
+IMAGE_SIZE = 8704
+RAW_IMAGE_HINT = (
+    f"expected a raw {IMAGE_SIZE}-byte PL27A1 .bin from prepare_raw_flash.py"
+)
 # PL27A1 image layout (header, then packed USB string descriptors from 0x10:
 # LANGID, manufacturer, product, serial).
 IMAGE_SIGNATURE = b"\x7b\x06"
+# USB ID of the bridge in a raw image (prepare_raw_flash.py).
+IMAGE_PID = 0x506D
 IMAGE_BCD_DEVICE = 0x0200
 STRING_TABLE_OFFSET = 0x10
 SERIAL_DESCRIPTOR_OFFSET = 0x38
 SERIAL_DESCRIPTOR_HEADER = b"\x22\x03"
+# The string region (zero-filled after the strings) ends here; the hardware
+# config registers follow up to 0x1FF and must never change.
+STRING_REGION_END = 0xF9
 USB_DT_STRING = 0x03
 LANGID_EN_US = 0x0409
 EXPECTED_MANUFACTURER = "Google LLC"
@@ -237,6 +248,97 @@ def decode_image(data: bytes) -> H2hImage:
         if value and value != expected:
             image.warnings.append(f"{name} '{value}' (expected '{expected}')")
     return image
+
+
+def check_image(data: bytes) -> Tuple[Optional[H2hImage], str]:
+    """Checks that |data| is a raw PL27A1 image that can be flashed.
+
+    That is the 8704-byte .bin of prepare_raw_flash.py ("[Huaqin] PL27A1
+    pre-programming", b/563317155): Prolific signature, 18d1:506d and
+    decodable USB string descriptors. Returns the decoded image (None if it
+    cannot be decoded) and '' if the image is fine, else why not. Other
+    image warnings (see decode_image) are no errors.
+    """
+    if len(data) != IMAGE_SIZE:
+        return None, f"{len(data)} bytes; {RAW_IMAGE_HINT}"
+    try:
+        image = decode_image(data)
+    except ValueError as e:
+        return None, f"not a PL27A1 H2H image ({e}); {RAW_IMAGE_HINT}"
+    if data[: len(IMAGE_SIGNATURE)] != IMAGE_SIGNATURE:
+        return image, (
+            f"not a PL27A1 H2H image (signature {data[:2].hex()}, expected "
+            f"{IMAGE_SIGNATURE.hex()}); {RAW_IMAGE_HINT}"
+        )
+    if image.pid != IMAGE_PID:
+        return image, (
+            f"USB ID {image.vid:04x}:{image.pid:04x} in the image (expected "
+            f"{profile.GOOGLE_VID:04x}:{IMAGE_PID:04x}); {RAW_IMAGE_HINT}"
+        )
+    return image, ""
+
+
+def _serial_descriptor_end(data: bytes) -> Tuple[int, str]:
+    """Returns (end offset of the serial descriptor, '') or (0, why not).
+
+    The strict table walk (LANGID, manufacturer, product, serial) has to put
+    the serial descriptor at SERIAL_DESCRIPTOR_OFFSET and end it inside the
+    string region.
+    """
+    try:
+        bodies = _string_descriptors(data)
+    except ValueError as e:
+        return 0, f"the USB string descriptors do not decode ({e})"
+    serial_offset = STRING_TABLE_OFFSET + sum(len(b) + 2 for b in bodies[:3])
+    if serial_offset != SERIAL_DESCRIPTOR_OFFSET:
+        return 0, (
+            f"the serial descriptor is at 0x{serial_offset:02x} (expected "
+            f"0x{SERIAL_DESCRIPTOR_OFFSET:02x})"
+        )
+    end = serial_offset + 2 + len(bodies[3])
+    if end > STRING_REGION_END:
+        return 0, f"the serial descriptor ends at 0x{end:02x}, in the config block"
+    return end, ""
+
+
+def serial_patch_error(data: bytes) -> str:
+    """Returns '' if the serial of image |data| can be replaced, else why not.
+
+    The serial is the last string descriptor, at the fixed offset
+    SERIAL_DESCRIPTOR_OFFSET; the string region is zero-filled up to
+    STRING_REGION_END, where the hardware config registers start. The image
+    has no checksum (b/563317155; the patched image of b/567837469 booted
+    with the new serial), so only the serial descriptor changes.
+    """
+    return _serial_descriptor_end(data)[1]
+
+
+def patch_serial(data: bytes, serial: str) -> bytes:
+    """Returns a copy of image |data| with the serial number |serial|.
+
+    Clears the old serial descriptor and writes the new one at
+    SERIAL_DESCRIPTOR_OFFSET (bLength, USB_DT_STRING, UTF-16LE); every byte
+    outside the old and the new descriptor stays as it is. Raises ValueError
+    if |serial| is not a v1.2 serial or the image cannot be patched (see
+    check_image and serial_patch_error).
+    """
+    if not profile.is_valid_serial(serial):
+        raise ValueError(f"'{serial}' is not a valid Maui v1.2 serial number")
+    error = check_image(data)[1]
+    old_end, patch_error = _serial_descriptor_end(data)
+    if error or patch_error:
+        raise ValueError(f"cannot change the serial number: {error or patch_error}")
+    encoded = serial.encode("utf-16-le")
+    descriptor = bytes([2 + len(encoded), USB_DT_STRING]) + encoded
+    new_end = SERIAL_DESCRIPTOR_OFFSET + len(descriptor)
+    out = bytearray(data)
+    out[SERIAL_DESCRIPTOR_OFFSET:old_end] = bytes(old_end - SERIAL_DESCRIPTOR_OFFSET)
+    out[SERIAL_DESCRIPTOR_OFFSET:new_end] = descriptor
+    patched = bytes(out)
+    # Never flash anything but the intended change.
+    if len(patched) != len(data) or decode_image(patched).serial != serial:
+        raise ValueError("the patched image does not decode to the new serial")
+    return patched
 
 
 def parse_jedec_id(output: str) -> Optional[Tuple[int, int, int]]:
@@ -594,31 +696,9 @@ class H2hSpiCheck:  # pylint: disable=too-many-instance-attributes,too-few-publi
             self._fail(f"Could not release the H2H SPI bus: {e}")
 
     def _reset_bridge(self) -> None:
-        """Pulses the PL27A1 reset so that it boots from its flash again.
-
-        h2h_reset_l is active low and `gpio set` takes logical levels: 1 holds
-        the bridge in reset, 0 lets it run. `gpio set` prints the new level
-        ("[h2h_reset_l] O = 0"). The reset is always released.
-        """
+        """Pulses the PL27A1 reset so that it boots from its flash again."""
         self._reset_sent = True
-        try:
-            out = self._cmd("gpio set h2h_reset_l 1")
-            if parse_gpios(out).get("h2h_reset_l") != 1:
-                self._log(
-                    "WARNING: 'gpio set h2h_reset_l 1' was not confirmed: the bridge "
-                    "may not have been reset."
-                )
-            self._sleep(RESET_PULSE_S)
-        finally:
-            out = self._cmd("gpio set h2h_reset_l 0")
-        if parse_gpios(out).get("h2h_reset_l") == 0:
-            return
-        level = parse_gpios(self._cmd("gpio get")).get("h2h_reset_l", "nothing")
-        if level != 0:
-            raise CheckError(
-                "Could not take the H2H bridge out of reset (h2h_reset_l: expected "
-                f"0, got {level}) - power-cycle the board."
-            )
+        reset_bridge(self._cmd, self._sleep, self._log)
 
     def _wait_for_h2h(self) -> Optional[device.H2hDevice]:
         """Returns the bridge as the host sees it, None if it does not show up.
@@ -627,14 +707,72 @@ class H2hSpiCheck:  # pylint: disable=too-many-instance-attributes,too-few-publi
         that the enumeration from before the reset is gone, until
         REENUM_TIMEOUT_S. Without a bus access the current enumeration counts.
         """
-        deadline = self._clock() + REENUM_TIMEOUT_S
-        if self._acquired:
-            self._sleep(REENUM_SETTLE_S)
-        while True:
-            h2h = device.pair_h2h(self._unit.mcu, self._scan_h2h(), self._unit.consoles)
-            if h2h is not None or self._clock() >= deadline:
-                return h2h
-            self._sleep(REENUM_POLL_S)
+        return wait_for_h2h(
+            self._unit.mcu,
+            self._unit.consoles,
+            settle=self._acquired,
+            scan_h2h=self._scan_h2h,
+            sleep=self._sleep,
+            clock=self._clock,
+        )
+
+
+def reset_bridge(
+    cmd: ConsoleFn,
+    sleep: Callable[[float], None] = time.sleep,
+    log: Callable[[str], None] = lambda text: None,
+) -> None:
+    """Pulses the PL27A1 reset so that it boots from its flash again.
+
+    |cmd| runs one MCU console command. h2h_reset_l is active low and
+    `gpio set` takes logical levels: 1 holds the bridge in reset, 0 lets it
+    run. `gpio set` prints the new level ("[h2h_reset_l] O = 0"). The reset
+    is always released; raises CheckError if the bridge stays in reset.
+    """
+    try:
+        out = cmd("gpio set h2h_reset_l 1")
+        if parse_gpios(out).get("h2h_reset_l") != 1:
+            log(
+                "WARNING: 'gpio set h2h_reset_l 1' was not confirmed: the bridge "
+                "may not have been reset."
+            )
+        sleep(RESET_PULSE_S)
+    finally:
+        out = cmd("gpio set h2h_reset_l 0")
+    if parse_gpios(out).get("h2h_reset_l") == 0:
+        return
+    level = parse_gpios(cmd("gpio get")).get("h2h_reset_l", "nothing")
+    if level != 0:
+        raise CheckError(
+            "Could not take the H2H bridge out of reset (h2h_reset_l: expected "
+            f"0, got {level}) - power-cycle the board."
+        )
+
+
+def wait_for_h2h(  # pylint: disable=too-many-arguments
+    mcu: Optional[device.McuConsole],
+    consoles: Sequence[device.McuConsole],
+    *,
+    settle: bool = True,
+    timeout_s: float = REENUM_TIMEOUT_S,
+    scan_h2h: Callable[[], List[device.H2hDevice]] = device.scan_h2h_devices,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> Optional[device.H2hDevice]:
+    """Returns the H2H bridge of the board of |mcu|, None if it does not show up.
+
+    With |settle| (after a reset of the bridge) the host is only polled after
+    REENUM_SETTLE_S, so that the enumeration from before the reset is gone;
+    the bridge has |timeout_s| from the call to show up.
+    """
+    deadline = clock() + timeout_s
+    if settle:
+        sleep(REENUM_SETTLE_S)
+    while True:
+        h2h = device.pair_h2h(mcu, scan_h2h(), list(consoles)) if mcu else None
+        if h2h is not None or clock() >= deadline:
+            return h2h
+        sleep(REENUM_POLL_S)
 
 
 def run_check(

@@ -21,6 +21,10 @@
         to be provisioned again.
       </li>
     </ul>
+    <p class="subtitle">
+      The <strong>H2H bridge firmware</strong> (PL27A1 SPI flash, holds the unit
+      serial number) can be flashed too, optionally with a new serial number.
+    </p>
   </div>
 
   <mat-accordion multi="true" class="programming-panels">
@@ -85,11 +89,18 @@
         @if (fullImageBusy) {
           <div class="hint">A full image flash is running.</div>
         }
+        @if (h2hBusy) {
+          <div class="hint">An H2H firmware flash is running.</div>
+        }
         <button
           mat-raised-button
           color="primary"
           [disabled]="
-            appUpdateInProgress || fullImageBusy || !selectedPort || !selectedFile
+            appUpdateInProgress ||
+            fullImageBusy ||
+            h2hBusy ||
+            !selectedPort ||
+            !selectedFile
           "
           (click)="updateMcuApp()">
           <mat-icon>bolt</mat-icon>
@@ -125,8 +136,26 @@
       </mat-expansion-panel-header>
       <div class="panel-body">
         <app-maui-v12-full-image-panel
-          [locked]="appUpdateInProgress"
+          [locked]="appUpdateInProgress || h2hBusy"
           (busyChange)="fullImageBusy = $event"></app-maui-v12-full-image-panel>
+      </div>
+    </mat-expansion-panel>
+
+    <!-- H2H bridge firmware (maui-flash h2h) -->
+    <mat-expansion-panel>
+      <mat-expansion-panel-header>
+        <mat-panel-title>
+          <mat-icon>usb</mat-icon>&nbsp;H2H bridge firmware (PL27A1 SPI flash)
+        </mat-panel-title>
+        <mat-panel-description>
+          maui-flash h2h, optionally with a new serial number
+        </mat-panel-description>
+      </mat-expansion-panel-header>
+      <div class="panel-body">
+        <app-maui-v12-h2h-flash-panel
+          [consoles]="consoles"
+          [locked]="appUpdateInProgress || fullImageBusy"
+          (busyChange)="onH2hBusy($event)"></app-maui-v12-h2h-flash-panel>
       </div>
     </mat-expansion-panel>
 

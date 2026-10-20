@@ -128,6 +128,18 @@ service MauiMcuService {
 
   // USB-UART bridges that update_mcu_full_image can use (sysfs scan).
   rpc list_uart_bridges(google.protobuf.Empty) returns (MauiUartBridgesResponse) {}
+
+  // H2H (PL27A1) firmware images in the H2H firmware directory of the
+  // station (MAUI_H2H_FW_DIR, default ~/diagnoseme_h2h_firmware), plus the
+  // MCU App build compared with the stable one. The images are never
+  // bundled with DiagnoseMe: the operator copies them there.
+  rpc list_h2h_firmware(MauiH2hFirmwareListRequest) returns (MauiH2hFirmwareListResponse) {}
+
+  // Programs the H2H bridge SPI flash with `maui-flash h2h` (maui-utils),
+  // optionally with another serial number patched into a copy of the image,
+  // then resets the bridge and checks its USB iSerial. Any MCU App build;
+  // older or unknown builds get a warning.
+  rpc flash_h2h_firmware(MauiH2hFlashRequest) returns (stream MauiH2hFlashProgress) {}
 }
 
 message MauiMcuConsoleInfo {
@@ -270,6 +282,68 @@ message MauiUartBridgesResponse {
   repeated MauiUartBridge bridges = 1; // Preferred order, default first.
   string default_port = 2;
   string message = 3;
+}
+
+message MauiH2hFirmwareFile {
+  string file_name = 1;
+  int64 size_bytes = 2;
+  string sha256 = 3;           // Hex digest of the file.
+  bool valid = 4;              // A whole PL27A1 image that can be flashed.
+  string error = 5;            // Why the file cannot be flashed, if !valid.
+  repeated string warnings = 6;
+  string serial_number = 7;    // Serial string descriptor of the image.
+  bool serial_valid = 8;       // serial_number is a Maui v1.2 serial.
+  bool serial_patchable = 9;   // The serial number can be changed safely.
+  string serial_patch_error = 10; // Why not, if !serial_patchable.
+  uint32 vid = 11;             // USB VID:PID in the image header.
+  uint32 pid = 12;
+}
+
+message MauiH2hFirmwareListRequest {
+  string device_port = 1;      // MCU console; empty: first MCU App console.
+}
+
+message MauiH2hFirmwareListResponse {
+  string directory = 1;        // Station (host) directory of the images.
+  bool directory_exists = 2;
+  repeated MauiH2hFirmwareFile files = 3; // Newest first.
+  string message = 4;
+  int64 expected_size_bytes = 5; // Size of a PL27A1 image (8704).
+  string mcu_port = 6;         // MCU console whose App was checked.
+  string mcu_version = 7;      // Its build id, e.g. "0.69-5324f43".
+  string stable_version = 8;   // Stable / approved build compared with.
+  // approved | newer | older | unknown | busy; empty: no MCU App console.
+  string firmware_verdict = 9;
+  string firmware_message = 10;
+  // Older or unknown MCU App: H2H flashing may fail, update it first.
+  bool firmware_warning = 11;
+}
+
+message MauiH2hFlashRequest {
+  string device_port = 1;      // MCU console; empty: first MCU App console.
+  string file_name = 2;        // From list_h2h_firmware.
+  string expected_sha256 = 3;  // From list_h2h_firmware; empty: not checked.
+  string new_serial = 4;       // Empty: keep the serial number of the image.
+  bool read_back = 5;          // Read the flash back and compare it.
+}
+
+message MauiH2hFlashProgress {
+  bool is_complete = 1;
+  bool success = 2;
+  int32 progress_percent = 3;  // Overall; 100 only after the iSerial check.
+  // checking | erasing | programming | verifying | reading | rebooting |
+  // done | failed
+  string phase = 4;
+  int32 phase_percent = 5;     // maui-flash progress of the current phase.
+  string status_message = 6;
+  string error_message = 7;
+  string log_line = 8;
+  string image_serial = 9;     // Serial number in the flashed image.
+  bool serial_changed = 10;    // The image was patched with new_serial.
+  string host_serial = 11;     // H2H iSerial after the reset of the bridge.
+  // The MCU serial number (NVS) differs from the new H2H serial: provision it.
+  bool mcu_serial_mismatch = 12;
+  double elapsed_s = 13;
 }
 
 // Data Messages

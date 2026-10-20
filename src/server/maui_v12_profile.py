@@ -417,6 +417,107 @@ def check_mcu_version(  # pylint: disable=too-many-return-statements
     )
 
 
+# compare_mcu_version() verdicts.
+VERDICT_APPROVED = "approved"
+VERDICT_NEWER = "newer"
+VERDICT_OLDER = "older"
+VERDICT_UNKNOWN = "unknown"
+VERDICT_BUSY = "busy"  # Not read: the console was in use.
+UPDATE_FIRST_HINT = "if flashing fails, update the MCU App first."
+
+
+@dataclasses.dataclass(frozen=True)
+class McuVersionVerdict:
+    """The running MCU App compared with the stable / approved builds."""
+
+    status: str = ""  # VERDICT_*; '' without an MCU App console.
+    version: str = ""  # Build id (or the unparsed `version` line).
+    stable: str = ""  # The newest stable / approved build compared with.
+    message: str = ""
+
+    @property
+    def warning(self) -> bool:
+        """True if the MCU App may be too old for H2H flashing."""
+        return self.status in (VERDICT_OLDER, VERDICT_UNKNOWN)
+
+
+def compare_mcu_version(
+    output: str,
+    environ: Optional[Mapping[str, str]] = None,
+    roots: Optional[Sequence[str]] = None,
+) -> McuVersionVerdict:
+    """Compares the `version` |output| with the stable / approved MCU App.
+
+    Any build may flash; an older or unknown one gets a warning. The stable
+    builds are the bundled STABLE.json versions plus MAUI_V12_APPROVED_FW
+    (approved_mcu_versions). The commit count orders the builds; it
+    is only a hint, so equal counts of different builds stay unknown.
+    """
+    version = parse_mcu_version(output)
+    if version is None:
+        line = next(
+            (ln.strip() for ln in (output or "").splitlines() if "Maui version" in ln),
+            "",
+        )
+        return McuVersionVerdict(
+            VERDICT_UNKNOWN,
+            line,
+            "",
+            f"Could not parse the MCU App version ({line or 'no answer'}); "
+            f"{UPDATE_FIRST_HINT}",
+        )
+    build = version.build_id
+    check = check_mcu_version(output, environ, roots, require_approval=True)
+    if check.ok:
+        return McuVersionVerdict(VERDICT_APPROVED, build, build, check.message + ".")
+    approved = [
+        a
+        for a in approved_mcu_versions(environ, roots) or ()
+        if (m := MCU_VERSION_ID_RE.match(a)) and m.group(1) == version.major
+    ]
+    if (
+        version.dirty
+        or version.major != MCU_VERSION_MAJOR
+        or version.mode != MCU_BOOT_MODE
+        or not approved
+    ):
+        reason = (
+            f"MCU App {build} cannot be compared ({NO_STABLE_FIRMWARE})"
+            if not approved and not version.dirty
+            else check.message.rstrip(".")
+        )
+        return McuVersionVerdict(
+            VERDICT_UNKNOWN, build, "", f"{reason}; {UPDATE_FIRST_HINT}"
+        )
+
+    def count(build_id: str) -> int:
+        m = MCU_VERSION_ID_RE.match(build_id)
+        return int(m.group(2)) if m else -1
+
+    stable = max(approved, key=count)
+    if int(version.count) > count(stable):
+        return McuVersionVerdict(
+            VERDICT_NEWER,
+            build,
+            stable,
+            f"MCU App {build} is newer than the stable {stable}.",
+        )
+    if int(version.count) < count(stable):
+        return McuVersionVerdict(
+            VERDICT_OLDER,
+            build,
+            stable,
+            f"MCU App {build} is older than the stable {stable}; {UPDATE_FIRST_HINT}",
+        )
+    return McuVersionVerdict(
+        VERDICT_UNKNOWN,
+        build,
+        stable,
+        f"MCU App {build} is another build than the stable {stable}; "
+        f"{UPDATE_FIRST_HINT}",
+    )
+
+
 def valid_hwrevs(environ: Optional[Mapping[str, str]] = None) -> Tuple[int, ...]:
     """Returns the accepted `hwrev` values (MAUI_V12_HWREVS overrides)."""
     revs = set()

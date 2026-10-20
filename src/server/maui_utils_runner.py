@@ -130,6 +130,27 @@ class MauiUtilsSession:
         shutil.copy2(path, os.path.join(self.staging_dir, name))
         return f"{CONTAINER_FW_DIR}/{name}"
 
+    def stage_data(self, name: str, data: bytes) -> str:
+        """Writes |data| as file |name| into the staging dir.
+
+        Used for generated files, e.g. a patched copy of an image.
+
+        Returns:
+          The path of the file inside the maui-utils container.
+        """
+        with open(self.local_path(name), "wb") as f:
+            f.write(data)
+        return f"{CONTAINER_FW_DIR}/{name}"
+
+    def local_path(self, name: str) -> str:
+        """Returns the local path of file |name| of the staging dir.
+
+        maui-utils writes CONTAINER_FW_DIR/<name> (e.g. a flash dump) there.
+        """
+        if not name or name in (".", "..") or os.path.basename(name) != name:
+            raise MauiUtilsError(f"Invalid staging file name: {name!r}")
+        return os.path.join(self.staging_dir, name)
+
     def command(self, tool: str, args: Sequence[str]) -> List[str]:
         """Returns the docker command line running |tool| with |args|."""
         if tool not in KNOWN_TOOLS:

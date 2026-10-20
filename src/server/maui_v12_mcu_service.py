@@ -33,6 +33,7 @@ from server import maui_common
 from server import maui_utils_runner
 from server import maui_v12_device as device
 from server import maui_v12_h2h as h2h_check
+from server import maui_v12_h2h_flash as h2h_flash
 from server import maui_v12_ite_flash as ite_flash
 from server import maui_v12_profile as profile
 from server import maui_v12_uart as uart
@@ -891,6 +892,57 @@ class MauiMcuServicer(maui_manufacturing_pb2_grpc.MauiMcuServiceServicer):
             # aclosing: a cancelled RPC stops itecomdbgr right away.
             async with contextlib.aclosing(
                 flasher.flash(request, fw_file, is_cancelled=context.done)
+            ) as updates:
+                async for update in updates:
+                    yield update
+        finally:
+            device.release_consoles(keys)
+
+    def list_h2h_firmware(
+        self,
+        request: maui_manufacturing_pb2.MauiH2hFirmwareListRequest,
+        unused_context: grpc.ServicerContext,
+    ) -> maui_manufacturing_pb2.MauiH2hFirmwareListResponse:
+        """Lists the H2H images of the station and checks the MCU App build."""
+        port, verdict = h2h_flash.read_firmware_verdict(
+            request.device_port,
+            lambda port: h2h_check.open_console(self._make_tester(port)),
+        )
+        return h2h_flash.list_response(mcu_port=port, firmware=verdict)
+
+    async def flash_h2h_firmware(
+        self,
+        request: maui_manufacturing_pb2.MauiH2hFlashRequest,
+        context: grpc.ServicerContext,
+    ) -> AsyncGenerator[maui_manufacturing_pb2.MauiH2hFlashProgress, None]:
+        """Programs the H2H bridge SPI flash with maui-flash h2h (maui-utils)."""
+        job, error, log_key = await asyncio.get_running_loop().run_in_executor(
+            None, h2h_flash.prepare_job, request
+        )
+        if job is None:
+            yield h2h_flash.failed_progress(log_key, error)
+            return
+        try:
+            keys = await device.claim_consoles_async(
+                [job.console], "H2H firmware flash"
+            )
+        except device.ConsoleBusyError as e:
+            # Nothing was attempted: keep the board's previous log.
+            yield maui_manufacturing_pb2.MauiH2hFlashProgress(
+                is_complete=True,
+                success=False,
+                phase=h2h_flash.PHASE_FAILED,
+                status_message=str(e),
+                error_message=str(e),
+            )
+            return
+        try:
+            flasher = h2h_flash.H2hFirmwareFlasher(
+                lambda port: h2h_check.open_console(self._make_tester(port))
+            )
+            # aclosing: a cancelled RPC stops maui-flash right away.
+            async with contextlib.aclosing(
+                flasher.flash(job, is_cancelled=context.done)
             ) as updates:
                 async for update in updates:
                     yield update

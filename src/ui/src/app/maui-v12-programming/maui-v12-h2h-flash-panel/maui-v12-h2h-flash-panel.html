@@ -1,0 +1,240 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<div class="h2h-flash-panel">
+  <div class="warning-box">
+    <mat-icon>warning</mat-icon>
+    <div>
+      <strong>Erases the whole H2H bridge SPI flash</strong> (USB descriptors
+      with the unit serial number and the Prolific firmware) and writes the
+      selected image. An interrupted flash leaves the bridge unable to boot
+      until it is flashed again; the MCU stays reachable over USB.
+    </div>
+  </div>
+
+  <div class="steps-box">
+    <div class="steps-title">
+      <mat-icon>list</mat-icon>
+      How to flash the H2H firmware
+    </div>
+    <ol id="h2h-steps">
+      <li>
+        Copy the H2H image (.bin, 8704 bytes) to this folder on the station:
+        <code id="h2h-dir">{{ directory || '…' }}</code>
+        <br />
+        The station creates this folder. Images made by prepare_raw_flash.py
+        are named <code>prolific_raw_&lt;number&gt;_&lt;serial&gt;.bin</code>.
+      </li>
+      <li>Click <strong>Refresh</strong>, then select the file in the list.</li>
+      <li>
+        Optional: check <strong>Change serial number</strong> and type the new
+        serial (MAUIV12H + 8 digits). The file itself is not changed.
+      </li>
+      <li>
+        Click <strong>Flash H2H Firmware</strong> and wait for PASSED. Do not
+        unplug the Maui while it flashes.
+      </li>
+      <li>
+        If the serial number changed: provision the MCU serial number (card
+        below) and run the H2H SPI check again.
+      </li>
+    </ol>
+  </div>
+
+  @if (firmwareMessage) {
+    <div
+      id="h2h-fw-status"
+      [class.fw-warning]="firmwareWarning"
+      [class.fw-info]="!firmwareWarning">
+      <mat-icon>{{ firmwareWarning ? 'warning' : 'info' }}</mat-icon>
+      <span>
+        @if (firmwareWarning) {
+          <strong>WARNING:</strong>
+        }
+        {{ firmwareMessage }}
+        @if (firmwareWarning) {
+          Use "MCU App update over USB (RW bootloader)" on this page.
+        }
+      </span>
+    </div>
+  }
+
+  <div class="form-row">
+    <button
+      mat-stroked-button
+      id="h2h-refresh"
+      [disabled]="inProgress || loading"
+      (click)="refresh()">
+      <mat-icon>refresh</mat-icon>
+      Refresh
+    </button>
+    <span
+      id="h2h-list-message"
+      class="hint"
+      [class.error]="!directoryExists || !validFiles.length">
+      {{ listMessage }}
+    </span>
+  </div>
+
+  @if (files.length) {
+    <mat-radio-group
+      [(ngModel)]="selectedFile"
+      [disabled]="inProgress"
+      aria-label="H2H image">
+      <table id="h2h-files" class="file-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>File</th>
+            <th>Size</th>
+            <th>SHA-256</th>
+            <th>Serial number</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (f of files; track f.fileName) {
+            <tr
+              [class.invalid]="!f.valid"
+              [class.selected]="f.fileName === selectedFile">
+              <td>
+                <mat-radio-button
+                  [value]="f.fileName"
+                  [disabled]="!f.valid"
+                  [attr.aria-label]="f.fileName"></mat-radio-button>
+              </td>
+              <td class="file-name">{{ f.fileName }}</td>
+              <td>{{ f.sizeBytes }} B</td>
+              <td>
+                <code [title]="f.sha256">{{ shortSha(f.sha256) }}</code>
+              </td>
+              <td>
+                {{ f.serialNumber || '—' }}
+                @if (f.serialNumber && !f.serialValid) {
+                  <span class="warn-text">(not a v1.2 serial)</span>
+                }
+              </td>
+              <td>
+                @if (f.valid) {
+                  <span class="ok-text">PL27A1 image</span>
+                  @for (w of f.warnings; track w) {
+                    <div class="warn-text">{{ w }}</div>
+                  }
+                } @else {
+                  <span class="error-text">{{ f.error }}</span>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </mat-radio-group>
+  }
+
+  <div class="form-row">
+    <mat-form-field appearance="outline" class="mcu-field">
+      <mat-label>Maui MCU (App console)</mat-label>
+      <mat-select
+        [(ngModel)]="selectedPort"
+        [disabled]="inProgress || !appConsoles.length"
+        (selectionChange)="refresh()">
+        @for (c of appConsoles; track c.devicePort) {
+          <mat-option [value]="c.devicePort">
+            {{ c.devicePort }} — {{ c.serialNumber || 'no serial' }}
+          </mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-checkbox [(ngModel)]="readBack" [disabled]="inProgress">
+      Read back and compare after flashing
+    </mat-checkbox>
+  </div>
+
+  <div class="form-row">
+    <mat-checkbox
+      id="h2h-change-serial"
+      [(ngModel)]="changeSerial"
+      [disabled]="inProgress">
+      Change serial number
+    </mat-checkbox>
+    @if (changeSerial) {
+      <mat-form-field appearance="outline" class="serial-field">
+        <mat-label>New serial number</mat-label>
+        <input
+          matInput
+          id="h2h-new-serial"
+          [(ngModel)]="newSerial"
+          [disabled]="inProgress"
+          placeholder="MAUIV12H26010001"
+          maxlength="16"
+          autocomplete="off"
+          spellcheck="false" />
+      </mat-form-field>
+    }
+  </div>
+  @if (serialError) {
+    <div id="h2h-serial-error" class="error-text">{{ serialError }}</div>
+  } @else if (changeSerial && selected) {
+    <div class="hint">
+      A copy of {{ selected.fileName }} is flashed with the serial number
+      {{ serialToWrite }} (was {{ selected.serialNumber }}); the file itself
+      is not modified.
+    </div>
+  }
+
+  <div class="form-row">
+    <button
+      mat-raised-button
+      color="warn"
+      id="h2h-start"
+      [disabled]="!canStart"
+      (click)="start()">
+      <mat-icon>bolt</mat-icon>
+      Flash H2H Firmware
+    </button>
+    <span class="hint">
+      Takes a few seconds. Leaving this page cancels the flash.
+    </span>
+  </div>
+  @if (!inProgress && blockReason && !serialError && files.length) {
+    <div id="h2h-block-reason" class="hint">{{ blockReason }}</div>
+  }
+  @if (locked && !inProgress) {
+    <div class="hint">Wait until the other MCU programming step has finished.</div>
+  }
+
+  @if (inProgress || result !== 'NONE') {
+    <div class="progress-row">
+      <span class="phase">{{ phaseLabel }}</span>
+      <span class="elapsed">{{ elapsedText }}</span>
+    </div>
+    <mat-progress-bar mode="determinate" [value]="progress"></mat-progress-bar>
+    <div
+      id="h2h-status"
+      class="result"
+      [class.passed]="result === 'PASSED'"
+      [class.failed]="result === 'FAILED'">
+      {{ status }}
+    </div>
+  }
+  @if (log.length) {
+    <pre class="tool-log">{{ log.join('\n') }}</pre>
+  }
+
+  @if (showSerialCard) {
+    <div class="serial-note">
+      <mat-icon>info</mat-icon>
+      <span>
+        The H2H serial number is now {{ hostSerial }}, the MCU still reports
+        another one. Provision it with the card below: the H2H serial is copied
+        into the MCU.
+      </span>
+    </div>
+    <app-maui-serial-provision-card
+      cardId="h2h-flash-serial-card"
+      cardTitle="Serial Number Provisioning (after the H2H flash)">
+    </app-maui-serial-provision-card>
+  }
+</div>

@@ -25,6 +25,7 @@ import {
   MauiMcuConsoleInfo,
 } from '../../proto/maui-manufacturing.pb';
 import {MauiV12FullImagePanelComponent} from './maui-v12-full-image-panel/maui-v12-full-image-panel';
+import {MauiV12H2hFlashPanelComponent} from './maui-v12-h2h-flash-panel/maui-v12-h2h-flash-panel';
 
 /** Component names of MauiListFirmwareRequest. */
 const FW_COMPONENT_MCU_APP = 'mcu_app';
@@ -45,6 +46,7 @@ export function isAppImage(file: MauiFirmwareFile): boolean {
  * Not a guided test flow: the operator picks what to program.
  *  - MCU App: RW bootloader update (maui-flash mcu --target app).
  *  - MCU full image: whole flash with itecomdbgr over a USB-UART bridge.
+ *  - H2H bridge firmware: PL27A1 SPI flash with maui-flash h2h.
  *  - PDC: TPS66994 firmware over the MCU console (same as v1.1).
  */
 @Component({
@@ -63,6 +65,7 @@ export function isAppImage(file: MauiFirmwareFile): boolean {
     MatSelectModule,
     MauiPdcFlashPanelComponent,
     MauiV12FullImagePanelComponent,
+    MauiV12H2hFlashPanelComponent,
   ],
 })
 export class MauiV12ProgrammingComponent implements OnInit, OnDestroy {
@@ -84,6 +87,8 @@ export class MauiV12ProgrammingComponent implements OnInit, OnDestroy {
   appLog: string[] = [];
   /** A full image flash runs: the MCU is halted, no App update. */
   fullImageBusy = false;
+  /** An H2H firmware flash runs: the MCU console is in use. */
+  h2hBusy = false;
 
   ngOnInit(): void {
     this.refresh();
@@ -136,8 +141,22 @@ export class MauiV12ProgrammingComponent implements OnInit, OnDestroy {
     this.refreshSubs.add(firmwareSub);
   }
 
+  /** Tracks the H2H flash; the serial numbers may change after it. */
+  onH2hBusy(busy: boolean): void {
+    this.h2hBusy = busy;
+    if (!busy) {
+      this.refresh();
+    }
+    this.cdr.detectChanges();
+  }
+
   updateMcuApp(): void {
-    if (!this.selectedPort || !this.selectedFile || this.fullImageBusy) {
+    if (
+      !this.selectedPort ||
+      !this.selectedFile ||
+      this.fullImageBusy ||
+      this.h2hBusy
+    ) {
       return;
     }
     this.appUpdateInProgress = true;

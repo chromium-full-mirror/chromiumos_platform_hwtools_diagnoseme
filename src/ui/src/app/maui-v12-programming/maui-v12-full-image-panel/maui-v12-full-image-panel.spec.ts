@@ -285,7 +285,7 @@ describe('MauiV12FullImagePanelComponent', () => {
     component.start();
     expect(mcuService.updateMcuFullImage).not.toHaveBeenCalled();
     expect(fixture.nativeElement.textContent).toContain(
-      'Wait until the MCU App update has finished.',
+      'Wait until the other MCU programming step has finished.',
     );
   });
 

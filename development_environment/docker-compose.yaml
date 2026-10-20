@@ -37,6 +37,8 @@ services:
       - MAUI_V12_APPROVED_FW
       - MAUI_V12_HWREVS
       - MAUI_ITE_NO_OUTPUT_TIMEOUT_S
+      # Maui v1.2 H2H firmware directory (shown in the UI, mounted below).
+      - MAUI_H2H_FW_DIR=${HOME}/diagnoseme_h2h_firmware
       # Optional ADB transfer test overrides (passed through when set).
       - MAUI_ADB_SIZE_MB
       - MAUI_ADB_DEADLINE_S
@@ -50,6 +52,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /tmp:/tmp
       - ${HOME}/diagnoseme_results:/root/diagnoseme_results
+      # Maui v1.2 H2H firmware images (never bundled: copied there by hand).
+      - ${HOME}/diagnoseme_h2h_firmware:/mnt/h2h_firmware:ro
 
   #############################################################################
   envoy:
