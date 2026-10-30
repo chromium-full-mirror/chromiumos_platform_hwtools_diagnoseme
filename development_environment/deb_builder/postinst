@@ -56,7 +56,8 @@ config_edition() {
 # ($1) that differ from the new config.env ($2) into the station config
 # ($3, config.local.env), which the package never ships or overwrites.
 # Station specific: STATION_ID, RESULTS_SERVER and the MAUI_* overrides
-# (except MAUI_UTILS_IMAGE and MAUI_DEVICE, which belong to the package).
+# (except MAUI_UTILS_IMAGE, MAUI_DEVICE and MAUI_H2H_FIRMWARE, which belong
+# to the package).
 # Only a config.env written before config.local.env existed (it does not
 # mention config.local.env) is migrated: since then config.env holds package
 # defaults only. Nothing is moved when the edition changes, empty values and
@@ -83,7 +84,7 @@ migrate_station_config() {
     keys=$(sed -n 's/^\(STATION_ID\|RESULTS_SERVER\|MAUI_[A-Z0-9_]*\)=.*/\1/p' "$old_config" | sort -u)
     for key in $keys; do
         case "$key" in
-            MAUI_UTILS_IMAGE|MAUI_DEVICE) continue ;;
+            MAUI_UTILS_IMAGE|MAUI_DEVICE|MAUI_H2H_FIRMWARE) continue ;;
         esac
         if [ -f "$local_config" ] && grep -q "^${key}=" "$local_config"; then
             continue

@@ -8,6 +8,8 @@ import {
   DOLOS_ROUTES,
   MAUI_V11_MENU,
   MAUI_V11_ROUTES,
+  MAUI_V12_MENU,
+  MAUI_V12_ROUTES,
   SERVO_MICRO_MENU,
   SERVO_MICRO_ROUTES,
   SERVO_V4P1_MENU,
@@ -29,11 +31,14 @@ export const EDITION: Edition = {
     ...SERVO_MICRO_MENU,
     {divider: true},
     ...MAUI_V11_MENU,
+    {divider: true},
+    ...MAUI_V12_MENU,
   ],
   routes: [
     ...DOLOS_ROUTES,
     ...SERVO_V4P1_ROUTES,
     ...SERVO_MICRO_ROUTES,
     ...MAUI_V11_ROUTES,
+    ...MAUI_V12_ROUTES,
   ],
 };

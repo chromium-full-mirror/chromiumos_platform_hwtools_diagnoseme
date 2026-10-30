@@ -1,0 +1,20 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+#
+# Maui v1.2 override for H2H (PL27A1) firmware flashing, on top of
+# docker-compose-prod.yaml and docker-compose-maui.yaml. Installed as
+# /etc/diagnoseme/docker-compose-maui-h2h.yaml by the Maui edition packages
+# with "h2h_firmware" (editions.json) only, whose config.env selects it in
+# COMPOSE_FILE. start-diagnoseme sets and creates MAUI_H2H_FW_DIR (default:
+# ~/diagnoseme_h2h_firmware of the desktop user); stop-diagnoseme and
+# diagnoseme-logs, which do not set it, fall back to the station user's.
+
+services:
+  server:
+    environment:
+      # Station directory of the H2H images (shown in the UI).
+      - MAUI_H2H_FW_DIR=${MAUI_H2H_FW_DIR:-/home/diagnoseme/diagnoseme_h2h_firmware}
+    volumes:
+      # H2H firmware images (never bundled: the operator copies them there).
+      - ${MAUI_H2H_FW_DIR:-/home/diagnoseme/diagnoseme_h2h_firmware}:/mnt/h2h_firmware:ro

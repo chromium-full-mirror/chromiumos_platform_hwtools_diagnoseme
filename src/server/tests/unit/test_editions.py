@@ -28,12 +28,8 @@ REPO_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
 )
 UI_EDITIONS_DIR = os.path.join(REPO_ROOT, "src", "ui", "src", "app", "editions")
-MAUI_SERVICES = {
-    editions.SERVICE_MAUI_STATION1,
-    editions.SERVICE_MAUI_PDC,
-    editions.SERVICE_MAUI_STATION2,
-    editions.SERVICE_MAUI_DEVICE_MGMT,
-}
+# Every Maui service key (v1.1 and v1.2 implementations).
+MAUI_SERVICES = set(editions.GRPC_SERVICE_OF)
 SERVO_SERVICES = {editions.SERVICE_SERVO_V41, editions.SERVICE_SERVO_MICRO}
 
 
@@ -401,6 +397,50 @@ class TestReleaseArtifacts(unittest.TestCase):
         self.assertIn('"commit": os.environ["COMMIT"]', bundle)
         self.assertIn('"repo_digests"', bundle)
         self.assertIn('"deb_version": os.environ["DEB_VERSION"]', bundle)
+
+
+class TestMauiV12Edition(unittest.TestCase):
+    """The Maui v1.2 edition: package, services, H2H firmware, release firmware."""
+
+    def setUp(self):
+        self.build_registry = _load_jsonc(os.path.join(REPO_ROOT, "editions.json"))[
+            "editions"
+        ]
+
+    def test_maui_v12_edition(self):
+        meta = self.build_registry["maui-v1.2"]
+        self.assertTrue(meta["shipped"])
+        self.assertEqual(meta["deb_package"], "diagnoseme-maui-v1.2")
+        self.assertEqual(meta["maui_device"], "maui_v12")
+        self.assertEqual(meta["maui_hw_rev"], "v1.2")
+        self.assertEqual(meta["results_dir"], "/var/log/diagnoseme/maui_v12_results")
+        self.assertEqual(meta["firmware"], ["mcu_app", "mcu_full", "pdc"])
+        self.assertIn(editions.SERVICE_MAUI_MCU, editions.SERVICES_OF["maui-v1.2"])
+        # One implementation of every shared Maui gRPC service.
+        grpc_services = [
+            editions.GRPC_SERVICE_OF[s]
+            for s in editions.SERVICES_OF["maui-v1.2"]
+            if s in editions.GRPC_SERVICE_OF
+        ]
+        self.assertEqual(len(grpc_services), len(set(grpc_services)))
+
+    def test_stable_firmware_required_for_v12_releases(self):
+        # S4: the Maui v1.2 ISO and bundle need mcu_app / mcu_full with a
+        # valid STABLE.json (the approved MCU App builds come from them).
+        self.assertEqual(
+            self.build_registry["maui-v1.2"]["firmware_stable_required"],
+            ["mcu_app", "mcu_full"],
+        )
+
+    def test_h2h_firmware_only_on_maui_v12(self):
+        # The H2H firmware directory is created and mounted on Maui v1.2
+        # stations only (M8).
+        for edition_id, meta in self.build_registry.items():
+            self.assertEqual(
+                bool(meta.get("h2h_firmware")),
+                meta.get("maui_device") == "maui_v12",
+                edition_id,
+            )
 
 
 class TestUiOfflineFonts(unittest.TestCase):

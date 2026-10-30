@@ -276,6 +276,27 @@ class TestRenderConfig(EditionInfoTestCase):
             ],
         )
 
+    def test_only_h2h_editions_select_the_h2h_override(self):
+        # M8: the repository registry; Maui v1.2 mounts the H2H firmware
+        # directory, Maui v1.1 does not.
+        editions = edition_info.load_editions()
+        v12 = edition_info.station_config(editions, "maui-v1.2")
+        self.assertEqual(
+            v12["COMPOSE_FILE"],
+            edition_info.MAUI_COMPOSE_FILE + ":" + edition_info.MAUI_H2H_COMPOSE_FILE,
+        )
+        self.assertEqual(v12["MAUI_H2H_FIRMWARE"], "true")
+        self.assertEqual(
+            v12["DIAGNOSEME_RESULTS_DIR"], "/var/log/diagnoseme/maui_v12_results"
+        )
+        v11 = edition_info.station_config(editions, "maui-v1.1")
+        self.assertEqual(v11["COMPOSE_FILE"], edition_info.MAUI_COMPOSE_FILE)
+        self.assertEqual(v11["MAUI_H2H_FIRMWARE"], "false")
+        path = os.path.join(self.tmp, "v12.env")
+        shutil.copy(CONFIG_TEMPLATE, path)
+        self.assertEqual(edition_info.main(["render-config", "maui-v1.2", path]), 0)
+        self.assertEqual(_source(path, "MAUI_H2H_FIRMWARE"), ["true"])
+
     def test_maui_template_documents_the_shared_adb_defaults(self):
         # One set of ADB defaults for every Maui edition: 40 s, 5 Gbps.
         with open(CONFIG_TEMPLATE, encoding="utf-8") as f:

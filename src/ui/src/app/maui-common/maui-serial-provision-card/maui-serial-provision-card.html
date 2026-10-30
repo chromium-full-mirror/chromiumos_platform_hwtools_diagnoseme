@@ -1,0 +1,98 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<diagnoseme-rework-card
+  [id]="cardId"
+  [title]="cardTitle"
+  [progress]="inProgress"
+  [disabled]="locked">
+  <diagnoseme-rework-card-column column="1">
+    <div class="steps-vertical-container">
+      <div class="instructions-box">
+        <span class="step-num">Step 1</span>
+        <span class="step-text"
+          >Connect the Maui board <strong>Host USB-C port</strong> to the test
+          station.</span
+        >
+      </div>
+      <div class="instructions-box">
+        <span class="step-num">Step 2</span>
+        <span class="step-text"
+          >Click <strong>Provision Serial Number</strong>. The H2H serial is
+          written to the MCU, the MCU reboots and must re-enumerate with the
+          same serial (about 2-7 s).</span
+        >
+      </div>
+    </div>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="2">
+    <div class="status-panel">
+      @if (h2hSerial) {
+        <div class="info-row">
+          <span class="label">H2H Serial:</span>
+          <span class="value code">{{ h2hSerial }}</span>
+        </div>
+      }
+      @if (previousMcuSerial && !alreadyProvisioned) {
+        <div class="info-row">
+          <span class="label">Previous MCU Serial:</span>
+          <span class="value code">{{ previousMcuSerial }}</span>
+        </div>
+      }
+      @if (mcuSerial) {
+        <div class="info-row">
+          <span class="label">MCU Serial:</span>
+          <span class="value code"
+            >{{ mcuSerial }}
+            @if (devicePort) {
+              ({{ devicePort }})
+            }</span
+          >
+        </div>
+      }
+      @if (reenumerationS > 0) {
+        <div class="info-row">
+          <span class="label">Re-enumeration:</span>
+          <span class="value code">{{ reenumerationS | number: '1.1-1' }} s</span>
+        </div>
+      }
+      @if (message) {
+        <div class="info-row">
+          <span class="label">Status:</span>
+          <span
+            class="badge"
+            [class.badge-active]="status === 'PASSED'"
+            [class.badge-fail]="status === 'FAILED'"
+            >{{ message }}</span
+          >
+        </div>
+      }
+      <div class="actions-wrapper serial-actions">
+        <button
+          mat-raised-button
+          color="primary"
+          class="action-btn-wide"
+          [disabled]="inProgress || locked"
+          (click)="run()">
+          <mat-icon>badge</mat-icon>
+          Provision Serial Number
+        </button>
+        <button
+          mat-stroked-button
+          color="warn"
+          [disabled]="inProgress || locked"
+          (click)="bypass()">
+          <mat-icon>skip_next</mat-icon>
+          Bypass
+        </button>
+      </div>
+    </div>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="3">
+    <test-pass-fail-button #serialStatus></test-pass-fail-button>
+  </diagnoseme-rework-card-column>
+</diagnoseme-rework-card>

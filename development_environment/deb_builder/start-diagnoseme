@@ -83,6 +83,36 @@ load_station_config() {
     done
 }
 
+# Prints the home directory of the desktop user, also when this runs as root
+# (e.g. from diagnoseme-offline-update via sudo).
+station_home() {
+    local home="${HOME:-}"
+    if [ "$(id -u)" -eq 0 ]; then
+        if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+            home="$(getent passwd "${SUDO_USER}" | cut -d: -f6)"
+        elif [ -d /home/diagnoseme ]; then
+            home=/home/diagnoseme
+        fi
+    fi
+    echo "${home:-/home/diagnoseme}"
+}
+
+# Creates the Maui v1.2 H2H firmware directory $1 before docker would (as
+# root). The operator copies the H2H images there (the server only reads
+# them), so a new directory belongs to the owner of its parent directory.
+create_h2h_fw_dir() {
+    local dir="$1" owner
+    if [ -d "${dir}" ] || ! mkdir -p "${dir}" 2> /dev/null; then
+        return 0
+    fi
+    if [ "$(id -u)" -eq 0 ]; then
+        owner="$(stat -c %U:%G "$(dirname "${dir}")" 2> /dev/null || true)"
+        if [ -n "${owner}" ]; then
+            chown "${owner}" "${dir}" 2> /dev/null || true
+        fi
+    fi
+}
+
 # Unit tests source this script for its functions only.
 if [ -n "${DIAGNOSEME_LIB_ONLY:-}" ]; then
     # shellcheck disable=SC2317 # exit only when executed, not sourced
@@ -178,11 +208,19 @@ if [ "$MAUI_STATION" = true ]; then
     export DIAGNOSEME_RESULTS_DIR="${DIAGNOSEME_RESULTS_DIR:-}"
     # Optional Maui test overrides (config.local.env; docker compose passes
     # them to the server only when they are exported).
-    for VAR in MAUI_ADB_SIZE_MB MAUI_ADB_DEADLINE_S MAUI_ADB_MIN_RATE_MB_S MAUI_ADB_MIN_LINK_MBPS; do
+    for VAR in MAUI_ADB_SIZE_MB MAUI_ADB_DEADLINE_S MAUI_ADB_MIN_RATE_MB_S MAUI_ADB_MIN_LINK_MBPS \
+               MAUI_V12_APPROVED_FW MAUI_V12_HWREVS MAUI_ITE_NO_OUTPUT_TIMEOUT_S; do
         if [ -n "${!VAR:-}" ]; then
             export "${VAR?}"
         fi
     done
+    if [ "${MAUI_H2H_FIRMWARE:-false}" = true ]; then
+        # Station directory of the Maui v1.2 H2H firmware images (never
+        # bundled: the operator copies them there);
+        # docker-compose-maui-h2h.yaml mounts it read-only.
+        MAUI_H2H_FW_DIR="${MAUI_H2H_FW_DIR:-$(station_home)/diagnoseme_h2h_firmware}"
+        export MAUI_H2H_FW_DIR
+    fi
 
     # The Maui flashing tools run in the maui-utils container. Load the
     # bundled image (md5 checked) if it is not present yet (offline stations).
@@ -235,6 +273,10 @@ if [ "$MAUI_STATION" = true ]; then
     fi
 fi
 mkdir -p "${HOST_DIRS[@]}" 2>/dev/null || true
+if [ "$MAUI_STATION" = true ] && [ "${MAUI_H2H_FIRMWARE:-false}" = true ] && \
+        [ -n "${MAUI_H2H_FW_DIR:-}" ]; then
+    create_h2h_fw_dir "${MAUI_H2H_FW_DIR}"
+fi
 
 # Services started by 'up'. In offline mode watchtower is left out (Maui
 # factory stations must not update themselves; its image is not in the

@@ -15,6 +15,7 @@ import re
 import subprocess
 import time
 from typing import Any
+from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Optional
@@ -325,8 +326,28 @@ class _HostConsoleChecks:  # pylint: disable=too-many-instance-attributes
         )
 
 
-def _run_host_console_checks(
-    tester: MauiConsoleTester, read_charger: bool, checks: _HostConsoleChecks
+# Revision hooks of the GPIO and voltage checks (see MauiStation2Servicer).
+GpioCheck = Callable[
+    [MauiConsoleTester, Any, Dict[str, Any]],
+    Tuple[bool, Dict[str, int], List[str], str],
+]
+VoltageCheck = Callable[[Dict[str, Any]], Tuple[bool, List[str]]]
+
+
+def _verify_v11_gpios(
+    tester: MauiConsoleTester, ser: Any, adc_status: Dict[str, Any]
+) -> Tuple[bool, Dict[str, int], List[str], str]:
+    """Reads `gpio get` in the open session `ser` and checks the v1.1 levels."""
+    del adc_status  # Not needed by Maui v1.1.
+    return tester.read_and_verify_gpios(ser=ser)
+
+
+def _run_host_console_checks(  # pylint: disable=too-many-arguments
+    tester: MauiConsoleTester,
+    read_charger: bool,
+    checks: _HostConsoleChecks,
+    verify_gpios: GpioCheck = _verify_v11_gpios,
+    verify_voltages: VoltageCheck = verify_host_adc_voltages,
 ) -> _HostConsoleChecks:
     """Runs the Host console checks (tests, [charger PDC], ADC, hwrev, temp, GPIOs) in one session."""
     port_node = tester.port_node
@@ -348,10 +369,10 @@ def _run_host_console_checks(
             checks.temp_ok, checks.temp_c, checks.temp_raw = tester.read_temperature(
                 ser=ser
             )
-            checks.gpios_ok, _, checks.gpio_mismatches, checks.gpios_raw = (
-                tester.read_and_verify_gpios(ser=ser)
+            checks.gpios_ok, _, checks.gpio_mismatches, checks.gpios_raw = verify_gpios(
+                tester, ser, checks.adc_status
             )
-            checks.voltages_ok, checks.voltage_mismatches = verify_host_adc_voltages(
+            checks.voltages_ok, checks.voltage_mismatches = verify_voltages(
                 checks.adc_status
             )
     except ConsolePortBusyError as e:
@@ -461,6 +482,23 @@ class MauiStation2Servicer(
         """Returns the GPIO details text of a passing GPIO check."""
         return f"All {len(EXPECTED_HOST_GPIOS)} GPIOs verified"
 
+    def _expected_hwrev_text(self) -> str:
+        """Returns the expected `hwrev` shown in the logs and the UI."""
+        return self.EXPECTED_HWREV_TEXT
+
+    def _verify_gpios(
+        self, tester: MauiConsoleTester, ser: Any, adc_status: Dict[str, Any]
+    ) -> Tuple[bool, Dict[str, int], List[str], str]:
+        """Reads `gpio get` in the open session `ser` and checks the levels.
+
+        `adc_status` is the `adc status` reading of the same session.
+        """
+        return _verify_v11_gpios(tester, ser, adc_status)
+
+    def _verify_voltages(self, adc_status: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """Checks the `adc status` readings of the host-only cards."""
+        return verify_host_adc_voltages(adc_status)
+
     def _host_console_checks(
         self, port_node: str, read_charger: bool
     ) -> _HostConsoleChecks:
@@ -469,13 +507,14 @@ class MauiStation2Servicer(
             self._make_console_tester(port_node),
             read_charger,
             _HostConsoleChecks(
-                expected_hwrev_text=self.EXPECTED_HWREV_TEXT,
+                expected_hwrev_text=self._expected_hwrev_text(),
                 gpio_ok_text=self._gpio_ok_text(),
             ),
+            verify_gpios=self._verify_gpios,
+            verify_voltages=self._verify_voltages,
         )
 
-    @staticmethod
-    def _check_host_usb_topology() -> Tuple[bool, bool, bool, bool]:
+    def _check_host_usb_topology(self) -> Tuple[bool, bool, bool, bool]:
         """Checks presence of Hub2, Hub3, FTDI (0x6002), and H2H (18d1:506d/5084) using sysfs scanning."""
         hub_usb2_ok = False
         hub_usb3_ok = False
@@ -592,6 +631,7 @@ class MauiStation2Servicer(
             gpios_ok=checks.gpios_ok,
             hwrev_ok=checks.hwrev_ok,
             detected_hwrev=checks.detected_hwrev,
+            expected_hwrev=checks.expected_hwrev_text,
             temp_ok=checks.temp_ok,
             temperature_c=checks.temp_c,
             voltages_ok=checks.voltages_ok,
@@ -946,6 +986,7 @@ class MauiStation2Servicer(
             gpios_ok=checks.gpios_ok,
             hwrev_ok=checks.hwrev_ok,
             detected_hwrev=checks.detected_hwrev,
+            expected_hwrev=checks.expected_hwrev_text,
             temp_ok=checks.temp_ok,
             temperature_c=checks.temp_c,
             voltages_ok=checks.voltages_ok,
@@ -1129,8 +1170,7 @@ class MauiStation2Servicer(
             dut_speed_str = "5000M (SuperSpeed)" if h2h_5gbps else "Unknown"
         return adb_ok, h2h_5gbps, dut_speed_str, "\n".join(logs)
 
-    @staticmethod
-    def _find_h2h_serial() -> str:
+    def _find_h2h_serial(self) -> str:
         """Serial of the first Maui H2H/ADB or FTDI endpoint on the host (never the DUT's CCD)."""
         for dev in maui_common.scan_usb_devices():
             is_maui = (
@@ -1276,6 +1316,8 @@ class MauiStation2Servicer(
             log=log_text,
             transfer_seconds=res.transfer_s,
             deadline_seconds=res.deadline_s,
+            host_link_mbps=res.host_link_mbps,
+            dut_link_mbps=res.dut_link_mbps,
         )
 
     def run_host_dut_tests(  # pylint: disable=too-many-locals

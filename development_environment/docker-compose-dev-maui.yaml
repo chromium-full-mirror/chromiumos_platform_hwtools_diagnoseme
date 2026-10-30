@@ -18,6 +18,12 @@ services:
       # Optional maui-utils image override (default: the server image's
       # MAUI_UTILS_IMAGE, else the newest local maui-utils image).
       - MAUI_UTILS_IMAGE
+      # Optional Maui v1.2 test overrides (passed through when set).
+      - MAUI_V12_APPROVED_FW
+      - MAUI_V12_HWREVS
+      - MAUI_ITE_NO_OUTPUT_TIMEOUT_S
+      # Maui v1.2 H2H firmware directory (shown in the UI, mounted below).
+      - MAUI_H2H_FW_DIR=${HOME}/diagnoseme_h2h_firmware
       # Optional ADB transfer test overrides (passed through when set).
       - MAUI_ADB_SIZE_MB
       - MAUI_ADB_DEADLINE_S
@@ -31,3 +37,5 @@ services:
       - /var/lib/diagnoseme/firmware:/var/lib/diagnoseme/firmware:ro
       # Firmware staged for the maui-utils container (src/server/maui_utils_runner.py).
       - /var/lib/diagnoseme/maui-utils/staging:/var/lib/diagnoseme/maui-utils/staging
+      # Maui v1.2 H2H firmware images (never bundled: copied there by hand).
+      - ${HOME}/diagnoseme_h2h_firmware:/mnt/h2h_firmware:ro

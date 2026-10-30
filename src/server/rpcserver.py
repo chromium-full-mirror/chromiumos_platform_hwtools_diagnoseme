@@ -62,6 +62,16 @@ MAUI_SERVICES: Dict[str, Tuple[str, str]] = {
         "server.maui_station1_service",
         "MauiDeviceManagementServicer",
     ),
+    editions.SERVICE_MAUI_V12_PDC: ("server.maui_v12_services", "MauiV12PdcServicer"),
+    editions.SERVICE_MAUI_V12_STATION2: (
+        "server.maui_v12_services",
+        "MauiV12Station2Servicer",
+    ),
+    editions.SERVICE_MAUI_V12_DEVICE_MGMT: (
+        "server.maui_v12_services",
+        "MauiV12DeviceManagementServicer",
+    ),
+    editions.SERVICE_MAUI_MCU: ("server.maui_v12_mcu_service", "MauiMcuServicer"),
 }
 
 

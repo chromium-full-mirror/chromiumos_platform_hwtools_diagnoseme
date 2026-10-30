@@ -16,6 +16,7 @@ import importlib.util
 import io
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tarfile
@@ -35,9 +36,6 @@ REPO_ROOT = os.path.abspath(
 )
 DEV_ENV = os.path.join(REPO_ROOT, "development_environment")
 DEB_BUILDER = os.path.join(DEV_ENV, "deb_builder")
-MAUI_COMPOSE_FILE = (
-    "/etc/diagnoseme/docker-compose.yaml:/etc/diagnoseme/docker-compose-maui.yaml"
-)
 
 
 _CHECK_DEB_SPEC = importlib.util.spec_from_file_location(
@@ -293,6 +291,38 @@ class TestStartDiagnoseme(ScriptTestCase):
         self.assertNotIn("maui_v11_results", script)
         self.assertIn("MAUI_ADB_MIN_LINK_MBPS", script)
 
+    def test_h2h_firmware_dir_only_with_h2h_firmware(self):
+        # M8: only Maui stations of an edition with H2H firmware flashing
+        # (config.env MAUI_H2H_FIRMWARE=true, Maui v1.2) set, create and
+        # mount the H2H firmware directory.
+        with open(self.SCRIPT, encoding="utf-8") as f:
+            script = f.read()
+        self.assertEqual(script.count("MAUI_H2H_FW_DIR="), 1)
+        main = script.split('if [ -n "${DIAGNOSEME_LIB_ONLY:-}" ]', 1)[1]
+        maui_block = main.split('if [ "$MAUI_STATION" = true ]; then', 1)[1]
+        self.assertIn('if [ "${MAUI_H2H_FIRMWARE:-false}" = true ]; then', maui_block)
+        self.assertNotIn("diagnoseme_h2h_firmware", main.split(maui_block)[0])
+        self.assertIn(
+            'if [ "$MAUI_STATION" = true ] && [ "${MAUI_H2H_FIRMWARE:-false}" = true ]',
+            main,
+        )
+
+    def test_create_h2h_fw_dir(self):
+        home = os.path.join(self.tmp, "home")
+        os.makedirs(home)
+        proc = self.run_lib(
+            "bash",
+            self.SCRIPT,
+            'D="$(station_home)/diagnoseme_h2h_firmware"; create_h2h_fw_dir "$D"; '
+            'create_h2h_fw_dir "$D"; echo "$D"',
+            env={"HOME": home, "SUDO_USER": ""},
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        h2h_dir = proc.stdout.strip()
+        if os.getuid() != 0:
+            self.assertEqual(h2h_dir, os.path.join(home, "diagnoseme_h2h_firmware"))
+        self.assertTrue(os.path.isdir(h2h_dir))
+
 
 class TestAdbSettingsConsistency(unittest.TestCase):
     """One set of ADB transfer defaults, passed through by every station file."""
@@ -375,6 +405,36 @@ class TestComposeFiles(ScriptTestCase):
             "MAUI_ADB_MIN_LINK_MBPS",
         ):
             self.assertIn(mount, override)
+
+    def test_v12_overrides_reach_the_server(self):
+        with open(
+            os.path.join(DEV_ENV, "docker-compose-maui.yaml"), encoding="utf-8"
+        ) as f:
+            compose = f.read()
+        with open(os.path.join(DEB_BUILDER, "start-diagnoseme"), encoding="utf-8") as f:
+            start = f.read()
+        with open(os.path.join(DEB_BUILDER, "config.env"), encoding="utf-8") as f:
+            config = f.read()
+        for env in (
+            "MAUI_V12_APPROVED_FW",
+            "MAUI_V12_HWREVS",
+            "MAUI_ITE_NO_OUTPUT_TIMEOUT_S",
+        ):
+            self.assertIn(f"- {env}\n", compose)
+            self.assertIn(env, start)
+            self.assertIn(f"#{env}=", config)
+
+    def test_h2h_override_mounts_the_h2h_firmware_dir(self):
+        with open(
+            os.path.join(DEV_ENV, "docker-compose-maui-h2h.yaml"), encoding="utf-8"
+        ) as f:
+            text = f.read()
+        self.assertIn("/mnt/h2h_firmware:ro", text)
+        self.assertIn("MAUI_H2H_FW_DIR=${MAUI_H2H_FW_DIR:-", text)
+        # Neither the generic file nor the shared Maui override mount it.
+        for name in ("docker-compose-prod.yaml", "docker-compose-maui.yaml"):
+            with open(os.path.join(DEV_ENV, name), encoding="utf-8") as f:
+                self.assertNotIn("h2h_firmware", f.read(), name)
 
     def test_stop_uses_the_compose_files_of_config_env(self):
         compose = _write(
@@ -464,6 +524,52 @@ class TestDashboard(ScriptTestCase):
                 dashboard.station_results_dir((os.path.join(self.tmp, "none"),)),
                 dashboard.DEFAULT_RESULTS_DIR,
             )
+
+    def test_reads_the_edition_and_the_legacy_results(self):
+        # S5: the edition's results directory (e.g. maui_v12_results) and the
+        # ~/diagnoseme_results of older releases are both read.
+        dashboard = self.load()
+        results = os.path.join(self.tmp, "maui_v12_results")
+        new = _write(os.path.join(results, "highlevel", "SN1_PASS.json"), "{}")
+        home = os.path.join(self.tmp, "home")
+        old = _write(
+            os.path.join(home, "diagnoseme_results", "highlevel", "SN2_PASS.json"),
+            "{}",
+        )
+        with mock.patch.object(dashboard, "RESULTS_DIR", results), mock.patch.dict(
+            os.environ, {"HOME": home}
+        ):
+            files = dashboard.find_result_files()
+        self.assertIn(new, files)
+        self.assertIn(old, files)
+
+
+class TestPreseed(ScriptTestCase):
+    """The ISO preseed creates the results directory of the edition."""
+
+    def test_results_dir_of_the_edition_is_created(self):
+        with open(
+            os.path.join(REPO_ROOT, "test_server", "preseed.cfg"), encoding="utf-8"
+        ) as f:
+            lines = [line for line in f if "DIAGNOSEME_RESULTS_DIR" in line]
+        self.assertEqual(len(lines), 1)
+        command = lines[0].strip().rstrip("\\").strip().replace("/target", self.tmp)
+        _write(
+            os.path.join(self.tmp, "etc", "diagnoseme", "config.env"),
+            "MODE=offline\nDIAGNOSEME_RESULTS_DIR=/var/log/diagnoseme/maui_v12_results\n",
+        )
+        proc = subprocess.run(
+            ["bash", "-c", f"in-target() {{ :; }}; {command}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(
+            os.path.isdir(
+                os.path.join(self.tmp, "var", "log", "diagnoseme", "maui_v12_results")
+            )
+        )
 
 
 class TestOfflineUpdateEditionCheck(ScriptTestCase):
@@ -1023,18 +1129,18 @@ class TestCheckDeb(ScriptTestCase):
         ):
             self.assertIn(expected, text)
 
-    def maui_data(self, tar=b"utils", md5=None):
-        config = (
-            "DIAGNOSEME_EDITION=maui-v1.1\nMODE=offline\nDOCKER_TAG=maui-v1.1\n"
-            f"COMPOSE_FILE={MAUI_COMPOSE_FILE}\nFIRMWARE_COMPONENTS='mcu pdc'\n"
-            "MAUI_DEVICE=maui_v11\nMAUI_UTILS_IMAGE=maui-utils:1.0\n"
-            "DIAGNOSEME_RESULTS_DIR=/var/log/diagnoseme/maui_v11_results\n"
-        )
+    def maui_data(self, tar=b"utils", md5=None, edition="maui-v1.1"):
+        config = check_deb.edition_info.station_config(self.editions, edition, "1.0")
+        config["MODE"] = "offline"
         data = {
-            "etc/diagnoseme/config.env": config.encode(),
+            "etc/diagnoseme/config.env": "".join(
+                f"{k}={shlex.quote(v)}\n" for k, v in config.items()
+            ).encode(),
             "etc/diagnoseme/docker-compose-maui.yaml": b"",
             "usr/share/applications/start-diagnoseme.desktop": b"",
         }
+        if self.editions[edition].get("h2h_firmware"):
+            data["etc/diagnoseme/docker-compose-maui-h2h.yaml"] = b""
         if tar is not None:
             data["var/lib/diagnoseme/maui-utils/maui-utils.tar"] = tar
             data["var/lib/diagnoseme/maui-utils/STABLE.json"] = json.dumps(
@@ -1045,6 +1151,30 @@ class TestCheckDeb(ScriptTestCase):
     def test_valid_maui_deb(self):
         control = self.control("diagnoseme-maui-v1.1", self.others("maui-v1.1"))
         self.assertEqual(self.run_check("maui-v1.1", control, self.maui_data()), [])
+
+    def test_valid_maui_v12_deb_and_the_h2h_override(self):
+        control = self.control("diagnoseme-maui-v1.2", self.others("maui-v1.2"))
+        data = self.maui_data(edition="maui-v1.2")
+        config = data["etc/diagnoseme/config.env"].decode()
+        self.assertIn("MAUI_H2H_FIRMWARE=true", config)
+        self.assertIn("docker-compose-maui-h2h.yaml", config)
+        self.assertEqual(self.run_check("maui-v1.2", control, data), [])
+        del data["etc/diagnoseme/docker-compose-maui-h2h.yaml"]
+        self.assertIn(
+            "docker-compose-maui-h2h.yaml must be shipped",
+            "\n".join(self.run_check("maui-v1.2", control, data)),
+        )
+        # Maui v1.1 has no H2H firmware flashing.
+        control = self.control("diagnoseme-maui-v1.1", self.others("maui-v1.1"))
+        data = self.maui_data()
+        self.assertIn(
+            "MAUI_H2H_FIRMWARE=false", data["etc/diagnoseme/config.env"].decode()
+        )
+        data["etc/diagnoseme/docker-compose-maui-h2h.yaml"] = b""
+        self.assertIn(
+            "docker-compose-maui-h2h.yaml must be shipped",
+            "\n".join(self.run_check("maui-v1.1", control, data)),
+        )
 
     def test_maui_deb_without_maui_utils(self):
         control = self.control("diagnoseme-maui-v1.1", self.others("maui-v1.1"))

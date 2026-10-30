@@ -7,7 +7,7 @@ This project provides a system for generating a custom Debian 13 (Trixie) instal
 1. **Build the ISO:**
    Run the provided build script for one edition (see `editions.json`). It will download the official Debian 13.3.0 netinst ISO, download the latest stable Maui firmware, embed the edition's Docker images and Debian package, and inject the `preseed.cfg`.
    ```bash
-   ./build_iso.sh --edition maui-v1.1             # the release images of this commit (:maui-v1.1-<commit>)
+   ./build_iso.sh --edition maui-v1.2             # the release images of this commit (:maui-v1.2-<commit>)
    ./build_iso.sh --edition maui-v1.1 --build-local  # or build them from this checkout
    ```
    The result is `custom-debian-preseed-<edition>.iso` (`--output` overrides it).
@@ -72,12 +72,14 @@ The machine boots directly into the **XFCE4 Desktop** with user `diagnoseme` log
 * `diagnoseme-dashboard [--watch | --json | --all]`: Computes real-time Maui manufacturing statistics, pass/fail yields, and stage breakdowns.
 * `diagnoseme-logs [service]`: Follows container logs in real time (all containers by default).
 * `diagnoseme-logs --device <SERIAL>`: Lists the result files and device logs of a device (a bare `<SERIAL>` that is not a service name works too).
+* `diagnoseme-logs --collect [SERIAL]`: Collects results, device and server logs, container logs, configuration, firmware versions, `lsusb` and `dmesg` into one `diagnoseme_logs_<station>_<SERIAL|all>_<date>_<time>.zip` in the current directory (send it with bug reports).
 * `sudo diagnoseme-offline-update [bundle_path]`: Updates Docker images, `.deb`, and Maui firmware from a USB stick. `bundle_path` may be the bundle directory or its `.zip`; without it, mounted media and then unmounted drives are searched.
 
 ### Log and Result Locations
 * Device logs: `/var/log/diagnoseme/devices/<SERIAL>/`
-* Final results: the edition's results directory (`DIAGNOSEME_RESULTS_DIR` in `config.env`), `/var/log/diagnoseme/maui_v11_results/` for Maui v1.1
+* Final results: the edition's results directory (`DIAGNOSEME_RESULTS_DIR` in `config.env`), `/var/log/diagnoseme/maui_v11_results/` for Maui v1.1 and `/var/log/diagnoseme/maui_v12_results/` for Maui v1.2
 * Container logs: `/var/log/diagnoseme/{rpcserver,nginx,envoy}/`
+* Maui v1.2 H2H (PL27A1) firmware images: not part of DiagnoseMe; copy the `*.bin` file to `~/diagnoseme_h2h_firmware/` of the desktop user (`MAUI_H2H_FW_DIR` in `config.env`), which the server mounts read-only.
 
 Results in `~/diagnoseme_results/` from older releases are still shown by `diagnoseme-dashboard` and `diagnoseme-logs`.
 
@@ -102,7 +104,7 @@ It moves the edition tag and its `docker_tag_aliases` (servo-dolos: `:servo-dolo
 ### Building an Offline Update Bundle for Factory USBs
 From the repository root on a connected development machine:
 ```bash
-./development_environment/build-offline-bundle.sh --edition maui-v1.1 \
+./development_environment/build-offline-bundle.sh --edition maui-v1.2 \
     [--build-local | --use-local]
 ```
 This exports the edition's Docker images of `--tag` (default `<edition>-<commit>`, the release build of the checked out commit; the server image must be the edition, there is no fallback to `:latest`), tagged with the station tags, e.g. `:maui-v1.1` ( the old `:maui` tag is not saved, the bundle's deb switches the station to `:maui-v1.1`), copies/downloads the edition's firmware components (failing if none could be staged for a component, or if a `firmware_stable_required` component, e.g. `mcu` and `pdc` of maui-v1.1, has no valid `STABLE.json`, unless `--allow-missing-fw` is given), builds the edition's Debian package (Maui editions include the maui-utils image), computes SHA256 checksums, and creates a ready-to-copy update directory and ZIP file in `offline_update_bundle/<edition>/`. On the station, run `sudo ./install-update.sh` from the bundle directory (or `sudo diagnoseme-offline-update`). `MANIFEST.json` names the bundle's edition, package, commit and the image ids and digests; a firmware component with a `STABLE.json` replaces the station's directory. The edition and package are checked: the update refuses a bundle of another edition than the station's (old Maui stations without `DIAGNOSEME_EDITION` count as `maui-v1.1`, the old `diagnoseme` package without `config.env` as `servo-dolos`) unless `--switch-edition` is given (`sudo ./install-update.sh --switch-edition`), and a deb whose `Package` is not the edition's.
@@ -118,7 +120,9 @@ Builds and stations always use the releases marked stable in the public `gs://ma
   |---|---|---|---|
   | `mcu` | `mcu-fw/mspm0/<version>/` | `stable.<device>.mcufw` | the `*.txt` file (`zephyr.txt`) |
   | `pdc` | `pdc-fw/<version>/` | `stable.<device>.pdcfw` | the `*.bin` file (`<version>.bin`) |
+  | `mcu_app` (Maui v1.2) | `mcu-fw/maui_v12/<version>/` | `stable.<device>.mcufw` | `maui_app_signed.bin` |
+  | `mcu_full` (Maui v1.2) | `mcu-fw/maui_v12/<version>/` | `stable.<device>.mcufw` | `maui_full_flash_1mb.bin` (exactly 1,048,576 bytes) |
 
-  A missing marker fails the fetch. If a version directory holds several images, the preferred name (else the alphabetically first) is used with a warning. Downloads are size- and md5-checked. `firmware/<component>/` is replaced as a whole (downloaded next to it, then swapped in, so a failed download keeps the previous firmware) and holds exactly the stable image and `STABLE.json`, which records it as `{"version", "file", "md5", "source"}`. Nothing is downloaded when `STABLE.json` already names the same version and md5 (`--force` downloads anyway); `--dry-run` shows what would be fetched.
+  A missing marker fails the fetch (for the Maui v1.2 components `mcu_app` and `mcu_full` it is only a warning). If a version directory holds several images, the preferred name (else the alphabetically first) is used with a warning. Downloads are size- and md5-checked. `firmware/<component>/` is replaced as a whole (downloaded next to it, then swapped in, so a failed download keeps the previous firmware) and holds exactly the stable image and `STABLE.json`, which records it as `{"version", "file", "md5", "source"}`. Nothing is downloaded when `STABLE.json` already names the same version and md5 (`--force` downloads anyway); `--dry-run` shows what would be fetched.
 * **Flashing:** station 1 flashes the MCU and PDC images named by `STABLE.json` after checking their md5.
 * **maui-utils:** Maui editions always bundle the stable maui-utils release, the `<version>` marked by `docker/<version>/stable.dockertag` in `gs://maui-firmware` (`tools/fetch_maui_utils.sh`, which downloads it with `tools/maui_fw_fetch.py maui-utils`: the same marker resolution with numeric version order, a crc32c check because the bucket has no md5 of this composite object, and a `STABLE.json` with its md5); there is no version option. A Maui deb build fails without it (`ALLOW_NO_MAUI_UTILS=1` for development builds only). `start-diagnoseme` checks the md5 of the bundled tar against its `STABLE.json` before `docker load`. The deb records it in `config.env` as `MAUI_UTILS_IMAGE=maui-utils:<version>`; a server without `MAUI_UTILS_IMAGE` uses the newest local `maui-utils:*` image. Developer-only override: `--maui-utils-tar <file>` (`build_iso.sh`, `build-offline-bundle.sh`, `build-diagnoseme.sh`) bundles a local `docker save` tar of an unreleased build instead.

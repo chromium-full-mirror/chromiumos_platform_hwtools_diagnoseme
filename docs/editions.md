@@ -10,6 +10,7 @@ Angular edition files, `angular.json` and the `Dockerfile.base` targets agree.
 |---------|---------|---------|-------------------|-----|
 | servo-dolos | yes | `diagnoseme` | `:release` | `custom-debian-preseed-latest.iso` |
 | maui-v1.1 | yes | `diagnoseme-maui-v1.1` | `:maui-v1.1` | `custom-debian-preseed-maui-v1.1-latest.iso` |
+| maui-v1.2 | yes | `diagnoseme-maui-v1.2` | `:maui-v1.2` | `custom-debian-preseed-maui-v1.2-latest.iso` |
 | dolos, servo-v4p1, servo-micro | no | | | |
 | all | no (development) | | | |
 
@@ -65,7 +66,8 @@ servo-dolos it also moves `:release`, which the Servo/Dolos stations follow.
   `config.env`. The first upgrade from an older package moves real overrides
   there. It skips edition switches, empty values and old default station IDs.
 * `docker-compose-prod.yaml` holds the generic services. Maui editions add
-  `docker-compose-maui.yaml` through `COMPOSE_FILE` in `config.env`.
+  `docker-compose-maui.yaml`, and Maui v1.2 also adds
+  `docker-compose-maui-h2h.yaml`, through `COMPOSE_FILE` in `config.env`.
   Servo/Dolos stations get no Maui folders or mounts.
 * For development with Maui, add `docker-compose-dev-maui.yaml` to the
   development `docker-compose.yaml`.
@@ -108,6 +110,8 @@ servo-dolos it also moves `:release`, which the Servo/Dolos stations follow.
 
 * Device logs are in `/var/log/diagnoseme/devices/<SERIAL>/`.
 * Results are in the edition's `results_dir`
-  (`/var/log/diagnoseme/maui_v11_results`).
+  (`/var/log/diagnoseme/maui_v11_results` or
+  `/var/log/diagnoseme/maui_v12_results`).
 * `diagnoseme-logs` and `diagnoseme-dashboard` also read the legacy
-  `~/diagnoseme_results`.
+  `~/diagnoseme_results`. `diagnoseme-logs --collect [SERIAL]` writes one zip
+  with everything needed for debugging.

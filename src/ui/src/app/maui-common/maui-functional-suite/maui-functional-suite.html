@@ -22,12 +22,12 @@
       <span class="device-status-text">
         @if (deviceConnected && deviceProgrammed) {
           <strong>Programmed Maui Device:</strong> {{ serialNumber }} (Port:
-          {{ devicePort || '/dev/ttyUSB0' }})
+          {{ devicePort || rev.defaultConsolePort }})
         } @else if (deviceConnected && !deviceProgrammed) {
           <strong>Unprogrammed Device Detected:</strong>
-          {{ serialNumber || 'Unknown' }} (FTDI PID:
-          {{ ftdiPid || '0x6001' }}) —
-          <em>Step 1 provisioning required before functional testing</em>
+          {{ serialNumber || 'Unknown' }} ({{ rev.consoleLabel }} PID:
+          {{ ftdiPid || rev.consolePidText(false) }}) —
+          <em>{{ rev.unprovisionedHint }}</em>
         } @else {
           <strong>No Maui Device Detected:</strong> Please connect Maui Host
           USB-C cable to this test station.
@@ -54,6 +54,30 @@
   </div>
 
   <div class="cards-column">
+    <!-- Serial Number Provisioning (Maui v1.2: H2H serial -> MCU) -->
+    @if (rev.requiresSerialProvisioning) {
+      <app-maui-serial-provision-card
+        cardId="func-card-serial"
+        [cardTitle]="serialCardTitle"
+        [locked]="otherUnitDetected || (anyTestInProgress && !serialProvisionInProgress)"
+        (statusChange)="onSerialProvisionStatus($event)"
+        (runningChange)="serialProvisionInProgress = $event">
+      </app-maui-serial-provision-card>
+    }
+
+    <!-- H2H SPI Flash Access Check (Maui v1.2: serial in the H2H flash) -->
+    @if (rev.requiresH2hSpiCheck) {
+      <app-maui-h2h-spi-check-card
+        cardId="func-card-h2h-spi"
+        [cardTitle]="h2hSpiCardTitle"
+        [locked]="otherUnitDetected || (anyTestInProgress && !h2hSpiInProgress)"
+        [serialNumber]="serialNumber"
+        [devicePort]="devicePort"
+        (statusChange)="onH2hSpiStatus($event)"
+        (runningChange)="h2hSpiInProgress = $event">
+      </app-maui-h2h-spi-check-card>
+    }
+
     <!-- Card 0: Outer Housing Barcode Verification (FATP QT0 Mode only) -->
     @if (isFatpMode) {
       <diagnoseme-rework-card
@@ -74,7 +98,7 @@
               <span class="step-num">Step 2</span>
               <span class="step-text"
                 >Verify that the scanned barcode matches the internal electronic
-                serial number (FTDI / ADB).</span
+                serial number ({{ rev.consoleLabel }} / ADB).</span
               >
             </div>
           </div>
@@ -88,13 +112,13 @@
             </div>
             @if (adbSerial) {
               <div class="info-row">
-                <span class="label">ADB Serial:</span>
+                <span class="label">{{ rev.serialTexts.h2hSerialLabel }}:</span>
                 <span class="value code">{{ adbSerial }}</span>
               </div>
             }
             @if (ftdiSerial) {
               <div class="info-row">
-                <span class="label">FTDI Serial:</span>
+                <span class="label">{{ rev.consoleLabel }} Serial:</span>
                 <span class="value code">{{ ftdiSerial }}</span>
               </div>
             }
@@ -152,9 +176,9 @@
     <!-- Card 1: Host USB & Console Check -->
     <diagnoseme-rework-card
       id="func-card-1"
-      title="1. Host USB & Console Verification"
+      [title]="cardNo(1) + '. Host USB & Console Verification'"
       [progress]="cards.hostUsb.inProgress"
-      [disabled]="isFatpMode && !barcodeMatches">
+      [disabled]="(isFatpMode && !barcodeMatches) || !serialCardsDone">
       <diagnoseme-rework-card-column column="1">
         <div class="steps-vertical-container">
           <div class="instructions-box">
@@ -206,7 +230,12 @@
               mat-raised-button
               color="primary"
               class="action-btn-wide"
-              [disabled]="otherUnitDetected || (isFatpMode && !barcodeMatches) || cards.hostUsb.inProgress"
+              [disabled]="
+                otherUnitDetected ||
+                (isFatpMode && !barcodeMatches) ||
+                !serialCardsDone ||
+                cards.hostUsb.inProgress
+              "
               (click)="runUsbCheck()">
               <mat-icon>play_arrow</mat-icon>
               Run USB & Console Check
@@ -214,7 +243,12 @@
             <button
               mat-stroked-button
               color="warn"
-              [disabled]="otherUnitDetected || (isFatpMode && !barcodeMatches) || cards.hostUsb.inProgress"
+              [disabled]="
+                otherUnitDetected ||
+                (isFatpMode && !barcodeMatches) ||
+                !serialCardsDone ||
+                cards.hostUsb.inProgress
+              "
               (click)="bypassCard('hostUsb')">
               <mat-icon>skip_next</mat-icon>
               Bypass
@@ -231,7 +265,7 @@
     <!-- Card 2: Host Cable 180° Flip Test -->
     <diagnoseme-rework-card
       id="func-card-2"
-      title="2. Host Cable 180° Orientation Flip Test"
+      [title]="cardNo(2) + '. Host Cable 180° Orientation Flip Test'"
       [progress]="cards.hostFlip.inProgress"
       [disabled]="!cards.hostUsb.done">
       <diagnoseme-rework-card-column column="1">
@@ -304,7 +338,7 @@
     <!-- Card 3: RESET Button Test -->
     <diagnoseme-rework-card
       id="func-card-3"
-      title="3. Interactive RESET Button Test"
+      [title]="cardNo(3) + '. Interactive RESET Button Test'"
       [progress]="resetBaselineInProgress || cards.reset.inProgress"
       [disabled]="!cards.hostFlip.done">
       <diagnoseme-rework-card-column column="1">
@@ -383,39 +417,94 @@
       </diagnoseme-rework-card-column>
     </diagnoseme-rework-card>
 
-    <!-- Card 4: BSL Button Test (ADC Status) -->
+    <!-- Card 4: BSL Button Test (v1.1: ADC Status, v1.2: GPIO) -->
     <diagnoseme-rework-card
       id="func-card-4"
-      title="4. Interactive BSL Button Test (ADC Status)"
+      [title]="bslCardTitle"
       [progress]="cards.bsl.inProgress"
       [disabled]="!cards.reset.done">
       <diagnoseme-rework-card-column column="1">
-        <div class="steps-vertical-container">
-          <div class="instructions-box">
-            <span class="step-num">Step 1</span>
-            <span class="step-text"
-              >Press and <strong>HOLD</strong> the physical
-              <strong>BSL</strong> button on the Maui board.</span
-            >
+        @if (rev.bslMethod === 'gpio') {
+          <div class="steps-vertical-container" id="func-bsl-steps">
+            <div
+              class="instructions-box bsl-step"
+              [ngClass]="'bsl-step-' + bslStepState(1)">
+              <span class="step-num">Step 1</span>
+              <span class="step-text"
+                >Click <strong>{{ bslReadLabel }}</strong> and do
+                <strong>NOT</strong> touch the BSL button (about 2 s).</span
+              >
+            </div>
+            <div
+              class="instructions-box bsl-step"
+              [ngClass]="'bsl-step-' + bslStepState(2)">
+              <span class="step-num">Step 2</span>
+              <span class="step-text"
+                >When prompted, press and <strong>HOLD</strong> the physical
+                <strong>BSL</strong> button (within 10 s, hold it until the
+                card asks you to release it).</span
+              >
+            </div>
+            <div
+              class="instructions-box bsl-step"
+              [ngClass]="'bsl-step-' + bslStepState(3)">
+              <span class="step-num">Step 3</span>
+              <span class="step-text"
+                ><strong>Release</strong> the button when prompted and keep it
+                released (about 1 s).</span
+              >
+            </div>
           </div>
-          <div class="instructions-box">
-            <span class="step-num">Step 2</span>
-            <span class="step-text"
-              >While holding, click <strong>Read BSL ADC</strong>.</span
-            >
+        } @else {
+          <div class="steps-vertical-container">
+            <div class="instructions-box">
+              <span class="step-num">Step 1</span>
+              <span class="step-text"
+                >Press and <strong>HOLD</strong> the physical
+                <strong>BSL</strong> button on the Maui board.</span
+              >
+            </div>
+            <div class="instructions-box">
+              <span class="step-num">Step 2</span>
+              <span class="step-text"
+                >While holding, click <strong>{{ bslReadLabel }}</strong>.</span
+              >
+            </div>
+            <div class="instructions-box">
+              <span class="step-num">Step 3</span>
+              <span class="step-text"
+                >Release the BSL button once reading completes.</span
+              >
+            </div>
           </div>
-          <div class="instructions-box">
-            <span class="step-num">Step 3</span>
-            <span class="step-text"
-              >Release the BSL button once reading completes.</span
-            >
-          </div>
-        </div>
+        }
       </diagnoseme-rework-card-column>
 
       <diagnoseme-rework-card-column column="2">
         <div class="status-panel">
-          @if (peakBslMv > 0) {
+          @if (rev.bslMethod === 'gpio') {
+            @if (cards.bsl.inProgress && bslPhase) {
+              <div class="bsl-live-prompt" id="func-bsl-prompt">
+                <span class="bsl-live-step">Step {{ bslPhase }} of 3</span>
+                <span class="bsl-live-text">{{ bslPrompt }}</span>
+                <span class="bsl-live-countdown"
+                  >{{ bslSecondsLeft | number: '1.1-1' }} s</span
+                >
+              </div>
+              <div class="info-row">
+                <span class="label">BSL GPIO:</span>
+                <span class="value code">{{
+                  bslLevel < 0 ? '-' : bslLevel
+                }}</span>
+              </div>
+            }
+            @if (bslFailedPhase && !cards.bsl.inProgress) {
+              <div class="info-row" id="func-bsl-failed-step">
+                <span class="label">Failed Step:</span>
+                <span class="badge badge-fail">Step {{ bslFailedPhase }} of 3</span>
+              </div>
+            }
+          } @else if (peakBslMv > 0) {
             <div class="info-row">
               <span class="label">ADC Voltage:</span>
               <span class="value code">{{ peakBslMv }} mV (Expected &gt; {{ bslThresholdMv }} mV)</span>
@@ -438,7 +527,7 @@
               [disabled]="otherUnitDetected || !cards.reset.done || cards.bsl.inProgress"
               (click)="readBslButton()">
               <mat-icon>touch_app</mat-icon>
-              Read BSL ADC
+              {{ bslReadLabel }}
             </button>
             <button
               mat-stroked-button
@@ -460,7 +549,7 @@
     <!-- Card 5: Visual LED Verification -->
     <diagnoseme-rework-card
       id="func-card-5"
-      title="5. Visual LED Verification"
+      [title]="cardNo(5) + '. Visual LED Verification'"
       [disabled]="!cards.bsl.done">
       <diagnoseme-rework-card-column column="1">
         <div class="steps-vertical-container">
@@ -473,15 +562,15 @@
           <div class="instructions-box">
             <span class="step-num">LED 1</span>
             <span class="step-text"
-              ><strong>Amber LED (PD Contract)</strong> — Must be ON when
-              charger plugged.</span
+              ><strong>{{ rev.leds.amberName }}</strong> —
+              {{ rev.leds.amberInstruction }}</span
             >
           </div>
           <div class="instructions-box">
             <span class="step-num">LED 2</span>
             <span class="step-text"
-              ><strong>Green LED (Host Link)</strong> — Must be BLINKING at
-              1 Hz (500ms ON / 500ms OFF).</span
+              ><strong>{{ rev.leds.greenName }}</strong> —
+              {{ rev.leds.greenInstruction }}</span
             >
           </div>
           <div class="instructions-box">
@@ -498,10 +587,10 @@
         <div class="status-panel">
           <div class="led-checkbox-group">
             <mat-checkbox [(ngModel)]="ledAmberChecked" color="primary">
-              Amber LED (PD Contract) ON
+              {{ rev.leds.amberCheckLabel }}
             </mat-checkbox>
             <mat-checkbox [(ngModel)]="ledGreenChecked" color="primary">
-              Green LED (Host Link) Blinking at 1 Hz
+              {{ rev.leds.greenCheckLabel }}
             </mat-checkbox>
           </div>
           <div class="actions-wrapper" style="display: flex; gap: 8px;">
@@ -535,7 +624,7 @@
     <!-- Card 6: Host + DUT + Charger Verification (PD & Data Path) -->
     <diagnoseme-rework-card
       id="func-card-6"
-      title="6. Host + DUT + Charger Verification (PD & Data Path)"
+      [title]="cardNo(6) + '. Host + DUT + Charger Verification (PD & Data Path)'"
       [progress]="cards.hostDutCharger.inProgress"
       [disabled]="!cards.leds.done">
       <diagnoseme-rework-card-column column="1">
@@ -658,7 +747,7 @@
     <!-- Card 7: 180° DUT Cable Flip Polarity Verification (With Charger) -->
     <diagnoseme-rework-card
       id="func-card-7"
-      title="7. 180° DUT Cable Flip Polarity Verification (With Charger)"
+      [title]="cardNo(7) + '. 180° DUT Cable Flip Polarity Verification (With Charger)'"
       [progress]="cards.dutSbuFlip.inProgress"
       [disabled]="!cards.hostDutCharger.done">
       <diagnoseme-rework-card-column column="1">
@@ -727,19 +816,111 @@
       </diagnoseme-rework-card-column>
     </diagnoseme-rework-card>
 
-    <!-- Card 8: Charger Disconnect Verification (No Charger) -->
+    <!-- Card 8: ADB Data Transfer Reliability (Host + DUT + charger, right after the SBU flip) -->
     <diagnoseme-rework-card
-      id="func-card-8"
-      title="8. Charger Disconnect Verification (No Charger)"
-      [progress]="cards.chargerDisconnect.inProgress"
+      id="func-card-adb"
+      [title]="cardNo(8) + '. ADB Data Transfer Reliability (DUT via H2H)'"
+      [progress]="cards.adbTransfer.inProgress"
       [disabled]="!cards.dutSbuFlip.done">
       <diagnoseme-rework-card-column column="1">
         <div class="steps-vertical-container">
           <div class="instructions-box">
             <span class="step-num">Step 1</span>
             <span class="step-text"
-              >Unplug the external USB-C PD Charger from Maui
-              <strong>Charger Passthrough port</strong>.</span
+              >Keep the cables of the previous card connected (<strong>Host</strong>,
+              <strong>DUT</strong> and <strong>charger</strong>); the DUT stays booted with
+              <strong>ADB</strong> enabled.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text"
+              >Click <strong>Run ADB Transfer Test</strong>. Two ~400 MB random files (slightly different
+              sizes) are pushed to the DUT and pulled back and their checksums are compared; the
+              transfer must finish within the time limit (40 s) on a 5 Gbps link.</span
+            >
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          @if (cards.adbTransfer.inProgress) {
+            <div class="info-row">
+              <span class="label">Status:</span>
+              <span class="value">Transferring data over ADB...</span>
+            </div>
+          }
+          @if (adbTransferResult; as t) {
+            <div class="info-row">
+              <span class="label">ADB Device:</span>
+              <span class="value code">{{ t.adbSerial || '-' }}</span>
+            </div>
+            <div class="info-row" id="func-adb-push">
+              <span class="label">Push:</span>
+              <span class="value">{{ t.pushMbPerS | number: '1.1-1' }} MB/s ({{ t.pushSeconds | number: '1.1-1' }} s)</span>
+            </div>
+            <div class="info-row" id="func-adb-pull">
+              <span class="label">Pull:</span>
+              <span class="value">{{ t.pullMbPerS | number: '1.1-1' }} MB/s ({{ t.pullSeconds | number: '1.1-1' }} s)</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Checksum:</span>
+              <span class="badge" [class.badge-active]="t.success" [class.badge-fail]="!t.success">{{
+                t.success ? 'SHA-1 Match' : 'FAILED'
+              }}</span>
+            </div>
+            <div class="info-row" id="func-adb-summary">
+              <span class="label">Summary:</span>
+              <span class="value code">{{ adbSummary(t) }}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Result:</span>
+              <span class="value">{{ t.message }}</span>
+            </div>
+          }
+          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+            <button
+              #adbTransferBtn
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="otherUnitDetected || !cards.dutSbuFlip.done || cards.adbTransfer.inProgress"
+              (click)="runAdbTransfer()">
+              <mat-icon>swap_vert</mat-icon>
+              Run ADB Transfer Test
+            </button>
+            <button
+              mat-stroked-button
+              color="warn"
+              [disabled]="otherUnitDetected || !cards.dutSbuFlip.done || cards.adbTransfer.inProgress"
+              (click)="bypassCard('adbTransfer')">
+              <mat-icon>skip_next</mat-icon>
+              Bypass
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #adbTransferStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+
+    <!-- Card 9: Charger Disconnect Verification (No Charger, after the ADB transfer) -->
+    <diagnoseme-rework-card
+      id="func-card-charger"
+      [title]="cardNo(9) + '. Charger Disconnect Verification (No Charger)'"
+      [progress]="cards.chargerDisconnect.inProgress"
+      [disabled]="!cards.adbTransfer.done">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text"
+              >Unplug <strong>ALL</strong> cables from Maui, then connect only the
+              <strong>Host</strong> and <strong>DUT</strong> cables again (leave
+              the <strong>charger unplugged</strong>).</span
             >
           </div>
           <div class="instructions-box">
@@ -779,7 +960,7 @@
               mat-raised-button
               color="primary"
               class="action-btn-wide"
-              [disabled]="otherUnitDetected || !cards.dutSbuFlip.done || cards.chargerDisconnect.inProgress"
+              [disabled]="otherUnitDetected || !cards.adbTransfer.done || cards.chargerDisconnect.inProgress"
               (click)="runChargerDisconnect()">
               <mat-icon>power_off</mat-icon>
               Verify Charger Disconnected
@@ -787,7 +968,7 @@
             <button
               mat-stroked-button
               color="warn"
-              [disabled]="otherUnitDetected || !cards.dutSbuFlip.done || cards.chargerDisconnect.inProgress"
+              [disabled]="otherUnitDetected || !cards.adbTransfer.done || cards.chargerDisconnect.inProgress"
               (click)="bypassCard('chargerDisconnect')">
               <mat-icon>skip_next</mat-icon>
               Bypass
@@ -801,97 +982,12 @@
       </diagnoseme-rework-card-column>
     </diagnoseme-rework-card>
 
-    <!-- Card 9: ADB Data Transfer Reliability -->
-    <diagnoseme-rework-card
-      id="func-card-adb"
-      title="9. ADB Data Transfer Reliability (DUT via H2H)"
-      [progress]="cards.adbTransfer.inProgress"
-      [disabled]="!cards.chargerDisconnect.done">
-      <diagnoseme-rework-card-column column="1">
-        <div class="steps-vertical-container">
-          <div class="instructions-box">
-            <span class="step-num">Step 1</span>
-            <span class="step-text"
-              >Keep the DUT connected and booted with <strong>ADB</strong> enabled.</span
-            >
-          </div>
-          <div class="instructions-box">
-            <span class="step-num">Step 2</span>
-            <span class="step-text"
-              >Click <strong>Run ADB Transfer Test</strong>. Two ~400 MB random files (slightly different
-              sizes) are pushed to the DUT and pulled back and their checksums are compared; the
-              transfer must finish within 60 s.</span
-            >
-          </div>
-        </div>
-      </diagnoseme-rework-card-column>
-
-      <diagnoseme-rework-card-column column="2">
-        <div class="status-panel">
-          @if (cards.adbTransfer.inProgress) {
-            <div class="info-row">
-              <span class="label">Status:</span>
-              <span class="value">Transferring data over ADB...</span>
-            </div>
-          }
-          @if (adbTransferResult; as t) {
-            <div class="info-row">
-              <span class="label">ADB Device:</span>
-              <span class="value code">{{ t.adbSerial || '-' }}</span>
-            </div>
-            <div class="info-row" id="func-adb-push">
-              <span class="label">Push:</span>
-              <span class="value">{{ t.pushMbPerS | number: '1.1-1' }} MB/s ({{ t.pushSeconds | number: '1.1-1' }} s)</span>
-            </div>
-            <div class="info-row" id="func-adb-pull">
-              <span class="label">Pull:</span>
-              <span class="value">{{ t.pullMbPerS | number: '1.1-1' }} MB/s ({{ t.pullSeconds | number: '1.1-1' }} s)</span>
-            </div>
-            <div class="info-row">
-              <span class="label">Checksum:</span>
-              <span class="badge" [class.badge-active]="t.success" [class.badge-fail]="!t.success">{{
-                t.success ? 'SHA-1 Match' : 'FAILED'
-              }}</span>
-            </div>
-            <div class="info-row">
-              <span class="label">Result:</span>
-              <span class="value">{{ t.message }}</span>
-            </div>
-          }
-          <div class="actions-wrapper" style="display: flex; gap: 8px;">
-            <button
-              #adbTransferBtn
-              mat-raised-button
-              color="primary"
-              class="action-btn-wide"
-              [disabled]="otherUnitDetected || !cards.chargerDisconnect.done || cards.adbTransfer.inProgress"
-              (click)="runAdbTransfer()">
-              <mat-icon>swap_vert</mat-icon>
-              Run ADB Transfer Test
-            </button>
-            <button
-              mat-stroked-button
-              color="warn"
-              [disabled]="otherUnitDetected || !cards.chargerDisconnect.done || cards.adbTransfer.inProgress"
-              (click)="bypassCard('adbTransfer')">
-              <mat-icon>skip_next</mat-icon>
-              Bypass
-            </button>
-          </div>
-        </div>
-      </diagnoseme-rework-card-column>
-
-      <diagnoseme-rework-card-column column="3">
-        <test-pass-fail-button #adbTransferStatus></test-pass-fail-button>
-      </diagnoseme-rework-card-column>
-    </diagnoseme-rework-card>
-
     <!-- Card 10: Log Compilation & Archival -->
     <diagnoseme-rework-card
-      id="func-card-9"
-      [title]="isFatpMode ? '10. FATP QT0 Summary & Archival' : '10. SMT Log Completion & Archival'"
+      id="func-card-logs"
+      [title]="cardNo(10) + (isFatpMode ? '. FATP QT0 Summary & Archival' : '. SMT Log Completion & Archival')"
       [progress]="savingLogs || inspectingLogs"
-      [disabled]="!cards.adbTransfer.done">
+      [disabled]="!cards.chargerDisconnect.done">
       <diagnoseme-rework-card-column column="1">
         <div class="steps-vertical-container">
           <div class="instructions-box">
@@ -911,24 +1007,36 @@
 
       <diagnoseme-rework-card-column column="2">
         <div class="status-panel">
-          @if (cards.adbTransfer.done && deviceConnected && !logsSaved) {
+          @if (cards.chargerDisconnect.done && deviceConnected && !logsSaved) {
             <div class="operator-warning-banner">
               <mat-icon>warning</mat-icon>
               <span><strong>Operator Action Required:</strong> Please disconnect the Maui unit from the host USB port to enable log archival and complete testing.</span>
             </div>
           }
-          @if (cards.adbTransfer.done && !deviceConnected && !logsSaved) {
+          @if (cards.chargerDisconnect.done && !deviceConnected && !logsSaved) {
             <div class="operator-ready-banner">
               <mat-icon>check_circle</mat-icon>
               <span><strong>Ready for Archival:</strong> Maui unit disconnected. Click <strong>{{ isFatpMode ? 'Save FATP Logs' : 'Save SMT Logs' }}</strong> to finalize.</span>
             </div>
           }
-          @if (logsSaved) {
-            <div class="station-completion-hero">
+          @if (logsSaved && finalPassed) {
+            <div class="station-completion-hero" id="func-final-pass">
               <mat-icon class="hero-icon">verified</mat-icon>
               <div class="hero-content">
-                <div class="hero-title">Unit {{ lastTestedSerial || serialNumber }} Completed!</div>
+                <div class="hero-title">Unit {{ lastTestedSerial || serialNumber }} PASSED</div>
                 <div class="hero-sub">{{ isFatpMode ? 'FATP QT0' : 'SMT Functional' }} report archived to {{ archiveLocation }}. Station refreshing for next unit in {{ reloadDelaySec }}s...</div>
+              </div>
+            </div>
+          } @else if (logsSaved) {
+            <div class="station-completion-hero hero-fail" id="func-final-fail">
+              <mat-icon class="hero-icon">cancel</mat-icon>
+              <div class="hero-content">
+                <div class="hero-title">Unit {{ lastTestedSerial || serialNumber }} FAILED</div>
+                <div class="hero-sub">
+                  Not passed: {{ finalNotPassedCards.join(', ') }}.<br />
+                  {{ isFatpMode ? 'FATP QT0' : 'SMT Functional' }} report archived to {{ archiveLocation }}. Put the unit aside
+                  as failed, then click <strong>Next Unit</strong>.
+                </div>
               </div>
             </div>
           }
@@ -940,7 +1048,7 @@
             <span class="label">Physical Connection:</span>
             <span
               class="badge"
-              [class.badge-active]="!deviceConnected && cards.adbTransfer.done"
+              [class.badge-active]="!deviceConnected && cards.chargerDisconnect.done"
               [class.badge-fail]="deviceConnected">
               {{ deviceConnected ? 'Unit Still Connected (Unplug to proceed)' : 'Unit Disconnected (Safe to Save Logs)' }}
             </span>
@@ -956,7 +1064,7 @@
             <span
               class="badge"
               [class.badge-active]="logsSaved"
-              [class.badge-fail]="!logsSaved && cards.adbTransfer.done">
+              [class.badge-fail]="!logsSaved && cards.chargerDisconnect.done">
               {{
                 logsSaved
                   ? (isFatpMode ? 'FATP QT0 Report Saved' : 'SMT Report Saved')
@@ -1035,10 +1143,21 @@
               <mat-icon>save</mat-icon>
               {{ isFatpMode ? 'Save FATP Logs & Finalize FATP Report' : 'Save SMT Logs & Finalize SMT Report' }}
             </button>
+            @if (logsSaved && !finalPassed) {
+              <button
+                mat-raised-button
+                color="warn"
+                class="action-btn-wide"
+                id="func-next-unit"
+                (click)="nextUnit()">
+                <mat-icon>skip_next</mat-icon>
+                Next Unit
+              </button>
+            }
             <button
               mat-stroked-button
               color="accent"
-              [disabled]="!cards.adbTransfer.done || inspectingLogs"
+              [disabled]="!cards.chargerDisconnect.done || inspectingLogs"
               (click)="inspectLogs()">
               <mat-icon>refresh</mat-icon>
               Refresh Logs Checklist
@@ -1071,7 +1190,7 @@
       <span
         class="value code"
         [style.color]="check.hwrevOk ? '#137333' : '#c5221f'"
-        >{{ check.hwrev }} (Expected: {{ expectedHwrev }})</span
+        >{{ check.hwrev }} (Expected: {{ check.expectedHwrev }})</span
       >
     </div>
   }
@@ -1111,9 +1230,7 @@
         class="value code"
         [style.color]="check.gpiosOk ? '#137333' : '#c5221f'">
         {{
-          check.gpiosOk
-            ? expectedGpioCount + '/' + expectedGpioCount + ' Verified'
-            : check.gpioDetails
+          check.gpiosOk ? gpioOkText(check.gpioDetails) : check.gpioDetails
         }}
       </span>
     </div>

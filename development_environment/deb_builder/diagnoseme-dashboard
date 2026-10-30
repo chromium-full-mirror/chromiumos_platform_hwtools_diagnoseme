@@ -5,8 +5,9 @@
 
 """DiagnoseMe Maui Multi-Station Manufacturing Dashboard.
 
-Reads test results from /var/log/diagnoseme/maui_v11_results/ (and the
-~/diagnoseme_results/ locations of older releases) across 3 production phases:
+Reads test results from the edition's results directory (DIAGNOSEME_RESULTS_DIR,
+e.g. /var/log/diagnoseme/maui_v11_results/; and the ~/diagnoseme_results/
+locations of older releases) across 3 production phases:
 1. SMT Step 1: Provisioning Pipeline (MCU + PDC + FTDI)
 2. SMT Step 2: SMT Functional Testing (Host + DUT + Charger)
 3. FATP Step 4: FATP Quick Test Suite (QT0 + Barcode Verification)
@@ -120,7 +121,9 @@ def find_result_files() -> List[str]:
       f"{RESULTS_DIR}/fatp_tests/*.json",
       f"{RESULTS_DIR}/highlevel/*.json",
       f"{RESULTS_DIR}/*.json",
-      # Read-only fallback: locations used by older releases.
+      # Read-only fallback, for every edition: locations used by older
+      # releases (e.g. ~/diagnoseme_results/highlevel of the Maui v1.2
+      # stations installed before the editions).
       os.path.expanduser("~/diagnoseme_results/smt_provisioning/results/*.json"),
       os.path.expanduser("~/diagnoseme_results/smt_functional/results/*.json"),
       os.path.expanduser("~/diagnoseme_results/fatp_tests/results/*.json"),
@@ -132,6 +135,7 @@ def find_result_files() -> List[str]:
       "/home/*/diagnoseme_results/smt_provisioning/results/*.json",
       "/home/*/diagnoseme_results/smt_functional/results/*.json",
       "/home/*/diagnoseme_results/fatp_tests/results/*.json",
+      "/home/*/diagnoseme_results/highlevel/*.json",
       "/root/diagnoseme_results/smt_provisioning/results/*.json",
       "/root/diagnoseme_results/smt_functional/results/*.json",
       "/root/diagnoseme_results/fatp_tests/results/*.json",

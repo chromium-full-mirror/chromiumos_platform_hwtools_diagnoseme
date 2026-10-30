@@ -3,33 +3,278 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-CONFIG_DIR="${DIAGNOSEME_CONFIG_DIR:-/etc/diagnoseme}"
+# Test hook: prefix of the system paths (unset on stations).
+ROOT="${DIAGNOSEME_LOGS_ROOT:-}"
+CONFIG_DIR="${DIAGNOSEME_CONFIG_DIR:-$ROOT/etc/diagnoseme}"
 DEFAULT_COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yaml"
 # config.env (package) and config.local.env (station overrides, read last).
-for CONFIG in "${CONFIG_DIR}/config.env" "${CONFIG_DIR}/config.local.env"; do
+CONFIG_FILES=("${CONFIG_DIR}/config.env" "${CONFIG_DIR}/config.local.env")
+for CONFIG in "${CONFIG_FILES[@]}"; do
     if [ -f "$CONFIG" ]; then
         # shellcheck disable=SC1090
         source "$CONFIG"
     fi
 done
-DEVICE_LOG_DIR="/var/log/diagnoseme/devices"
-# Maui results directory of the edition (config.env DIAGNOSEME_RESULTS_DIR).
-RESULTS_DIR="${DIAGNOSEME_RESULTS_DIR:-/var/log/diagnoseme/maui_v11_results}"
-# Locations used by older releases, still searched for existing stations.
+RPC_LOG_DIR="$ROOT/var/log/diagnoseme/rpcserver"
+FIRMWARE_DIR="$ROOT/var/lib/diagnoseme/firmware"
+DEVICE_LOG_DIR="$ROOT/var/log/diagnoseme/devices"
+# Maui results directory of the edition (config.env DIAGNOSEME_RESULTS_DIR,
+# e.g. maui_v12_results for maui-v1.2); the Maui v1.1 default otherwise.
+RESULTS_DIR="$ROOT${DIAGNOSEME_RESULTS_DIR:-/var/log/diagnoseme/maui_v11_results}"
+# Locations used by older releases, still searched for existing stations
+# of every edition: ~/diagnoseme_results of the user, else of the station
+# user (e.g. when run with sudo; Maui v1.2 releases before the editions wrote
+# their results there).
 LEGACY_RESULTS_DIR="${HOME:-/home/diagnoseme}/diagnoseme_results"
-LEGACY_DEVICE_LOG_ROOT="/tmp"
+if [ ! -d "$LEGACY_RESULTS_DIR" ] && [ -d "$ROOT/home/diagnoseme/diagnoseme_results" ]; then
+    LEGACY_RESULTS_DIR="$ROOT/home/diagnoseme/diagnoseme_results"
+fi
+LEGACY_DEVICE_LOG_ROOT="$ROOT/tmp"
 
 usage() {
     echo "Usage: diagnoseme-logs [all | <service>]"
     echo "       diagnoseme-logs [--device | -d] [<SERIAL>]"
+    echo "       diagnoseme-logs [--collect | -c] [<SERIAL>]"
     echo ""
     echo "  (no argument), all   Follow the logs of all DiagnoseMe containers"
     echo "  <service>            Follow the logs of one container (e.g. server, ui, envoy)"
     echo "  --device <SERIAL>    List result files and device logs of a device serial"
     echo "  <SERIAL>             Same as --device <SERIAL> (any argument that is not a service)"
     echo "  --device             List all device log and result directories"
+    echo "  --collect [SERIAL]   Collect everything needed to debug a station into one"
+    echo "                       zip in the current directory (or ~/ if not writable):"
+    echo "                       diagnoseme_logs_<station>_<SERIAL|all>_<YYYYmmdd_HHMMSS>.zip"
+    echo "                       with the results and device logs (only SERIAL's if"
+    echo "                       given), the rpcserver logs, container status, images"
+    echo "                       and logs, config.env, the firmware STABLE.json files,"
+    echo "                       lsusb, dmesg, OS and package versions."
     echo ""
     echo "Device logs: $DEVICE_LOG_DIR/<SERIAL>/, results: $RESULTS_DIR/"
+}
+
+# Prints "$@" to stderr.
+note() {
+    echo "$@" >&2
+}
+
+# Copies file $1 to $2 (sudo -n if not readable). Returns 1 on failure.
+copy_file() {
+    mkdir -p "$(dirname "$2")"
+    # The copy must stay owned by the user (sudo only reads the source).
+    # shellcheck disable=SC2024
+    if cat "$1" >"$2" 2>/dev/null || sudo -n cat "$1" >"$2" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "$2"
+    echo "$1" >>"$SKIPPED"
+    return 1
+}
+
+# Lists the files below directory $1 (sudo -n if not readable).
+list_files() {
+    find "$1" -type f 2>/dev/null || sudo -n find "$1" -type f 2>/dev/null
+}
+
+# Copies the files below directory $1 matching *$3* (all if $3 is empty)
+# to directory $2, keeping the structure below $1.
+copy_tree() {
+    local src="$1" dst="$2" filter="${3:-}" f rel
+    [ -d "$src" ] || return 0
+    while IFS= read -r f; do
+        rel="${f#"$src"/}"
+        if [ -n "$filter" ] && [[ "$rel" != *"$filter"* ]]; then
+            continue
+        fi
+        copy_file "$f" "$dst/$rel"
+    done < <(list_files "$src")
+}
+
+# Runs command "${@:2}" (with a timeout) and appends the command line and
+# its output to file $1. Never fails.
+run_to() {
+    local out="$1"
+    shift
+    mkdir -p "$(dirname "$out")"
+    {
+        echo "\$ $*"
+        if command -v timeout >/dev/null 2>&1; then
+            timeout 300 "$@" 2>&1
+        else
+            "$@" 2>&1
+        fi
+        echo "[exit code: $?]"
+    } >>"$out"
+}
+
+# Sets DOCKER to the docker command (sudo -n docker if docker alone is not
+# allowed).
+set_docker() {
+    DOCKER=(docker)
+    if ! docker info >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+        DOCKER=(sudo -n docker)
+    fi
+}
+
+# Prints the station name: STATION_ID of config.env, else the host name.
+station_name() {
+    local name
+    name="${STATION_ID:-}"
+    [ -n "$name" ] || name=$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null)
+    name=$(printf '%s' "${name:-station}" | tr -c 'A-Za-z0-9_.-' '_')
+    echo "${name:-station}"
+}
+
+# Sets COMPOSE to the docker compose command with the compose files of the
+# station (config.env COMPOSE_FILE, ':' separated; the Maui editions add
+# their overrides). Returns 1 and prints the error if a file is missing.
+set_compose() {
+    local f files
+    IFS=':' read -r -a files <<< "${COMPOSE_FILE:-$DEFAULT_COMPOSE_FILE}"
+    COMPOSE=("$@" compose)
+    for f in "${files[@]}"; do
+        if [ ! -f "$f" ]; then
+            echo "Error: Docker compose file not found at $f"
+            return 1
+        fi
+        COMPOSE+=(-f "$f")
+    done
+}
+
+# docker-compose-maui.yaml (Maui stations) needs the results directory and
+# docker-compose-maui-h2h.yaml the H2H firmware directory.
+for VAR in DIAGNOSEME_RESULTS_DIR MAUI_H2H_FW_DIR; do
+    if [ -n "${!VAR:-}" ]; then
+        export "${VAR?}"
+    fi
+done
+
+# Writes archive $1 of directory $3 inside directory $2. Prints its path
+# (.zip, or .tar.gz without zip and python3).
+make_archive() {
+    local zip_path="$1" parent="$2" name="$3"
+    if command -v zip >/dev/null 2>&1; then
+        (cd "$parent" && zip -qr "$zip_path" "$name") && echo "$zip_path" && return
+    fi
+    if command -v python3 >/dev/null 2>&1; then
+        (cd "$parent" && python3 -m zipfile -c "$zip_path" "$name") &&
+            echo "$zip_path" && return
+    fi
+    local tgz="${zip_path%.zip}.tar.gz"
+    tar -C "$parent" -czf "$tgz" "$name" && echo "$tgz"
+}
+
+collect_logs() {
+    local serial="${1:-}" station ts name stage out_dir dest d f archive images
+    serial=$(printf '%s' "$serial" | tr -cd 'A-Za-z0-9_-')
+    station=$(station_name)
+    ts=$(date +%Y%m%d_%H%M%S)
+    name="diagnoseme_logs_${station}_${serial:-all}_${ts}"
+    out_dir="$PWD"
+    if [ ! -w "$out_dir" ]; then
+        out_dir="${HOME:-/tmp}"
+    fi
+    stage=$(mktemp -d "${TMPDIR:-/tmp}/diagnoseme_collect.XXXXXX") || exit 1
+    # shellcheck disable=SC2064  # Expand $stage now.
+    trap "rm -rf '$stage'" EXIT
+    dest="$stage/$name"
+    mkdir -p "$dest/system" "$dest/docker"
+    SKIPPED="$dest/skipped_files.txt"
+    note "Collecting DiagnoseMe logs (serial: ${serial:-all})..."
+
+    {
+        echo "DiagnoseMe log collection"
+        echo "Date: $(date -Is 2>/dev/null || date)"
+        echo "Station: $station"
+        echo "Host: $(hostname 2>/dev/null)"
+        echo "Serial: ${serial:-all}"
+        echo "User: $(id -un 2>/dev/null)"
+    } >"$dest/README.txt"
+
+    # Results and device logs (only SERIAL's if given), then the locations
+    # of older releases.
+    local results=""
+    if [ -d "$RESULTS_DIR" ]; then
+        results="$RESULTS_DIR"
+        copy_tree "$RESULTS_DIR" "$dest/results" "$serial"
+    fi
+    if [ -d "$LEGACY_RESULTS_DIR" ]; then
+        results="$results${results:+, }$LEGACY_RESULTS_DIR"
+        copy_tree "$LEGACY_RESULTS_DIR" "$dest/legacy_results" "$serial"
+    fi
+    echo "Results: ${results:-none found}" >>"$dest/README.txt"
+    if [ -n "$serial" ]; then
+        copy_tree "$DEVICE_LOG_DIR/$serial" "$dest/device_logs/$serial"
+    else
+        copy_tree "$DEVICE_LOG_DIR" "$dest/device_logs"
+    fi
+    for d in "$LEGACY_DEVICE_LOG_ROOT"/*_diagnoseme_logs; do
+        [ -d "$d" ] || continue
+        if [ -n "$serial" ] && [ "$(basename "$d")" != "${serial}_diagnoseme_logs" ]; then
+            continue
+        fi
+        copy_tree "$d" "$dest/legacy_device_logs/$(basename "$d")"
+    done
+
+    # Server logs, configuration and firmware.
+    copy_tree "$RPC_LOG_DIR" "$dest/rpcserver"
+    for f in "${CONFIG_FILES[@]}"; do
+        [ -e "$f" ] && copy_file "$f" "$dest/etc/$(basename "$f")"
+    done
+    for f in "$FIRMWARE_DIR"/*/STABLE.json; do
+        [ -e "$f" ] || continue
+        copy_file "$f" "$dest/firmware/$(basename "$(dirname "$f")")/STABLE.json"
+    done
+
+    # Containers.
+    if command -v docker >/dev/null 2>&1; then
+        set_docker
+        if set_compose "${DOCKER[@]}" >"$dest/docker/compose_ps.txt"; then
+            run_to "$dest/docker/compose_ps.txt" "${COMPOSE[@]}" ps -a
+            note "Collecting the container logs..."
+            run_to "$dest/docker/compose_logs.txt" "${COMPOSE[@]}" logs \
+                --no-color --timestamps
+        fi
+        images=$("${DOCKER[@]}" images --format \
+            '{{.Repository}}:{{.Tag}}  {{.ID}}  {{.CreatedSince}}  {{.Size}}' 2>&1)
+        if grep -qE 'diagnoseme|maui-utils' <<<"$images"; then
+            grep -E 'diagnoseme|maui-utils' <<<"$images" >"$dest/docker/images.txt"
+        else
+            printf 'No diagnoseme / maui-utils image.\n%s\n' "$images" \
+                >"$dest/docker/images.txt"
+        fi
+    else
+        echo "docker not installed" >"$dest/docker/compose_ps.txt"
+    fi
+
+    # Host.
+    run_to "$dest/system/lsusb.txt" lsusb
+    run_to "$dest/system/lsusb_tree.txt" lsusb -t
+    if dmesg >/dev/null 2>&1; then
+        dmesg 2>&1 | tail -n 300 >"$dest/system/dmesg_tail.txt"
+    elif sudo -n dmesg >/dev/null 2>&1; then
+        sudo -n dmesg 2>&1 | tail -n 300 >"$dest/system/dmesg_tail.txt"
+    else
+        echo "dmesg not readable (needs root); skipped" >"$dest/system/dmesg_tail.txt"
+    fi
+    run_to "$dest/system/uname.txt" uname -a
+    copy_file "$ROOT/etc/os-release" "$dest/system/os-release.txt"
+    if command -v dpkg-query >/dev/null 2>&1; then
+        for f in $(dpkg-query -W -f='${Package}\n' 'diagnoseme*' 2>/dev/null); do
+            run_to "$dest/system/dpkg_status.txt" dpkg -s "$f"
+        done
+    fi
+    [ -s "$dest/system/dpkg_status.txt" ] ||
+        echo "No diagnoseme package installed" >"$dest/system/dpkg_status.txt"
+
+    if [ -s "$SKIPPED" ]; then
+        note "Could not read $(wc -l <"$SKIPPED") file(s); see skipped_files.txt."
+    fi
+    archive=$(make_archive "$out_dir/$name.zip" "$stage" "$name")
+    if [ -z "$archive" ] || [ ! -s "$archive" ]; then
+        note "Error: failed to write the archive in $out_dir."
+        return 1
+    fi
+    echo "Logs collected: $archive"
 }
 
 # Prints the result files matching a serial below DIR, if any.
@@ -100,26 +345,17 @@ case "${1:-}" in
         usage
         exit 0
         ;;
+    -c|--collect)
+        collect_logs "${2:-}"
+        exit $?
+        ;;
     --device|-d)
         show_device_logs "${2:-}"
         exit 0
         ;;
 esac
 
-# docker-compose-maui.yaml (Maui stations) needs the results directory.
-if [ -n "${DIAGNOSEME_RESULTS_DIR:-}" ]; then
-    export DIAGNOSEME_RESULTS_DIR
-fi
-# Compose files of the station (config.env COMPOSE_FILE, ':' separated).
-IFS=':' read -r -a COMPOSE_FILES <<< "${COMPOSE_FILE:-$DEFAULT_COMPOSE_FILE}"
-COMPOSE=(docker compose)
-for F in "${COMPOSE_FILES[@]}"; do
-    if [ ! -f "$F" ]; then
-        echo "Error: Docker compose file not found at $F"
-        exit 1
-    fi
-    COMPOSE+=(-f "$F")
-done
+set_compose docker || exit 1
 
 SERVICE="${1:-}"
 if [ -z "$SERVICE" ] || [ "$SERVICE" = "all" ]; then

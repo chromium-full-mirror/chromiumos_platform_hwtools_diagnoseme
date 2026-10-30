@@ -6,7 +6,8 @@
 # /etc/diagnoseme/docker-compose-maui.yaml by the Maui edition packages only;
 # their config.env selects it with
 # COMPOSE_FILE=/etc/diagnoseme/docker-compose.yaml:/etc/diagnoseme/docker-compose-maui.yaml).
-# Servo / Dolos stations neither mount nor create these directories.
+# Servo / Dolos stations neither mount nor create these directories. The H2H
+# firmware directory of Maui v1.2 is in docker-compose-maui-h2h.yaml.
 
 services:
   server:
@@ -17,6 +18,10 @@ services:
       # maui-utils image of the Maui host tools (config.env: the bundled
       # stable release; when empty the server uses the newest local one).
       - MAUI_UTILS_IMAGE
+      # Optional Maui v1.2 test overrides (config.local.env).
+      - MAUI_V12_APPROVED_FW
+      - MAUI_V12_HWREVS
+      - MAUI_ITE_NO_OUTPUT_TIMEOUT_S
       # Optional ADB transfer test overrides (config.local.env).
       - MAUI_ADB_SIZE_MB
       - MAUI_ADB_DEADLINE_S

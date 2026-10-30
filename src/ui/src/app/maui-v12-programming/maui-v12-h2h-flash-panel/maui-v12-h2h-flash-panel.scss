@@ -1,0 +1,191 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+:host {
+  display: block;
+  width: 100%;
+}
+
+.h2h-flash-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+
+  mat-progress-bar {
+    width: 100%;
+  }
+}
+
+.warning-box,
+.serial-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 4px;
+}
+
+.warning-box {
+  background: #fce8e6;
+  color: #a50e0e;
+  border-left: 4px solid #d93025;
+}
+
+.serial-note {
+  background: #e8f0fe;
+  color: #174ea6;
+  border-left: 4px solid #1a73e8;
+}
+
+.steps-box {
+  background: #f8f9fa;
+  border-radius: 4px;
+  padding: 8px 12px;
+
+  .steps-title {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-weight: 500;
+  }
+
+  ol {
+    margin: 6px 0 0;
+    padding-left: 22px;
+  }
+
+  li {
+    line-height: 1.6;
+  }
+
+  code {
+    font-size: 13px;
+    word-break: break-all;
+  }
+}
+
+.fw-warning,
+.fw-info {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.fw-warning {
+  background: #fef7e0;
+  color: #7a4a00;
+  border-left: 4px solid #f9ab00;
+}
+
+.fw-info {
+  background: #e6f4ea;
+  color: #137333;
+  border-left: 4px solid #1e8e3e;
+}
+
+.file-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+
+  th,
+  td {
+    text-align: left;
+    padding: 4px 8px;
+    border-bottom: 1px solid #e0e0e0;
+    vertical-align: middle;
+  }
+
+  th {
+    color: #5f6368;
+    font-weight: 500;
+  }
+
+  tr.selected td {
+    background: #e8f0fe;
+  }
+
+  tr.invalid td {
+    color: #80868b;
+  }
+
+  .file-name {
+    font-weight: 500;
+    word-break: break-all;
+  }
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+
+  .mcu-field {
+    min-width: 320px;
+  }
+
+  .serial-field {
+    width: 240px;
+  }
+}
+
+.hint {
+  color: #5f6368;
+  font-style: italic;
+
+  &.error {
+    color: #c5221f;
+  }
+}
+
+.ok-text {
+  color: #137333;
+}
+
+.warn-text {
+  color: #b06000;
+}
+
+.error-text {
+  color: #c5221f;
+}
+
+.progress-row {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 500;
+
+  .elapsed {
+    color: #5f6368;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.result {
+  font-weight: 500;
+
+  &.passed {
+    color: #137333;
+  }
+
+  &.failed {
+    color: #c5221f;
+  }
+}
+
+.tool-log {
+  width: 100%;
+  max-height: 240px;
+  overflow: auto;
+  background: #202124;
+  color: #e8eaed;
+  font-size: 11px;
+  padding: 8px;
+  border-radius: 4px;
+  box-sizing: border-box;
+}

@@ -23,6 +23,7 @@ RUN INFO="python3 /edition/edition_info.py --registry /edition/editions.json" \
     && ${INFO} validate "${EDITION}" \
     && ${INFO} get "${EDITION}" maui_utils > /edition/maui \
     && ${INFO} get "${EDITION}" realtek_tools > /edition/realtek \
+    && ${INFO} get "${EDITION}" h2h_firmware > /edition/h2h \
     && ${INFO} get "${EDITION}" firmware > /edition/firmware \
     && ${INFO} get "${EDITION}" results_dir > /edition/results_dir \
     && ${INFO} get "${EDITION}" deb_package > /edition/deb_package \
@@ -76,12 +77,14 @@ RUN chmod 755 usr/local/bin/start-diagnoseme \
 
 # Copy docker-compose and the station config of the edition, specialised by
 # tools/edition_info.py render-config: Maui editions get the Maui station
-# config (config.env, selecting docker-compose-maui.yaml with the Maui mounts),
+# config (config.env, selecting docker-compose-maui.yaml with the Maui mounts,
+# and for H2H firmware flashing (Maui v1.2) docker-compose-maui-h2h.yaml),
 # the other editions the generic online config (config-generic.env: online,
 # always pull, watchtower, no browser start, no Maui keys). Station overrides
 # live in /etc/diagnoseme/config.local.env, which is never shipped.
 COPY development_environment/docker-compose-prod.yaml etc/diagnoseme/docker-compose.yaml
 COPY development_environment/docker-compose-maui.yaml /tmp/docker-compose-maui.yaml
+COPY development_environment/docker-compose-maui-h2h.yaml /tmp/docker-compose-maui-h2h.yaml
 COPY development_environment/deb_builder/config.env /tmp/config-maui.env
 COPY development_environment/deb_builder/config-generic.env /tmp/config-generic.env
 # Bundle the stable maui-utils image (tools/fetch_maui_utils.sh: maui-utils.tar
@@ -95,6 +98,9 @@ RUN MAUI_UTILS_VERSION="" \
     && if [ "$(cat /edition/maui)" = "true" ]; then \
         install -m 644 /tmp/config-maui.env etc/diagnoseme/config.env \
         && install -m 644 /tmp/docker-compose-maui.yaml etc/diagnoseme/docker-compose-maui.yaml \
+        && if [ "$(cat /edition/h2h)" = "true" ]; then \
+            install -m 644 /tmp/docker-compose-maui-h2h.yaml etc/diagnoseme/docker-compose-maui-h2h.yaml; \
+        fi \
         && if [ -f /tmp/maui-utils/maui-utils.tar ] && [ -f /tmp/maui-utils/STABLE.json ]; then \
             MAUI_UTILS_VERSION="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["version"])' /tmp/maui-utils/STABLE.json)" \
             && mkdir -p var/lib/diagnoseme/maui-utils \
@@ -112,7 +118,8 @@ RUN MAUI_UTILS_VERSION="" \
         render-config "${EDITION}" etc/diagnoseme/config.env \
         --bundled-maui-utils "${MAUI_UTILS_VERSION}" \
     && chmod 644 etc/diagnoseme/docker-compose.yaml etc/diagnoseme/config.env \
-    && rm -rf /tmp/config-maui.env /tmp/config-generic.env /tmp/maui-utils /tmp/docker-compose-maui.yaml
+    && rm -rf /tmp/config-maui.env /tmp/config-generic.env /tmp/maui-utils /tmp/docker-compose-maui.yaml \
+        /tmp/docker-compose-maui-h2h.yaml
 
 # Copy desktop launchers. Maui editions get the Maui launchers (menu and
 # desktop); the other editions only get a 'DiagnoseMe Web' menu entry.

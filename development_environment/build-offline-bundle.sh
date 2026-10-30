@@ -145,7 +145,7 @@ read -r -a STATION_TAGS <<< "$("${EDITION_INFO[@]}" get "${EDITION}" docker_tags
 # maui-v1.1; none for the Servo/Dolos editions.
 read -r -a FW_COMPONENTS <<< "$("${EDITION_INFO[@]}" get "${EDITION}" firmware)"
 # Components the bundle must contain with a valid STABLE.json (Maui v1.1:
-# mcu, pdc).
+# mcu, pdc; Maui v1.2: mcu_app, mcu_full).
 read -r -a FW_STABLE_REQUIRED <<< "$("${EDITION_INFO[@]}" get "${EDITION}" firmware_stable_required)"
 
 if [ -z "${OUTPUT_DIR}" ] || [ "${OUTPUT_DIR}" = "/" ]; then
@@ -269,7 +269,8 @@ else
     echo "[1/4] Skipping Docker image export."
 fi
 
-# 2. Maui firmware of the edition: local dist/firmware, then the current
+# 2. Maui firmware of the edition (editions.json, e.g. mcu+pdc for v1.1 and
+# mcu_app+mcu_full+pdc for v1.2): local dist/firmware, then the current
 # stable versions from GCS
 if [ ${#FW_COMPONENTS[@]} -eq 0 ]; then
     echo "[2/4] The ${EDITION} edition has no Maui firmware."
@@ -310,8 +311,9 @@ else
         echo "      Skipping the Maui firmware download (--skip-fw)."
     fi
     # The station selects the images of these components by their STABLE.json
-    # (it refuses several images without one), so they must come with a valid
-    # one (image present, md5 matching); also for --skip-fw.
+    # (it refuses several images without one; Maui v1.2 also takes the
+    # approved MCU App builds from mcu_app / mcu_full), so they must come with
+    # a valid one (image present, md5 matching); also for --skip-fw.
     if [ ${#FW_STABLE_REQUIRED[@]} -gt 0 ] && ! python3 "${PROJECT_ROOT}/tools/maui_fw_fetch.py" \
             --dest-root "${BUNDLE_DIR}/firmware" --verify "${FW_STABLE_REQUIRED[@]}"; then
         if [ "$ALLOW_MISSING_FW" = true ]; then

@@ -28,6 +28,8 @@ export const MAUI_FW_CHANNEL = 'stable';
 
 /** Station directory where the backend exports final result packages. */
 export const MAUI_RESULTS_DIR = '/var/log/diagnoseme/maui_v11_results';
+/** Same for Maui v1.2 (see MauiHwRevProfile.resultsDir). */
+export const MAUI_V12_RESULTS_DIR = '/var/log/diagnoseme/maui_v12_results';
 
 // FTDI USB identifiers.
 export const FTDI_VID = 0x0403;

@@ -35,6 +35,13 @@ SERVICE_MAUI_STATION1 = "maui_station1"
 SERVICE_MAUI_PDC = "maui_pdc"
 SERVICE_MAUI_STATION2 = "maui_station2"
 SERVICE_MAUI_DEVICE_MGMT = "maui_device_mgmt"
+# Maui v1.2 implementations of the shared Maui gRPC services. They register
+# the same gRPC services as their v1.1 counterparts, so an edition may only
+# contain one implementation of each.
+SERVICE_MAUI_V12_PDC = "maui_v12_pdc"
+SERVICE_MAUI_V12_STATION2 = "maui_v12_station2"
+SERVICE_MAUI_V12_DEVICE_MGMT = "maui_v12_device_mgmt"
+SERVICE_MAUI_MCU = "maui_mcu"
 
 # Maui service key -> gRPC service (maui_manufacturing.proto) it implements;
 # rpcserver.py registers the servicers from it. Several keys may implement
@@ -43,8 +50,12 @@ SERVICE_MAUI_DEVICE_MGMT = "maui_device_mgmt"
 GRPC_SERVICE_OF = {
     SERVICE_MAUI_STATION1: "MauiStation1InitialFlashing",
     SERVICE_MAUI_PDC: "MauiPdcFlashing",
+    SERVICE_MAUI_V12_PDC: "MauiPdcFlashing",
     SERVICE_MAUI_STATION2: "MauiStation2FunctionalTesting",
+    SERVICE_MAUI_V12_STATION2: "MauiStation2FunctionalTesting",
     SERVICE_MAUI_DEVICE_MGMT: "MauiDeviceManagement",
+    SERVICE_MAUI_V12_DEVICE_MGMT: "MauiDeviceManagement",
+    SERVICE_MAUI_MCU: "MauiMcuService",
 }
 
 ALL_SERVICES = (
@@ -57,6 +68,23 @@ ALL_SERVICES = (
     SERVICE_MAUI_PDC,
     SERVICE_MAUI_STATION2,
     SERVICE_MAUI_DEVICE_MGMT,
+    SERVICE_MAUI_V12_PDC,
+    SERVICE_MAUI_V12_STATION2,
+    SERVICE_MAUI_V12_DEVICE_MGMT,
+    SERVICE_MAUI_MCU,
+)
+
+# Services of the development edition: every service, with the Maui v1.1
+# implementation of the shared Maui services (plus the v1.2-only MCU service).
+DEV_SERVICES = tuple(
+    s
+    for s in ALL_SERVICES
+    if s
+    not in (
+        SERVICE_MAUI_V12_PDC,
+        SERVICE_MAUI_V12_STATION2,
+        SERVICE_MAUI_V12_DEVICE_MGMT,
+    )
 )
 
 _MAUI_V11_SERVICES = (
@@ -82,7 +110,14 @@ SERVICES_OF: Dict[str, Tuple[str, ...]] = {
     "servo-v4p1": (SERVICE_DIAGNOSEME, SERVICE_SERVOD, SERVICE_SERVO_V41),
     "servo-micro": (SERVICE_DIAGNOSEME, SERVICE_SERVOD, SERVICE_SERVO_MICRO),
     "maui-v1.1": _MAUI_V11_SERVICES,
-    "all": ALL_SERVICES,
+    "maui-v1.2": (
+        SERVICE_DIAGNOSEME,
+        SERVICE_MAUI_V12_PDC,
+        SERVICE_MAUI_V12_STATION2,
+        SERVICE_MAUI_V12_DEVICE_MGMT,
+        SERVICE_MAUI_MCU,
+    ),
+    "all": DEV_SERVICES,
 }
 
 # Edition used when DIAGNOSEME_EDITION is not set (a server started from a
@@ -107,6 +142,9 @@ class Edition:
     services: Tuple[str, ...]
     maui_hw_rev: str = ""
     shipped: bool = True
+    # Firmware components the edition's releases must bundle with a valid
+    # STABLE.json (editions.json firmware_stable_required).
+    firmware_stable_required: Tuple[str, ...] = ()
 
 
 def editions_json_path() -> str:
@@ -139,6 +177,7 @@ def load_editions(path: Optional[str] = None) -> Dict[str, Edition]:
             services=SERVICES_OF[edition_id],
             maui_hw_rev=meta.get("maui_hw_rev", ""),
             shipped=bool(meta.get("shipped", False)),
+            firmware_stable_required=tuple(meta.get("firmware_stable_required", ())),
         )
         for edition_id, meta in registry.items()
     }

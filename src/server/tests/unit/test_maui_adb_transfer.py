@@ -623,6 +623,7 @@ class TestStation2AdbTransferRpc(unittest.TestCase):
         self.assertAlmostEqual(resp.total_seconds, 38.5)
         self.assertAlmostEqual(resp.transfer_seconds, 35.0)
         self.assertAlmostEqual(resp.deadline_seconds, 40.0)
+        self.assertEqual((resp.host_link_mbps, resp.dut_link_mbps), (5000, 5000))
         self.assertEqual(resp.host_sha1, f"{'a' * 40}, {'b' * 40}")
         self.assertEqual(resp.pulled_sha1, f"{'a' * 40}, {'b' * 40}")
         self.assertEqual(resp.log, "line 1\nline 2")

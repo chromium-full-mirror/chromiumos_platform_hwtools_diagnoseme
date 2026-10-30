@@ -48,13 +48,19 @@ crc32c checks when installed) because it also runs on stations and in build
 containers.
 
 Exit status: 0 when every component is up to date (a missing marker of an
-optional component is only a warning), 1 when a component failed, 2 for
-usage errors. Callers decide whether a failure is fatal.
+optional component is only a warning, unless it is named by --require), 1
+when a component failed, 2 for usage errors. Callers decide whether a
+failure is fatal. --verify only checks the STABLE.json and image of every
+component in --dest-root (release builds check the components the station
+needs a stable version of, editions.json "firmware_stable_required").
 
 Examples:
   tools/maui_fw_fetch.py --device maui_v11 --dest-root dist/firmware mcu pdc
   tools/maui_fw_fetch.py --dry-run --device maui_v11 --dest-root /tmp/fw mcu
   tools/maui_fw_fetch.py --dest-root dist maui-utils
+  tools/maui_fw_fetch.py --device maui_v12 --dest-root /tmp/fw \\
+      --require mcu_app --require mcu_full mcu_app mcu_full pdc
+  tools/maui_fw_fetch.py --dest-root /tmp/fw --verify mcu_app mcu_full
 """
 
 import argparse
@@ -110,7 +116,8 @@ class Component:
 
     gcs_dir: str
     marker_suffix: str
-    # Extension of the firmware image in the version directory.
+    # Extension of the firmware image in the version directory (or its full
+    # name, when the directory holds images of several components).
     file_ext: str
     # Image names preferred (in this order) when the version directory holds
     # several images; {version} is replaced by the version directory name.
@@ -131,6 +138,20 @@ COMPONENTS: Dict[str, Component] = {
     "mcu": Component("mcu-fw/mspm0", ".mcufw", ".txt", ("zephyr.txt",)),
     # PDC (TPS66994) firmware of every Maui revision.
     "pdc": Component("pdc-fw", ".pdcfw", ".bin", ("{version}.bin", "pdc.bin")),
+    # Maui v1.2 (ITE IT82002) MCUboot-signed App (maui-flash) and the whole
+    # 1 MiB flash image (itecomdbgr), from the same version directory. That
+    # directory holds several *.bin images, so the image is matched by its
+    # full name.
+    "mcu_app": Component(
+        "mcu-fw/maui_v12", ".mcufw", "maui_app_signed.bin", required=False
+    ),
+    "mcu_full": Component(
+        "mcu-fw/maui_v12",
+        ".mcufw",
+        "maui_full_flash_1mb.bin",
+        size=0x100000,
+        required=False,
+    ),
     # maui-utils Docker image (docker save) with the Maui host tools of every
     # Maui edition (bundled into the deb, see tools/fetch_maui_utils.sh).
     "maui-utils": Component(

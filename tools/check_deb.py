@@ -46,6 +46,7 @@ import edition_info  # pylint: disable=wrong-import-position
 CONFIG_PATH = "etc/diagnoseme/config.env"
 LOCAL_CONFIG_PATH = "etc/diagnoseme/config.local.env"
 MAUI_COMPOSE_PATH = "etc/diagnoseme/docker-compose-maui.yaml"
+MAUI_H2H_COMPOSE_PATH = "etc/diagnoseme/docker-compose-maui-h2h.yaml"
 MAUI_UTILS_DIR = "var/lib/diagnoseme/maui-utils"
 # Realtek tools of the editions with realtek_tools (Servo v4p1 tooling).
 RTUNICPG_PATH = "usr/local/bin/rtunicpg"
@@ -220,7 +221,12 @@ def check_deb(  # pylint: disable=too-many-locals,too-many-branches,too-many-sta
             expect.update(
                 {
                     "MODE": "offline",
-                    "COMPOSE_FILE": edition_info.MAUI_COMPOSE_FILE,
+                    "COMPOSE_FILE": edition_info.station_config(editions, edition_id)[
+                        "COMPOSE_FILE"
+                    ],
+                    "MAUI_H2H_FIRMWARE": (
+                        "true" if meta.get("h2h_firmware") else "false"
+                    ),
                     "FIRMWARE_COMPONENTS": edition_info.get_field(
                         editions, edition_id, "firmware"
                     ),
@@ -249,6 +255,12 @@ def check_deb(  # pylint: disable=too-many-locals,too-many-branches,too-many-sta
         if maui:
             if MAUI_COMPOSE_PATH not in files:
                 problems.append(f"{MAUI_COMPOSE_PATH} is missing")
+            # Only the editions with H2H firmware flashing mount its directory.
+            if bool(meta.get("h2h_firmware")) != (MAUI_H2H_COMPOSE_PATH in files):
+                problems.append(
+                    f"{MAUI_H2H_COMPOSE_PATH} must be shipped exactly by the "
+                    "editions with h2h_firmware"
+                )
             if "start-diagnoseme.desktop" not in launchers:
                 problems.append("the Maui launchers are missing")
             tar_path = f"{MAUI_UTILS_DIR}/maui-utils.tar"
@@ -271,6 +283,7 @@ def check_deb(  # pylint: disable=too-many-locals,too-many-branches,too-many-sta
                     problems.append(f"config.env of a non-Maui edition has {key}")
             for name in (
                 MAUI_COMPOSE_PATH,
+                MAUI_H2H_COMPOSE_PATH,
                 MAUI_UTILS_DIR,
                 "var/lib/diagnoseme/firmware",
             ):

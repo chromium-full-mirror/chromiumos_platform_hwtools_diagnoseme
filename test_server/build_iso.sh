@@ -202,6 +202,9 @@ cp "$DEB_BUILDER_DIR/maui-flash" "$BUILD_DIR/cli_tools/maui-ctl" 2>/dev/null || 
 if [ "$MAUI_EDITION" = "true" ]; then
     cp "$DEB_BUILDER_DIR/config.env" "$BUILD_DIR/cli_tools/config.env"
     cp "$DEV_ENV_DIR/docker-compose-maui.yaml" "$BUILD_DIR/cli_tools/"
+    if [ "$("${EDITION_INFO[@]}" get "${EDITION}" h2h_firmware)" = "true" ]; then
+        cp "$DEV_ENV_DIR/docker-compose-maui-h2h.yaml" "$BUILD_DIR/cli_tools/"
+    fi
 else
     cp "$DEB_BUILDER_DIR/config-generic.env" "$BUILD_DIR/cli_tools/config.env"
 fi

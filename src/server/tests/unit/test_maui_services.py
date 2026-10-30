@@ -1960,6 +1960,26 @@ class TestMauiDeviceManagementServicer(_IsolatedEnvMixin, unittest.TestCase):
                 json.load(f)["stage_statuses"]["adb_transfer_test"], "FAILED"
             )
 
+    def test_analyze_charger_disconnect_stage(self):
+        # The Charger Disconnect card is Host+DUT stage 3 (no charger).
+        self.assertIn(
+            (
+                "charger_disconnect",
+                "host_dut_stage3_no_charger.log",
+                "Charger Disconnect",
+            ),
+            STAGE_LOGS,
+        )
+        statuses, overall, _, _ = analyze_device_manufacturing_logs(MAUI_SERIAL)
+        self.assertEqual(statuses["charger_disconnect"], "NOT_RUN")
+        self.assertEqual(overall, "PASS")
+        self.write_status_log(
+            MAUI_SERIAL, "host_dut_stage3_no_charger", LogStatus.FAILED
+        )
+        statuses, overall, _, _ = analyze_device_manufacturing_logs(MAUI_SERIAL)
+        self.assertEqual(statuses["charger_disconnect"], "FAILED")
+        self.assertEqual(overall, "FAIL")
+
     def test_stage_logs_revision_hook(self):
         class OneStageServicer(MauiDeviceManagementServicer):
             """A revision that only evaluates the PDC log."""

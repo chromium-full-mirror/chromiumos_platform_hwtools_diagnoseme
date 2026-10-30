@@ -35,6 +35,9 @@ STATION_UI_BASE_URL = "http://localhost:8888"
 MAUI_COMPOSE_FILE = (
     "/etc/diagnoseme/docker-compose.yaml:/etc/diagnoseme/docker-compose-maui.yaml"
 )
+# Added for the editions with H2H firmware flashing (Maui v1.2): mounts the
+# station's H2H firmware directory (MAUI_H2H_FW_DIR).
+MAUI_H2H_COMPOSE_FILE = "/etc/diagnoseme/docker-compose-maui-h2h.yaml"
 
 
 def load_editions(path=REGISTRY):
@@ -96,9 +99,12 @@ def station_config(editions, edition_id, bundled_maui_utils=""):
         "STATION_ID": meta.get("station_id", ""),
     }
     if meta.get("maui_utils"):
+        h2h = bool(meta.get("h2h_firmware"))
         values.update(
             {
-                "COMPOSE_FILE": MAUI_COMPOSE_FILE,
+                "COMPOSE_FILE": MAUI_COMPOSE_FILE
+                + (f":{MAUI_H2H_COMPOSE_FILE}" if h2h else ""),
+                "MAUI_H2H_FIRMWARE": "true" if h2h else "false",
                 "FIRMWARE_COMPONENTS": get_field(editions, edition_id, "firmware"),
                 "MAUI_DEVICE": meta.get("maui_device", ""),
                 # Maui results directory (server DIAGNOSEME_RESULTS_DIR).

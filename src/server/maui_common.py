@@ -618,7 +618,7 @@ class FwSelection:
     error: str = ""
 
 
-def _read_stable_marker(marker: str) -> Dict[str, Any]:
+def read_stable_marker(marker: str) -> Dict[str, Any]:
     """Parsed STABLE.json |marker| (which exists); raises ValueError if invalid."""
     try:
         with open(marker, "r", encoding="utf-8") as f:
@@ -630,14 +630,14 @@ def _read_stable_marker(marker: str) -> Dict[str, Any]:
     return info
 
 
-def _stable_marker_fw_file(component_dir: str) -> Tuple[str, str]:
+def stable_marker_fw_file(component_dir: str) -> Tuple[str, str]:
     """Returns (image, version) named by <component_dir>/STABLE.json.
 
     The marker must exist. Raises ValueError when it is unreadable, names an
     invalid or missing file, or the MD5 of the image does not match.
     """
     marker = os.path.join(component_dir, STABLE_FW_MARKER)
-    info = _read_stable_marker(marker)
+    info = read_stable_marker(marker)
     file_name = str(info.get("file") or "")
     expected_md5 = str(info.get("md5") or "").strip().lower()
     if not file_name or os.path.basename(file_name) != file_name:
@@ -673,7 +673,7 @@ def stable_marker_version(component_dir: str) -> str:
     if not os.path.isfile(os.path.join(component_dir, STABLE_FW_MARKER)):
         return ""
     try:
-        return _stable_marker_fw_file(component_dir)[1]
+        return stable_marker_fw_file(component_dir)[1]
     except ValueError as e:
         logging.error("Skipping the stable firmware version: %s", e)
         return ""
@@ -740,7 +740,7 @@ def select_offline_fw(component: str) -> FwSelection:
             continue
         if is_component_dir and os.path.isfile(os.path.join(d, STABLE_FW_MARKER)):
             try:
-                path, version = _stable_marker_fw_file(d)
+                path, version = stable_marker_fw_file(d)
             except ValueError as e:
                 return FwSelection(
                     error=f"Invalid stable {component} firmware: {e}. {FW_UPDATE_HINT}"

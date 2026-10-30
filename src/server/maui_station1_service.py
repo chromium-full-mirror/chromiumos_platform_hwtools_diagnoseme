@@ -1390,6 +1390,10 @@ class SlotConsoleBusyError(RuntimeError):
     """The console of a PDC slot is used by another operation."""
 
 
+class SlotConsoleNotFoundError(SlotConsoleBusyError):
+    """The console of a PDC slot cannot be resolved, so it cannot be claimed."""
+
+
 @dataclasses.dataclass
 class _PdcRunResult:
     """Outcome of one maui-flash PDC run."""
@@ -1525,19 +1529,28 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
         result.returncode = proc.returncode
         result.output = "".join(tool_output).strip()
 
+    def _port_serials(self, dev_port: str) -> Tuple[str, str]:
+        """(MCU console serial, unit serial) of the board on `dev_port` ("" if unknown).
+
+        Revision hook: Maui v1.1 pairs the FTDI console with its ADB endpoint.
+        """
+        ftdi_ser, _, _, adb_ser = (
+            self._topology._find_ftdi_info_for_port(  # pylint: disable=protected-access
+                dev_port
+            )
+        )
+        return ftdi_ser or "", adb_ser or ""
+
     async def _resolve_pdc_serial(
         self, serial_no: str, dev_port: str, requested_port: str, slot_index: int
     ) -> str:
-        """ADB serial of the board on dev_port, else serial_no or MAUI-SLOT<slot>.
+        """Unit serial of the board on dev_port, else serial_no or MAUI-SLOT<slot>.
 
         A MAUI-SLOT<n> log dir is recorded for the board on `requested_port`;
         once the serial is known, the board's earlier temp dir logs are merged.
         """
         if not serial_no or serial_no.startswith("MAUI-SLOT") or "UNKNOWN" in serial_no:
-            ftdi_ser, _, _, adb_ser = await asyncio.to_thread(
-                self._topology._find_ftdi_info_for_port,  # pylint: disable=protected-access
-                dev_port,
-            )
+            ftdi_ser, adb_ser = await asyncio.to_thread(self._port_serials, dev_port)
             serial_no = adb_ser or serial_no or f"MAUI-SLOT{slot_index}"
             if serial_no.startswith("MAUI-SLOT"):
                 # Merged into the serial's dir once the FTDI EEPROM is programmed.
@@ -1659,7 +1672,8 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
             except SlotConsoleBusyError as e:
                 # Nothing was attempted: keep the board's previous log.
                 logging.warning("[Slot %d] %s", slot_index, e)
-                yield failure("Busy", str(e), str(e))
+                block = "Failed" if isinstance(e, SlotConsoleNotFoundError) else "Busy"
+                yield failure(block, str(e), str(e))
                 return
             if maui_utils_runner.simulation_enabled():
                 async for resp in self._simulate_pdc_flash(slot_index, serial_no):
@@ -1862,6 +1876,8 @@ STAGE_LOGS = (
     ("host_only_verification", "host_only_tests.log", "Host-Only Verification"),
     ("host_dut_verification", "host_dut_tests.log", "Host + DUT Verification"),
     ("adb_transfer_test", "adb_transfer_test.log", "ADB Transfer Reliability"),
+    # The Charger Disconnect card is Host+DUT stage 3 (no charger).
+    ("charger_disconnect", "host_dut_stage3_no_charger.log", "Charger Disconnect"),
 )
 # Auxiliary subtest logs (BSL button, RESET button, Host replug) that can fail Host-Only Verification.
 HOST_ONLY_AUX_LOGS = (
@@ -1879,7 +1895,15 @@ HOST_DUT_AUX_LOGS = (
     "host_dut_stage2_with_charger.log",
     "host_dut_stage3_sbu_flip.log",
 )
+# Logs written by the barcode / label pages, the only source of label_verified:
+# the Maui v1.2 serial page log and the label verification log.
+SERIAL_LABEL_LOG = "serial_label_check.log"
 LABEL_LOG = "label_verification.log"
+LABEL_LOGS = (SERIAL_LABEL_LOG, LABEL_LOG)
+# Barcode line of the serial page log (its STATUS also covers the enumeration).
+_SERIAL_PAGE_BARCODE_RE = re.compile(
+    r"^\s*Barcode matches[^:\n]*:\s*(PASS|FAIL)", re.IGNORECASE | re.MULTILINE
+)
 
 # Log STATUS -> (stage verdict, details).
 _STATUS_VERDICTS = {
@@ -1968,6 +1992,85 @@ def _merge_ui_stage_statuses(
     return merged
 
 
+def _add_host_dut_stage_logs(
+    dir_path: str,
+    stage_statuses: Dict[str, str],
+    log_file_infos: List[maui_manufacturing_pb2.MauiLogFileInfo],
+) -> int:
+    """Adds the per-stage Host+DUT logs (cards with/without charger, SBU flip).
+
+    The functional suite runs the Host+DUT cards one stage at a time, so
+    host_dut_tests.log is usually missing: then the stage verdict is derived
+    from the stage logs (any FAILED -> FAILED, else any BYPASSED -> BYPASSED,
+    else PASSED). Each stage log is judged by its STATUS line and listed after
+    (or instead of the missing) host_dut_tests.log entry.
+
+    Returns:
+      The number of stage logs present.
+    """
+    stage_infos = []
+    for aux_log in HOST_DUT_AUX_LOGS:
+        aux_path = os.path.join(dir_path, aux_log)
+        content = _read_log_file(aux_path)
+        if content is None:
+            continue
+        verdict, details = _log_verdict(content)
+        stage_infos.append(
+            maui_manufacturing_pb2.MauiLogFileInfo(
+                log_name=aux_log,
+                file_path=aux_path,
+                file_size_bytes=os.path.getsize(aux_path),
+                is_present=True,
+                stage_verdict=verdict,
+                details=details,
+            )
+        )
+    if not stage_infos:
+        return 0
+    verdicts = [info.stage_verdict for info in stage_infos]
+    host_dut_idx = next(
+        (
+            n
+            for n, info in enumerate(log_file_infos)
+            if info.log_name == "host_dut_tests.log"
+        ),
+        None,
+    )
+    if stage_statuses.get("host_dut_verification", "NOT_RUN") == "NOT_RUN":
+        if "FAILED" in verdicts:
+            stage_statuses["host_dut_verification"] = "FAILED"
+        elif "BYPASSED" in verdicts:
+            stage_statuses["host_dut_verification"] = "BYPASSED"
+        elif "PASSED" in verdicts:
+            stage_statuses["host_dut_verification"] = "PASSED"
+        # The stage logs replace the missing host_dut_tests.log entry.
+        if host_dut_idx is not None:
+            log_file_infos[host_dut_idx : host_dut_idx + 1] = stage_infos
+        else:
+            log_file_infos.extend(stage_infos)
+    else:
+        insert_at = len(log_file_infos) if host_dut_idx is None else host_dut_idx + 1
+        log_file_infos[insert_at:insert_at] = stage_infos
+    return len(stage_infos)
+
+
+def _label_verdict_from_logs(dir_path: str) -> str:
+    """label_verified from the barcode / label page logs (NOT_RUN when none exists)."""
+    for log_name in LABEL_LOGS:
+        content = _read_log_file(os.path.join(dir_path, log_name))
+        if content is None:
+            continue
+        if log_name == SERIAL_LABEL_LOG:
+            barcode = _SERIAL_PAGE_BARCODE_RE.search(content)
+            if barcode:
+                return "PASSED" if barcode.group(1).upper() == "PASS" else "FAILED"
+        status = maui_common.parse_log_status(content)
+        if status in (LogStatus.PASSED, LogStatus.BYPASSED, LogStatus.NOT_RUN):
+            return status
+        return "FAILED"
+    return "NOT_RUN"
+
+
 def analyze_device_manufacturing_logs(
     serial_number: str,
     stage_logs: Optional[Tuple[Tuple[str, str, str], ...]] = None,
@@ -2020,16 +2123,10 @@ def analyze_device_manufacturing_logs(
                         info.details = f"{label} subtest failed in {aux_log}"
                 break
 
-    # Check label_verification.log if present
-    lbl_content = _read_log_file(os.path.join(dir_path, LABEL_LOG))
-    if lbl_content is None:
-        stage_statuses["label_verified"] = "NOT_RUN"
-    else:
-        lbl_status = maui_common.parse_log_status(lbl_content)
-        if lbl_status in (LogStatus.PASSED, LogStatus.BYPASSED, LogStatus.NOT_RUN):
-            stage_statuses["label_verified"] = lbl_status
-        else:
-            stage_statuses["label_verified"] = "FAILED"
+    present_count += _add_host_dut_stage_logs(dir_path, stage_statuses, log_file_infos)
+
+    # label_verified comes only from the barcode / label pages.
+    stage_statuses["label_verified"] = _label_verdict_from_logs(dir_path)
 
     # Result is evaluated strictly from available logs (missing stages are acceptable)
     return (
@@ -2453,17 +2550,20 @@ class MauiDeviceManagementServicer(
             serial_no, self.STAGE_LOGS
         )
 
-        # If label verification was explicitly provided in request, update label_verified status
-        if request.label_verified or (
-            request.scanned_barcode
-            and request.adb_serial
-            and request.scanned_barcode.upper() == request.adb_serial.upper()
-        ):
-            stage_statuses["label_verified"] = "PASSED"
-        else:
-            stage_statuses["label_verified"] = stage_statuses.get(
-                "label_verified", "BYPASSED"
-            )
+        # label_verified is only set by a barcode page: its log (see
+        # analyze_device_manufacturing_logs) or a submission carrying the scanned
+        # barcode. Without either (e.g. SMT functional) it stays NOT_RUN, even
+        # when the USB serials match.
+        if request.scanned_barcode:
+            if request.label_verified:
+                stage_statuses["label_verified"] = "PASSED"
+            elif stage_statuses.get("label_verified", "NOT_RUN") == "NOT_RUN":
+                scan_ok = bool(
+                    request.adb_serial
+                    and request.scanned_barcode.upper() == request.adb_serial.upper()
+                )
+                stage_statuses["label_verified"] = "PASSED" if scan_ok else "FAILED"
+        stage_statuses.setdefault("label_verified", "NOT_RUN")
 
         # The UI reports bypassed / failed steps the logs cannot show.
         stage_statuses = _merge_ui_stage_statuses(

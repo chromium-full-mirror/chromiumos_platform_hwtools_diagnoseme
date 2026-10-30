@@ -22,6 +22,7 @@ import {
   GRPC_MAUI_PDC_FLASHING_CLIENT_SETTINGS,
   GRPC_MAUI_STATION2_FUNCTIONAL_TESTING_CLIENT_SETTINGS,
   GRPC_MAUI_DEVICE_MANAGEMENT_CLIENT_SETTINGS,
+  GRPC_MAUI_MCU_SERVICE_CLIENT_SETTINGS,
 } from '../../proto/maui-manufacturing.pbconf';
 
 @NgModule({
@@ -71,6 +72,10 @@ export class ServicesModule {
         },
         {
           provide: GRPC_MAUI_DEVICE_MANAGEMENT_CLIENT_SETTINGS,
+          useValue: {host: this.getServiceURL()} as GrpcWebClientSettings,
+        },
+        {
+          provide: GRPC_MAUI_MCU_SERVICE_CLIENT_SETTINGS,
           useValue: {host: this.getServiceURL()} as GrpcWebClientSettings,
         },
         {provide: GRPC_CLIENT_FACTORY, useClass: GrpcWebClientFactory},

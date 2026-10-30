@@ -7,3 +7,4 @@ Designed to allow non developers access to the same tools and processes with
 little training.
 
 See [docs/editions.md](docs/editions.md) for editions, releases and station configuration.
+See [docs/maui.md](docs/maui.md) for Maui stations.

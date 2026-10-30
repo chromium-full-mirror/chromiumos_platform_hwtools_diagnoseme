@@ -1,5 +1,5 @@
 {
-  "_comment": "DiagnoseMe editions (build-time product flavors), the single source of truth of the edition list. Read by src/server/editions.py (the server only adds its services table), tools/edition_info.py (build-diagnoseme.sh, cloudbuild, deb/ISO builders, tools/promote.sh) and checked against the Angular edition files, angular.json and Dockerfile.base by src/server/tests/unit/test_editions.py. Every build names its edition explicitly (there is no default edition). docker_tag_aliases are moved together with the edition tag by tools/promote.sh, the only way to promote a release (servo-dolos: :release, the tag of the stations installed before the editions). station_tag is the image tag of the edition's stations (config.env DOCKER_TAG, default the edition id; servo-dolos stations keep following :release). deb_package is the station package; the edition packages conflict with / replace each other. iso_latest is the GCS name of the edition's latest ISO (default custom-debian-preseed-<edition>-latest.iso). Maui editions (maui_utils) bundle the stable maui-utils release (gs://maui-firmware/docker/<version>/stable.dockertag); firmware lists the components of /var/lib/diagnoseme/firmware and maui_device the device of their stable markers (tools/maui_fw_fetch.py); the ISO and offline bundle of an edition fail unless every firmware_stable_required component has a valid STABLE.json (stations refuse several images without one); results_dir is the Maui results directory of the station (DIAGNOSEME_RESULTS_DIR); maui_hw_rev is the Maui hardware revision of the server hooks. realtek_tools marks the editions with the Servo v4p1 tooling (their Dockerfile.base target uses rtk-tools-builder): only their debs ship rtunicpg, the RTL8153 EEPROM files and the r8152 DKMS driver (dist/rtunicpg.tar.bz2, dist/r8152-2.21.4.tar.bz2, fetched by tools/fetch_rtk_tools.sh) and depend on dkms.",
+  "_comment": "DiagnoseMe editions (build-time product flavors), the single source of truth of the edition list. Read by src/server/editions.py (the server only adds its services table), tools/edition_info.py (build-diagnoseme.sh, cloudbuild, deb/ISO builders, tools/promote.sh) and checked against the Angular edition files, angular.json and Dockerfile.base by src/server/tests/unit/test_editions.py. Every build names its edition explicitly (there is no default edition). docker_tag_aliases are moved together with the edition tag by tools/promote.sh, the only way to promote a release (servo-dolos: :release, the tag of the stations installed before the editions). station_tag is the image tag of the edition's stations (config.env DOCKER_TAG, default the edition id; servo-dolos stations keep following :release). deb_package is the station package; the edition packages conflict with / replace each other. iso_latest is the GCS name of the edition's latest ISO (default custom-debian-preseed-<edition>-latest.iso). Maui editions (maui_utils) bundle the stable maui-utils release (gs://maui-firmware/docker/<version>/stable.dockertag); firmware lists the components of /var/lib/diagnoseme/firmware and maui_device the device of their stable markers (tools/maui_fw_fetch.py); firmware_stable_required lists the components that the ISO and the offline bundle must contain with a valid STABLE.json (stations refuse several images without one; Maui v1.2: the approved MCU App builds come from them); results_dir is the Maui results directory of the station (DIAGNOSEME_RESULTS_DIR); maui_hw_rev is the Maui hardware revision of the server hooks; h2h_firmware (Maui v1.2) enables H2H firmware flashing: the station creates the H2H firmware directory and mounts it with docker-compose-maui-h2h.yaml. realtek_tools marks the editions with the Servo v4p1 tooling (their Dockerfile.base target uses rtk-tools-builder): only their debs ship rtunicpg, the RTL8153 EEPROM files and the r8152 DKMS driver (dist/rtunicpg.tar.bz2, dist/r8152-2.21.4.tar.bz2, fetched by tools/fetch_rtk_tools.sh) and depend on dkms.",
   "editions": {
     "servo-dolos": {
       "title": "Servo / Dolos",
@@ -62,6 +62,27 @@
       "results_dir": "/var/log/diagnoseme/maui_v11_results",
       "station_id": "MAUI_V1_1_STATION",
       "deb_package": "diagnoseme-maui-v1.1"
+    },
+    "maui-v1.2": {
+      "title": "Maui v1.2",
+      "landing": "/maui/v1.2/testing",
+      "shipped": true,
+      "maui_utils": true,
+      "maui_device": "maui_v12",
+      "maui_hw_rev": "v1.2",
+      "firmware": [
+        "mcu_app",
+        "mcu_full",
+        "pdc"
+      ],
+      "firmware_stable_required": [
+        "mcu_app",
+        "mcu_full"
+      ],
+      "results_dir": "/var/log/diagnoseme/maui_v12_results",
+      "h2h_firmware": true,
+      "station_id": "MAUI_V1_2_STATION",
+      "deb_package": "diagnoseme-maui-v1.2"
     },
     "all": {
       "title": "All (development)",

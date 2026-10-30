@@ -1,0 +1,113 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<diagnoseme-rework-card
+  [id]="cardId"
+  [title]="cardTitle"
+  [progress]="inProgress"
+  [disabled]="locked">
+  <diagnoseme-rework-card-column column="1">
+    <div class="steps-vertical-container">
+      <div class="instructions-box">
+        <span class="step-num">Step 1</span>
+        <span class="step-text"
+          >Keep the Maui board <strong>Host USB-C port</strong> connected and
+          close ADB sessions: the H2H bridge drops off USB for about half a
+          second.</span
+        >
+      </div>
+      <div class="instructions-box">
+        <span class="step-num">Step 2</span>
+        <span class="step-text"
+          >Click <strong>Check H2H Flash Access</strong>. The MCU reads the
+          serial number from the H2H SPI flash, which must match the H2H serial
+          before and after the bridge restarts (about 2 s).</span
+        >
+      </div>
+    </div>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="2">
+    <div class="status-panel">
+      @if (!firmwareSupported) {
+        <div class="info-row">
+          <span class="label">MCU App:</span>
+          <span class="badge badge-fail"
+            >Not supported: update the MCU App (Programming page)</span
+          >
+        </div>
+      }
+      @if (hostSerialBefore) {
+        <div class="info-row">
+          <span class="label">H2H Serial (host):</span>
+          <span class="value code">{{ hostSerialBefore }}</span>
+        </div>
+      }
+      @if (spiSerial) {
+        <div class="info-row">
+          <span class="label">Serial in SPI Flash:</span>
+          <span
+            class="value code"
+            [class.mismatch]="spiSerial !== hostSerialBefore"
+            >{{ spiSerial }}</span
+          >
+        </div>
+      }
+      @if (hostSerialAfter) {
+        <div class="info-row">
+          <span class="label">H2H Serial (after):</span>
+          <span
+            class="value code"
+            [class.mismatch]="!!spiSerial && hostSerialAfter !== spiSerial"
+            >{{ hostSerialAfter }}</span
+          >
+        </div>
+      }
+      @if (jedecId) {
+        <div class="info-row">
+          <span class="label">SPI Flash:</span>
+          <span class="value code"
+            >JEDEC ID {{ jedecId
+            }}{{ flashSize ? ', ' + flashSize : '' }}</span
+          >
+        </div>
+      }
+      @if (message) {
+        <div class="info-row">
+          <span class="label">Status:</span>
+          <span
+            class="badge"
+            [class.badge-active]="status === 'PASSED'"
+            [class.badge-fail]="status === 'FAILED'"
+            >{{ message }}</span
+          >
+        </div>
+      }
+      <div class="actions-wrapper h2h-spi-actions">
+        <button
+          mat-raised-button
+          color="primary"
+          class="action-btn-wide"
+          [disabled]="inProgress || locked"
+          (click)="run()">
+          <mat-icon>memory</mat-icon>
+          Check H2H Flash Access
+        </button>
+        <button
+          mat-stroked-button
+          color="warn"
+          [disabled]="inProgress || locked"
+          (click)="bypass()">
+          <mat-icon>skip_next</mat-icon>
+          Bypass
+        </button>
+      </div>
+    </div>
+  </diagnoseme-rework-card-column>
+
+  <diagnoseme-rework-card-column column="3">
+    <test-pass-fail-button #h2hSpiStatus></test-pass-fail-button>
+  </diagnoseme-rework-card-column>
+</diagnoseme-rework-card>
