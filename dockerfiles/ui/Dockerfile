@@ -24,6 +24,10 @@ COPY src/ui/ /app/
 
 WORKDIR /app
 RUN ng build --output-path=dist --output-hashing=all --configuration=production
+# ng build copies symlinked assets (e.g. assets/img/*.jpg -> placeholder.jpg)
+# as absolute symlinks into /app; dereference them and make everything
+# world-readable for nginx, independent of the checkout's umask.
+RUN cp -rL dist/browser dist/site && chmod -R a+rX dist/site
 
 #####################################################################
 
@@ -34,16 +38,13 @@ RUN mkdir -p /var/cache/nginx/proxy_temp
 RUN chmod uog+rw /var/run
 
 # copy artifact build from the 'build environment'
-COPY --from=build /app/dist/browser /etc/nginx/html/
+COPY --from=build /app/dist/site /etc/nginx/html/
 
 COPY src/ui/nginx.conf /etc/nginx
 RUN rm -f /etc/nginx/conf.d/*
 RUN rm -f /docker-entrypoint.d/*
 RUN rm -f /var/log/nginx/*
 RUN chmod uog+rw /var/log/nginx
-
-COPY src/ui/src/assets/* /etc/nginx/html/assets/img/
-COPY src/ui/src/assets/build_info.json /etc/nginx/html/assets/
 
 
 

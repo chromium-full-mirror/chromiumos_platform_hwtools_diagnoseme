@@ -3,10 +3,12 @@
 // found in the LICENSE file.
 
 .reworkcard {
-    margin-bottom: 24px;
+    margin-bottom: 20px;
+    transition: opacity 0.25s ease, box-shadow 0.25s ease;
+    border-radius: 8px;
 
     &.disabled-card {
-      opacity: 0.3;
+      opacity: 0.35;
       pointer-events: none;
     }
 }
@@ -14,8 +16,8 @@
 .f-container {
   width: 100%;
   display: grid;
-  grid-template-columns: 550px 400px 60px;
+  grid-template-columns: minmax(340px, 1.2fr) minmax(300px, 1fr) 60px;
   grid-auto-rows: minmax(60px, auto);
-  grid-gap: 8px;
+  grid-gap: 12px;
   align-items: center;
 }

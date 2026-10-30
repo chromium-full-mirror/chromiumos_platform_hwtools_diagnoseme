@@ -1,0 +1,28 @@
+#!/bin/bash
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# Forwards maui-flash / maui-ctl to the running DiagnoseMe server container,
+# or to a local Maui tools checkout if the container is not running.
+# The deb installs this script as maui-flash and maui-ctl (symlink); the
+# command run is selected by the name this script was invoked as.
+
+TOOL="$(basename "$0")"
+case "$TOOL" in
+    maui-flash) LOCAL_SCRIPT="/usr/local/maui/tools/src/maui_flash.py" ;;
+    maui-ctl) LOCAL_SCRIPT="/usr/local/maui/tools/src/maui_ctl.py" ;;
+    *)
+        echo "Error: unsupported command name '$TOOL' (expected maui-flash or maui-ctl)." >&2
+        exit 1
+        ;;
+esac
+
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^server$'; then
+    exec docker exec -i server "$TOOL" "$@"
+elif [ -f "$LOCAL_SCRIPT" ]; then
+    exec python3 "$LOCAL_SCRIPT" "$@"
+else
+    echo "Error: DiagnoseMe server container is not running. Please run 'start-diagnoseme' first."
+    exit 1
+fi

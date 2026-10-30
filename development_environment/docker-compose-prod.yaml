@@ -6,64 +6,68 @@ services:
   ##############################################################################
   ui:
     container_name: ui
-    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/ui:release
+    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/ui:${DOCKER_TAG:-release}
     hostname: ui
     restart: unless-stopped
-    pull_policy: always
+    pull_policy: ${PULL_POLICY:-always}
 
     networks:
       diagnoseme:
         ipv4_address: 192.168.100.10
 
     volumes:
-      - logs:/var/log/nginx
+      - /var/log/diagnoseme/nginx:/var/log/nginx
 
   ##############################################################################
   server:
     container_name: server
-    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/server:release
+    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/server:${DOCKER_TAG:-release}
     hostname: server
     restart: unless-stopped
     privileged: true
-    pull_policy: always
+    pull_policy: ${PULL_POLICY:-always}
     network_mode: host
     environment:
       - TEST_DUT=brya
       - TEST_MODEL=banshee
       - RESULTS_SERVER=${RESULTS_SERVER:-}
+      - DIAGNOSEME_DEVICE_LOG_DIR=/var/log/diagnoseme/devices
+      - DIAGNOSEME_RESULTS_DIR=/var/log/diagnoseme/maui_v11_results
 
     volumes:
-      - logs:/var/log/rpcserver
+      - /var/log/diagnoseme/rpcserver:/var/log/rpcserver
+      - /var/log/diagnoseme/devices:/var/log/diagnoseme/devices
+      - /var/log/diagnoseme/maui_v11_results:/var/log/diagnoseme/maui_v11_results
       - /dev:/dev
       - /sys:/sys
       - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/diagnoseme/firmware:/var/lib/diagnoseme/firmware:ro
 
   #############################################################################
   envoy:
     container_name: envoy
-    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/envoy:release
+    image: us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/envoy:${DOCKER_TAG:-release}
     restart: unless-stopped
-    pull_policy: always
+    pull_policy: ${PULL_POLICY:-always}
     network_mode: host
     environment:
       ENVOY_UID: 0
 
     hostname: envoy-proxy
     volumes:
-      - logs:/var/log/envoy
+      - /var/log/diagnoseme/envoy:/var/log/envoy
 
   #############################################################################
   watchtower:
     container_name: watchtower
     image: nickfedor/watchtower:latest
     restart: unless-stopped
+    pull_policy: if_not_present
+    # Not started by start-diagnoseme in offline mode (Maui factory stations).
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     command: --interval 3600 --include-restarting ui server envoy
   #############################################################################
-
-volumes:
-  logs: {}
 
 networks:
   diagnoseme:

@@ -5,7 +5,12 @@
 .gcloudignore
 .git
 .gitignore
-dist/
+# dist/firmware/ must exist for the deb and server Dockerfiles (COPY), so
+# upload its placeholder file (but no staged firmware).
+dist/*
+!dist/firmware/
+dist/firmware/*
+!dist/firmware/.keep
 node_modules/
 src/generated/
 src/ui/node_modules/

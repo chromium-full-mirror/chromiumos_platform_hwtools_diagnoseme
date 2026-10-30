@@ -1,0 +1,1036 @@
+<!-- Copyright 2026 The ChromiumOS Authors
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file.
+-->
+
+<div class="maui-container">
+  <div class="header-section">
+    <h2>{{ suiteTitle }}</h2>
+    <p class="subtitle">{{ suiteSubtitle }}</p>
+    <div
+      class="device-status-badge"
+      [class.connected]="deviceConnected && deviceProgrammed"
+      [class.warning]="deviceConnected && !deviceProgrammed"
+      [class.disconnected]="!deviceConnected">
+      <mat-icon>{{
+        deviceConnected && deviceProgrammed
+          ? 'check_circle'
+          : deviceConnected
+            ? 'warning'
+            : 'usb_off'
+      }}</mat-icon>
+      <span class="device-status-text">
+        @if (deviceConnected && deviceProgrammed) {
+          <strong>Programmed Maui Device:</strong> {{ serialNumber }} (Port:
+          {{ devicePort || '/dev/ttyUSB0' }})
+        } @else if (deviceConnected && !deviceProgrammed) {
+          <strong>Unprogrammed Device Detected:</strong>
+          {{ serialNumber || 'Unknown' }} (FTDI PID:
+          {{ ftdiPid || '0x6001' }}) —
+          <em>Step 1 provisioning required before functional testing</em>
+        } @else {
+          <strong>No Maui Device Detected:</strong> Please connect Maui Host
+          USB-C cable to this test station.
+        }
+      </span>
+      <button
+        mat-icon-button
+        (click)="refreshDeviceStatus()"
+        title="Refresh Device Detection">
+        <mat-icon>refresh</mat-icon>
+      </button>
+    </div>
+    @if (unexpectedSerial) {
+      <div class="operator-warning-banner">
+        <mat-icon>warning</mat-icon>
+        <span
+          ><strong>Different Unit Detected:</strong> {{ unexpectedSerial }} is
+          connected, but this test sequence belongs to {{ lockedSerial }}.
+          Reconnect {{ lockedSerial }} to continue, or reload the page to start
+          a new unit.</span
+        >
+      </div>
+    }
+  </div>
+
+  <div class="cards-column">
+    <!-- Card 0: Outer Housing Barcode Verification (FATP QT0 Mode only) -->
+    @if (isFatpMode) {
+      <diagnoseme-rework-card
+        id="func-card-0"
+        title="0. Outer Housing Barcode Verification"
+        [progress]="cards.barcode.inProgress"
+        [disabled]="false">
+        <diagnoseme-rework-card-column column="1">
+          <div class="steps-vertical-container">
+            <div class="instructions-box">
+              <span class="step-num">Step 1</span>
+              <span class="step-text"
+                >Scan or type the <strong>Outer Housing Barcode</strong> using
+                the USB handheld scanner.</span
+              >
+            </div>
+            <div class="instructions-box">
+              <span class="step-num">Step 2</span>
+              <span class="step-text"
+                >Verify that the scanned barcode matches the internal electronic
+                serial number (FTDI / ADB).</span
+              >
+            </div>
+          </div>
+        </diagnoseme-rework-card-column>
+
+        <diagnoseme-rework-card-column column="2">
+          <div class="status-panel">
+            <div class="info-row">
+              <span class="label">Electronic Serial:</span>
+              <span class="value code">{{ serialNumber || 'Pending detection...' }}</span>
+            </div>
+            @if (adbSerial) {
+              <div class="info-row">
+                <span class="label">ADB Serial:</span>
+                <span class="value code">{{ adbSerial }}</span>
+              </div>
+            }
+            @if (ftdiSerial) {
+              <div class="info-row">
+                <span class="label">FTDI Serial:</span>
+                <span class="value code">{{ ftdiSerial }}</span>
+              </div>
+            }
+            <div class="barcode-input-container">
+              <mat-form-field appearance="outline" class="barcode-field">
+                <mat-label>Scan Outer Barcode</mat-label>
+                <input
+                  matInput
+                  [(ngModel)]="scannedBarcode"
+                  (keyup.enter)="verifyBarcode()"
+                  placeholder="Scan or enter barcode"
+                  [disabled]="cards.barcode.inProgress || barcodeMatches" />
+                <mat-icon matSuffix>qr_code_scanner</mat-icon>
+              </mat-form-field>
+            </div>
+            @if (barcodeMessage) {
+              <div class="info-row">
+                <span class="label">Match Result:</span>
+                <span
+                  class="badge"
+                  [class.badge-active]="barcodeMatches"
+                  [class.badge-fail]="barcodeCheckFailed">
+                  {{ barcodeMessage }}
+                </span>
+              </div>
+            }
+            <div class="actions-wrapper" style="display: flex; gap: 8px;">
+              <button
+                mat-raised-button
+                color="primary"
+                class="action-btn-wide"
+                [disabled]="otherUnitDetected || cards.barcode.inProgress || !scannedBarcode.trim()"
+                (click)="verifyBarcode()">
+                <mat-icon>verified</mat-icon>
+                Verify Barcode Match
+              </button>
+              <button
+                mat-stroked-button
+                color="warn"
+                [disabled]="otherUnitDetected || cards.barcode.inProgress"
+                (click)="bypassCard('barcode')">
+                <mat-icon>skip_next</mat-icon>
+                Bypass
+              </button>
+            </div>
+          </div>
+        </diagnoseme-rework-card-column>
+
+        <diagnoseme-rework-card-column column="3">
+          <test-pass-fail-button #barcodeStatus></test-pass-fail-button>
+        </diagnoseme-rework-card-column>
+      </diagnoseme-rework-card>
+    }
+
+    <!-- Card 1: Host USB & Console Check -->
+    <diagnoseme-rework-card
+      id="func-card-1"
+      title="1. Host USB & Console Verification"
+      [progress]="cards.hostUsb.inProgress"
+      [disabled]="isFatpMode && !barcodeMatches">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text"
+              >Connect Maui board <strong>Host USB-C port</strong> to the test
+              station Host PC.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text"
+              >Plug the USB-C Charger into the Maui
+              <strong>Charger Passthrough port</strong> (required for Amber
+              LED2).</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 3</span>
+            <span class="step-text"
+              >Click <strong>Run USB & Console Check</strong>.</span
+            >
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          @if (mcuVersionStr) {
+            <div class="info-row">
+              <span class="label">MCU Version:</span>
+              <span class="value code">{{ mcuVersionStr }}</span>
+            </div>
+          }
+          @if (pdcAppConfigStr) {
+            <div class="info-row">
+              <span class="label">PDC AppConfig:</span>
+              <span class="value code">{{ pdcAppConfigStr }}</span>
+            </div>
+          }
+          <ng-container
+            *ngTemplateOutlet="
+              hostCheckDetails;
+              context: {$implicit: hostUsbCheck, orientationFirst: false}
+            "></ng-container>
+          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+            <button
+              #usbCheckBtn
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="otherUnitDetected || (isFatpMode && !barcodeMatches) || cards.hostUsb.inProgress"
+              (click)="runUsbCheck()">
+              <mat-icon>play_arrow</mat-icon>
+              Run USB & Console Check
+            </button>
+            <button
+              mat-stroked-button
+              color="warn"
+              [disabled]="otherUnitDetected || (isFatpMode && !barcodeMatches) || cards.hostUsb.inProgress"
+              (click)="bypassCard('hostUsb')">
+              <mat-icon>skip_next</mat-icon>
+              Bypass
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #usbCheckStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+
+    <!-- Card 2: Host Cable 180° Flip Test -->
+    <diagnoseme-rework-card
+      id="func-card-2"
+      title="2. Host Cable 180° Orientation Flip Test"
+      [progress]="cards.hostFlip.inProgress"
+      [disabled]="!cards.hostUsb.done">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text"
+              >Unplug the Host USB-C cable from the Maui board.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text"
+              >Flip the connector <strong>180 degrees</strong> and plug it back
+              in.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 3</span>
+            <span class="step-text"
+              >Click <strong>Verify Host 180° Flip</strong>.</span
+            >
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          <ng-container
+            *ngTemplateOutlet="
+              hostCheckDetails;
+              context: {$implicit: hostFlipCheck, orientationFirst: true}
+            "></ng-container>
+          @if (replugMessage) {
+            <div class="info-row">
+              <span class="label">Flip Status:</span>
+              <span class="badge" [class.badge-active]="cards.hostFlip.status === 'PASSED'">{{
+                replugMessage
+              }}</span>
+            </div>
+          }
+          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+            <button
+              #replugBtn
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="otherUnitDetected || !cards.hostUsb.done || cards.hostFlip.inProgress"
+              (click)="runHostReplug()">
+              <mat-icon>swap_horiz</mat-icon>
+              Verify Host 180° Flip
+            </button>
+            <button
+              mat-stroked-button
+              color="warn"
+              [disabled]="otherUnitDetected || !cards.hostUsb.done || cards.hostFlip.inProgress"
+              (click)="bypassCard('hostFlip')">
+              <mat-icon>skip_next</mat-icon>
+              Bypass
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #replugStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+
+    <!-- Card 3: RESET Button Test -->
+    <diagnoseme-rework-card
+      id="func-card-3"
+      title="3. Interactive RESET Button Test"
+      [progress]="resetBaselineInProgress || cards.reset.inProgress"
+      [disabled]="!cards.hostFlip.done">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text"
+              >Click <strong>1. Check Baseline Uptime</strong>.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text"
+              >Press the physical <strong>RESET</strong> button on the Maui
+              board.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 3</span>
+            <span class="step-text"
+              >Click <strong>2. Verify Reboot</strong>.</span
+            >
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          @if (resetMessage) {
+            <div class="info-row">
+              <span class="label">Reset Status:</span>
+              <span class="badge" [class.badge-active]="cards.reset.status === 'PASSED'">{{
+                resetMessage
+              }}</span>
+            </div>
+          }
+          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+            <button
+              #captureResetBtn
+              mat-raised-button
+              color="accent"
+              class="action-btn-wide"
+              [disabled]="otherUnitDetected || !cards.hostFlip.done || resetBaselineInProgress"
+              (click)="captureResetBaseline()">
+              <mat-icon>timer</mat-icon>
+              1. Check Baseline Uptime
+            </button>
+            <button
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="
+                otherUnitDetected ||
+                !resetBaselineCaptured ||
+                resetBaselineInProgress ||
+                cards.reset.inProgress
+              "
+              (click)="verifyResetReboot()">
+              <mat-icon>restart_alt</mat-icon>
+              2. Verify Reboot
+            </button>
+            <button
+              mat-stroked-button
+              color="warn"
+              [disabled]="otherUnitDetected || !cards.hostFlip.done || cards.reset.inProgress"
+              (click)="bypassCard('reset')">
+              <mat-icon>skip_next</mat-icon>
+              Bypass
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #resetStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+
+    <!-- Card 4: BSL Button Test (ADC Status) -->
+    <diagnoseme-rework-card
+      id="func-card-4"
+      title="4. Interactive BSL Button Test (ADC Status)"
+      [progress]="cards.bsl.inProgress"
+      [disabled]="!cards.reset.done">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text"
+              >Press and <strong>HOLD</strong> the physical
+              <strong>BSL</strong> button on the Maui board.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text"
+              >While holding, click <strong>Read BSL ADC</strong>.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 3</span>
+            <span class="step-text"
+              >Release the BSL button once reading completes.</span
+            >
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          @if (peakBslMv > 0) {
+            <div class="info-row">
+              <span class="label">ADC Voltage:</span>
+              <span class="value code">{{ peakBslMv }} mV (Expected &gt; {{ bslThresholdMv }} mV)</span>
+            </div>
+          }
+          @if (bslMessage) {
+            <div class="info-row">
+              <span class="label">BSL Status:</span>
+              <span class="badge" [class.badge-active]="cards.bsl.status === 'PASSED'">{{
+                bslMessage
+              }}</span>
+            </div>
+          }
+          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+            <button
+              #readBslBtn
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="otherUnitDetected || !cards.reset.done || cards.bsl.inProgress"
+              (click)="readBslButton()">
+              <mat-icon>touch_app</mat-icon>
+              Read BSL ADC
+            </button>
+            <button
+              mat-stroked-button
+              color="warn"
+              [disabled]="otherUnitDetected || !cards.reset.done || cards.bsl.inProgress"
+              (click)="bypassCard('bsl')">
+              <mat-icon>skip_next</mat-icon>
+              Bypass
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #bslStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+
+    <!-- Card 5: Visual LED Verification -->
+    <diagnoseme-rework-card
+      id="func-card-5"
+      title="5. Visual LED Verification"
+      [disabled]="!cards.bsl.done">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text"
+              >Visually inspect the LEDs on the Maui board:</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">LED 1</span>
+            <span class="step-text"
+              ><strong>Amber LED (PD Contract)</strong> — Must be ON when
+              charger plugged.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">LED 2</span>
+            <span class="step-text"
+              ><strong>Green LED (Host Link)</strong> — Must be BLINKING at
+              1 Hz (500ms ON / 500ms OFF).</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text"
+              >Check each box below and click
+              <strong>Confirm LEDs Inspected</strong>.</span
+            >
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          <div class="led-checkbox-group">
+            <mat-checkbox [(ngModel)]="ledAmberChecked" color="primary">
+              Amber LED (PD Contract) ON
+            </mat-checkbox>
+            <mat-checkbox [(ngModel)]="ledGreenChecked" color="primary">
+              Green LED (Host Link) Blinking at 1 Hz
+            </mat-checkbox>
+          </div>
+          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+            <button
+              #confirmLedsBtn
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="otherUnitDetected || !cards.bsl.done"
+              (click)="confirmLeds()">
+              <mat-icon>lightbulb</mat-icon>
+              Confirm LEDs Inspected
+            </button>
+            <button
+              mat-stroked-button
+              color="warn"
+              [disabled]="otherUnitDetected || !cards.bsl.done"
+              (click)="bypassCard('leds')">
+              <mat-icon>skip_next</mat-icon>
+              Bypass
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #ledStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+
+    <!-- Card 6: Host + DUT + Charger Verification (PD & Data Path) -->
+    <diagnoseme-rework-card
+      id="func-card-6"
+      title="6. Host + DUT + Charger Verification (PD & Data Path)"
+      [progress]="cards.hostDutCharger.inProgress"
+      [disabled]="!cards.leds.done">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text"
+              >Connect Maui <strong>Host USB-C port</strong> to the Host PC.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text"
+              >Connect Maui <strong>DUT USB-C port</strong> to the Chromebook
+              DUT.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 3</span>
+            <span class="step-text"
+              >Plug external USB-C PD Charger into Maui
+              <strong>Charger Passthrough port</strong>.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 4</span>
+            <span class="step-text"
+              >Click <strong>Verify Host + DUT + Charger</strong>.</span
+            >
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          <div class="info-row">
+            <span class="label">ADB Status:</span>
+            <span class="value" [class.tag-prog]="adbConnected">
+              {{
+                adbConnected
+                  ? 'ADB Authorized & Connected'
+                  : cards.hostDutCharger.inProgress
+                    ? 'Checking ADB...'
+                    : 'Awaiting Check'
+              }}
+            </span>
+          </div>
+          @if (h2hLinkSpeed) {
+            <div class="info-row">
+              <span class="label">H2H Host Speed:</span>
+              <span class="value code">{{ h2hLinkSpeed }}</span>
+            </div>
+          }
+          @if (adbDutSpeed) {
+            <div class="info-row">
+              <span class="label">DUT ADB Speed:</span>
+              <span class="value code">{{ adbDutSpeed }}</span>
+            </div>
+          }
+          @if (ecVersionStr || gscVersionStr) {
+            <div class="info-row">
+              <span class="label">CCD Consoles:</span>
+              <span
+                class="badge"
+                [class.badge-active]="ecUartOk && gscUartOk">
+                EC: {{ ecUartOk ? 'OK' : 'FAIL' }} | GSC:
+                {{ gscUartOk ? 'OK' : 'FAIL' }}
+              </span>
+            </div>
+          }
+          @if (negotiatedVoltage > 0) {
+            <div class="info-row">
+              <span class="label">Negotiated Contract:</span>
+              <span class="value" [class.tag-prog]="cards.hostDutCharger.status === 'PASSED'">
+                {{ negotiatedVoltage }}V @ {{ negotiatedCurrent }}A ({{
+                  calculatedPowerW
+                }}W)
+              </span>
+            </div>
+          }
+          @if (measuredVbusMv > 0) {
+            <div class="info-row">
+              <span class="label">Measured VBUS:</span>
+              <span class="value code"
+                >{{ measuredVbusMv }} mV ({{
+                  (measuredVbusMv / 1000) | number: '1.2-3'
+                }}
+                V)</span
+              >
+            </div>
+          }
+          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+            <button
+              #hostDutChargerBtn
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="otherUnitDetected || !cards.leds.done || cards.hostDutCharger.inProgress"
+              (click)="runHostDutCharger()">
+              <mat-icon>bolt</mat-icon>
+              Verify Host + DUT + Charger
+            </button>
+            <button
+              mat-stroked-button
+              color="warn"
+              [disabled]="otherUnitDetected || !cards.leds.done || cards.hostDutCharger.inProgress"
+              (click)="bypassCard('hostDutCharger')">
+              <mat-icon>skip_next</mat-icon>
+              Bypass
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #hostDutChargerStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+
+    <!-- Card 7: 180° DUT Cable Flip Polarity Verification (With Charger) -->
+    <diagnoseme-rework-card
+      id="func-card-7"
+      title="7. 180° DUT Cable Flip Polarity Verification (With Charger)"
+      [progress]="cards.dutSbuFlip.inProgress"
+      [disabled]="!cards.hostDutCharger.done">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text"
+              >Unplug DUT USB-C cable from the Chromebook DUT.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text"
+              >Flip connector <strong>180 degrees</strong> and plug it back
+              into the DUT (keep Charger connected).</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 3</span>
+            <span class="step-text"
+              >Click <strong>Verify 180° SBU Flip</strong>.</span
+            >
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          @if (dutOrientation) {
+            <div class="info-row">
+              <span class="label">SBU Orientation:</span>
+              <span class="badge badge-active">{{ dutOrientation }}</span>
+            </div>
+          }
+          @if (cards.dutSbuFlip.status === 'PASSED') {
+            <div class="info-row">
+              <span class="label">Link Recovery:</span>
+              <span class="badge badge-active">5Gbps + CCD + PD Recovered</span>
+            </div>
+          }
+          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+            <button
+              #dutSbuFlipBtn
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="otherUnitDetected || !cards.hostDutCharger.done || cards.dutSbuFlip.inProgress"
+              (click)="runDutSbuFlip()">
+              <mat-icon>sync_alt</mat-icon>
+              Verify 180° SBU Flip
+            </button>
+            <button
+              mat-stroked-button
+              color="warn"
+              [disabled]="otherUnitDetected || !cards.hostDutCharger.done || cards.dutSbuFlip.inProgress"
+              (click)="bypassCard('dutSbuFlip')">
+              <mat-icon>skip_next</mat-icon>
+              Bypass
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #dutSbuFlipStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+
+    <!-- Card 8: Charger Disconnect Verification (No Charger) -->
+    <diagnoseme-rework-card
+      id="func-card-8"
+      title="8. Charger Disconnect Verification (No Charger)"
+      [progress]="cards.chargerDisconnect.inProgress"
+      [disabled]="!cards.dutSbuFlip.done">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text"
+              >Unplug the external USB-C PD Charger from Maui
+              <strong>Charger Passthrough port</strong>.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text"
+              >Click <strong>Verify Charger Disconnected</strong>.</span
+            >
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          @if (cards.chargerDisconnect.status !== 'NOT_RUN') {
+            <div class="info-row">
+              <span class="label">Charger Status:</span>
+              <span class="value" [class.tag-prog]="chargerDisconnected">
+                {{
+                  chargerDisconnected
+                    ? 'Disconnected (Verified)'
+                    : 'Plug Detected'
+                }}
+              </span>
+            </div>
+          }
+          @if (cards.chargerDisconnect.status === 'PASSED') {
+            <div class="info-row">
+              <span class="label">Battery Sink & Data:</span>
+              <span class="badge badge-active"
+                >5Gbps & CCD Consoles Active on Battery</span
+              >
+            </div>
+          }
+          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+            <button
+              #chargerDisconnectBtn
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="otherUnitDetected || !cards.dutSbuFlip.done || cards.chargerDisconnect.inProgress"
+              (click)="runChargerDisconnect()">
+              <mat-icon>power_off</mat-icon>
+              Verify Charger Disconnected
+            </button>
+            <button
+              mat-stroked-button
+              color="warn"
+              [disabled]="otherUnitDetected || !cards.dutSbuFlip.done || cards.chargerDisconnect.inProgress"
+              (click)="bypassCard('chargerDisconnect')">
+              <mat-icon>skip_next</mat-icon>
+              Bypass
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #chargerDisconnectStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+
+    <!-- Card 9: Log Compilation & Archival -->
+    <diagnoseme-rework-card
+      id="func-card-9"
+      [title]="isFatpMode ? '9. FATP QT0 Summary & Archival' : '9. SMT Log Completion & Archival'"
+      [progress]="savingLogs || inspectingLogs"
+      [disabled]="!cards.chargerDisconnect.done">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text"
+              >Disconnect the tested Maui unit from the host USB-C port.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text"
+              >Click <strong>{{ isFatpMode ? 'Save FATP Logs & Finalize FATP Report' : 'Save SMT Logs & Finalize SMT Report' }}</strong> to compile and archive the report.</span
+            >
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          @if (cards.chargerDisconnect.done && deviceConnected && !logsSaved) {
+            <div class="operator-warning-banner">
+              <mat-icon>warning</mat-icon>
+              <span><strong>Operator Action Required:</strong> Please disconnect the Maui unit from the host USB port to enable log archival and complete testing.</span>
+            </div>
+          }
+          @if (cards.chargerDisconnect.done && !deviceConnected && !logsSaved) {
+            <div class="operator-ready-banner">
+              <mat-icon>check_circle</mat-icon>
+              <span><strong>Ready for Archival:</strong> Maui unit disconnected. Click <strong>{{ isFatpMode ? 'Save FATP Logs' : 'Save SMT Logs' }}</strong> to finalize.</span>
+            </div>
+          }
+          @if (logsSaved) {
+            <div class="station-completion-hero">
+              <mat-icon class="hero-icon">verified</mat-icon>
+              <div class="hero-content">
+                <div class="hero-title">Unit {{ lastTestedSerial || serialNumber }} Completed!</div>
+                <div class="hero-sub">{{ isFatpMode ? 'FATP QT0' : 'SMT Functional' }} report archived to {{ archiveLocation }}. Station refreshing for next unit in {{ reloadDelaySec }}s...</div>
+              </div>
+            </div>
+          }
+          <div class="info-row">
+            <span class="label">Target Device:</span>
+            <span class="value code">{{ lastTestedSerial || serialNumber || 'N/A' }}</span>
+          </div>
+          <div class="info-row">
+            <span class="label">Physical Connection:</span>
+            <span
+              class="badge"
+              [class.badge-active]="!deviceConnected && cards.chargerDisconnect.done"
+              [class.badge-fail]="deviceConnected">
+              {{ deviceConnected ? 'Unit Still Connected (Unplug to proceed)' : 'Unit Disconnected (Safe to Save Logs)' }}
+            </span>
+          </div>
+          @if (logsDirectory) {
+            <div class="info-row">
+              <span class="label">Log Directory:</span>
+              <span class="value code">{{ logsDirectory }}</span>
+            </div>
+          }
+          <div class="info-row">
+            <span class="label">{{ isFatpMode ? 'FATP QT0 Status:' : 'SMT Status:' }}</span>
+            <span
+              class="badge"
+              [class.badge-active]="logsSaved"
+              [class.badge-fail]="!logsSaved && cards.chargerDisconnect.done">
+              {{
+                logsSaved
+                  ? (isFatpMode ? 'FATP QT0 Report Saved' : 'SMT Report Saved')
+                  : (canSaveLogs ? 'Ready for Log Archival' : 'Awaiting Disconnect')
+              }}
+            </span>
+          </div>
+
+          <!-- Log Checklist Panel -->
+          @if (logFiles.length > 0) {
+            <div class="logs-checklist-container">
+              <div class="logs-checklist-header">
+                <mat-icon>folder_zip</mat-icon>
+                <span>Stage Log Files & Verdicts</span>
+              </div>
+              <div class="logs-checklist-list">
+                @for (log of logFiles; track log.logName) {
+                  <div class="log-item-row" [class.log-missing]="!log.isPresent">
+                    <div class="log-item-left">
+                      <mat-icon
+                        class="log-status-icon"
+                        [class.icon-pass]="log.stageVerdict.includes('PASSED')"
+                        [class.icon-bypass]="log.stageVerdict.includes('BYPASSED')"
+                        [class.icon-fail]="log.stageVerdict.includes('FAILED')"
+                        [class.icon-missing]="log.stageVerdict.includes('MISSING')">
+                        {{
+                          log.stageVerdict.includes('PASSED')
+                            ? 'check_circle'
+                            : log.stageVerdict.includes('BYPASSED')
+                              ? 'skip_next'
+                              : log.stageVerdict.includes('FAILED')
+                                ? 'cancel'
+                                : 'help_outline'
+                        }}
+                      </mat-icon>
+                      <span class="log-filename">{{ log.logName }}</span>
+                    </div>
+                    <div class="log-item-right">
+                      <span class="log-details">{{ log.details }}</span>
+                      @if (formatLogSize(log.fileSizeBytes)) {
+                        <span class="log-size">{{ formatLogSize(log.fileSizeBytes) }}</span>
+                      }
+                      <span
+                        class="badge verdict-badge"
+                        [class.badge-active]="log.stageVerdict.includes('PASSED')"
+                        [class.badge-warn]="log.stageVerdict.includes('BYPASSED')"
+                        [class.badge-fail]="log.stageVerdict.includes('FAILED')">
+                        {{ log.stageVerdict }}
+                      </span>
+                    </div>
+                  </div>
+                }
+              </div>
+            </div>
+          }
+
+          @if (logsSaved && finalMesTrackingId) {
+            <div class="final-report-banner">
+              <mat-icon>verified</mat-icon>
+              <div class="banner-content">
+                <div class="banner-title">{{ isFatpMode ? 'FATP Report Package Generated' : 'SMT Report Package Generated' }}</div>
+                <div class="banner-tracking code">MES ID: {{ finalMesTrackingId }}</div>
+                <div class="banner-sub">{{ finalResultsMessage || 'Saved to ' + resultsDir + '/' }}</div>
+              </div>
+            </div>
+          }
+
+          <div class="actions-wrapper" style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button
+              #saveLogsBtn
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="!canSaveLogs"
+              (click)="saveLogs()">
+              <mat-icon>save</mat-icon>
+              {{ isFatpMode ? 'Save FATP Logs & Finalize FATP Report' : 'Save SMT Logs & Finalize SMT Report' }}
+            </button>
+            <button
+              mat-stroked-button
+              color="accent"
+              [disabled]="!cards.chargerDisconnect.done || inspectingLogs"
+              (click)="inspectLogs()">
+              <mat-icon>refresh</mat-icon>
+              Refresh Logs Checklist
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #completeStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+  </div>
+</div>
+
+<!-- Host-side readings shared by Card 1 and Card 2 (see HostCheckResult). -->
+<ng-template
+  #hostCheckDetails
+  let-check
+  let-orientationFirst="orientationFirst">
+  @if (orientationFirst && check.orientation) {
+    <div class="info-row">
+      <span class="label">Host CC Orientation:</span>
+      <span class="value code">{{ check.orientation }}</span>
+    </div>
+  }
+  @if (check.hwrev !== null) {
+    <div class="info-row">
+      <span class="label">HW Revision:</span>
+      <span
+        class="value code"
+        [style.color]="check.hwrevOk ? '#137333' : '#c5221f'"
+        >{{ check.hwrev }} (Expected: {{ expectedHwrev }})</span
+      >
+    </div>
+  }
+  @if (check.tempC !== null) {
+    <div class="info-row">
+      <span class="label">Temperature:</span>
+      <span
+        class="value code"
+        [style.color]="check.tempOk ? '#137333' : '#c5221f'"
+        >{{ check.tempC | number: '1.1-1' }} °C ({{
+          temperatureRangeLabel
+        }})</span
+      >
+    </div>
+  }
+  @if (!orientationFirst && check.orientation) {
+    <div class="info-row">
+      <span class="label">Host CC Orientation:</span>
+      <span class="value code">{{ check.orientation }}</span>
+    </div>
+  }
+  @if (check.pp5000Mv > 0) {
+    <div class="info-row">
+      <span class="label">Voltages:</span>
+      <span
+        class="value code"
+        [style.color]="check.voltagesOk ? '#137333' : '#c5221f'">
+        PP5000: {{ check.pp5000Mv }}mV, Host: {{ check.hostVbusMv }}mV,
+        CHG: {{ check.chgVbusMv }}mV
+      </span>
+    </div>
+  }
+  @if (check.gpioDetails) {
+    <div class="info-row">
+      <span class="label">GPIOs:</span>
+      <span
+        class="value code"
+        [style.color]="check.gpiosOk ? '#137333' : '#c5221f'">
+        {{
+          check.gpiosOk
+            ? expectedGpioCount + '/' + expectedGpioCount + ' Verified'
+            : check.gpioDetails
+        }}
+      </span>
+    </div>
+  }
+</ng-template>

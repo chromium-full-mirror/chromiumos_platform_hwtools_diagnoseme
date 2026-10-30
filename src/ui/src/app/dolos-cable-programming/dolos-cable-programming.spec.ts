@@ -9,11 +9,20 @@ import {DolosService} from '../services/dolos.service';
 import {DolosCableProgrammingComponent} from './dolos-cable-programming';
 
 class MockDolosService {
+  private modelsCallback?: (models: string[]) => void;
+
+  // Like the real gRPC call, answer asynchronously (see resolveModels): the
+  // component calls getModels() from its constructor, where change detection
+  // must not run yet.
   getModels = jasmine
     .createSpy('getModels')
     .and.callFake((callback: (models: string[]) => void) => {
-      callback(['ocelot', 'brya', 'akali']);
+      this.modelsCallback = callback;
     });
+
+  resolveModels(): void {
+    this.modelsCallback?.(['ocelot', 'brya', 'akali']);
+  }
 
   programCable = jasmine
     .createSpy('programCable')
@@ -44,6 +53,7 @@ describe('DolosCableProgrammingComponent', () => {
     fixture = TestBed.createComponent(DolosCableProgrammingComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
+    mockDolosService.resolveModels();
   });
 
   it('should create and load sorted models', () => {

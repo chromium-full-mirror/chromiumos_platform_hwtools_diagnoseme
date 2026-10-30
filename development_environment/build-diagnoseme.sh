@@ -5,6 +5,37 @@
 
 export DOCKER_BUILDKIT=1
 IMAGE="servod:dev"
+REGISTRY="us-docker.pkg.dev/chromeos-hw-tools/diagnoseme"
+# Optional extra tag for the ui/server/envoy images (e.g. "maui" for the
+# offline bundle and ISO builders). Off by default.
+EXTRA_TAG=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --tag)
+            EXTRA_TAG="$2"
+            shift 2
+            ;;
+        --maui-tags)
+            EXTRA_TAG="maui"
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: build-diagnoseme.sh [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --tag <tag>    Also tag ui/server/envoy as <img>:<tag> and ${REGISTRY}/<img>:<tag>"
+            echo "  --maui-tags    Same as --tag maui"
+            echo "  -h, --help     Show this message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
 set -ex
 
 # Get the absolute path to the project root
@@ -38,9 +69,9 @@ docker build -t envoy:latest -f dockerfiles/envoy/Dockerfile .
 docker build --output "./src/generated_tmp" --target copytohost -f dockerfiles/utilities/Dockerfile.protoc .
 
 # Handle Python generated files
-rm -rf ./src/server/generated
+rm -rf ./src/server/generated/* 2>/dev/null || true
 mkdir -p ./src/server/generated
-cp -r ./src/generated_tmp/python/server/generated/* ./src/server/generated/
+cp -rf ./src/generated_tmp/python/server/generated/* ./src/server/generated/
 
 # Handle TypeScript generated files
 rm -rf ./src/ui/src/proto
@@ -55,5 +86,13 @@ echo "{\"buildDate\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\", \"commitSha\": \"$(g
 
 docker build -t ui:latest -f dockerfiles/ui/Dockerfile .
 rm -rf ./src/generated_tmp
+
+# Tag images with the optional extra tag (local and registry names)
+if [ -n "${EXTRA_TAG}" ]; then
+    for IMG in ui server envoy; do
+        docker tag "${IMG}:latest" "${IMG}:${EXTRA_TAG}"
+        docker tag "${IMG}:latest" "${REGISTRY}/${IMG}:${EXTRA_TAG}"
+    done
+fi
 
 popd

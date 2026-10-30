@@ -17,22 +17,20 @@ import {
   GRPC_SERVO_MICRO_MANUFACTURING_CLIENT_SETTINGS,
 } from '../../proto/servo-manufacturing.pbconf';
 import {GRPC_DIAGNOSE_ME_SERVICE_CLIENT_SETTINGS} from '../../proto/diagnoseme.pbconf';
+import {
+  GRPC_MAUI_STATION1_INITIAL_FLASHING_CLIENT_SETTINGS,
+  GRPC_MAUI_PDC_FLASHING_CLIENT_SETTINGS,
+  GRPC_MAUI_STATION2_FUNCTIONAL_TESTING_CLIENT_SETTINGS,
+  GRPC_MAUI_DEVICE_MANAGEMENT_CLIENT_SETTINGS,
+} from '../../proto/maui-manufacturing.pbconf';
 
 @NgModule({
   imports: [GrpcCoreModule.forRoot()],
 })
 export class ServicesModule {
-  static getServiceURL() {
+  static getServiceURL(): string {
     const url = new URL(window.location.href);
-    const hostname = url.hostname;
-    const port = url.port;
-    let service_url = new String(url.protocol);
-
-    service_url = service_url.concat('//', hostname, ':', port);
-    service_url = service_url.concat('/rpc');
-    console.log(service_url);
-
-    return service_url;
+    return `${url.protocol}//${url.hostname}:${url.port}/rpc`;
   }
 
   static forRoot(): ModuleWithProviders<ServicesModule> {
@@ -57,6 +55,22 @@ export class ServicesModule {
         },
         {
           provide: GRPC_DIAGNOSE_ME_SERVICE_CLIENT_SETTINGS,
+          useValue: {host: this.getServiceURL()} as GrpcWebClientSettings,
+        },
+        {
+          provide: GRPC_MAUI_STATION1_INITIAL_FLASHING_CLIENT_SETTINGS,
+          useValue: {host: this.getServiceURL()} as GrpcWebClientSettings,
+        },
+        {
+          provide: GRPC_MAUI_PDC_FLASHING_CLIENT_SETTINGS,
+          useValue: {host: this.getServiceURL()} as GrpcWebClientSettings,
+        },
+        {
+          provide: GRPC_MAUI_STATION2_FUNCTIONAL_TESTING_CLIENT_SETTINGS,
+          useValue: {host: this.getServiceURL()} as GrpcWebClientSettings,
+        },
+        {
+          provide: GRPC_MAUI_DEVICE_MANAGEMENT_CLIENT_SETTINGS,
           useValue: {host: this.getServiceURL()} as GrpcWebClientSettings,
         },
         {provide: GRPC_CLIENT_FACTORY, useClass: GrpcWebClientFactory},

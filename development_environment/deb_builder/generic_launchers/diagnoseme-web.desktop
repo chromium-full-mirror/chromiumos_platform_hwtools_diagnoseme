@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=DiagnoseMe Web
+Comment=Open the DiagnoseMe web interface
+Exec=xdg-open http://localhost:8888/
+Icon=web-browser
+Terminal=false
+Categories=Network;WebBrowser;

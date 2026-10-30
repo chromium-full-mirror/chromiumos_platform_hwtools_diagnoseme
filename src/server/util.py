@@ -202,21 +202,52 @@ def discover_servo_micro_serial_path(
     )
 
 
-def is_usb_device_present(vid: int, pids: List[int]) -> bool:
-    """Check if a USB device is present on the system.
+def is_usb_device_present(vid: Any, pids: List[Any]) -> bool:
+    """Check if a USB device is present on the system using fast sysfs inspection.
 
     Args:
-        vid: Vendor ID.
-        pids: List of Product IDs.
+        vid: Vendor ID (int or hex string like "0bda" or 0x0BDA).
+        pids: List of Product IDs (int or hex string like "5411" or 0x5411).
 
     Returns:
         True if found.
     """
-    lsusb = run_command(["lsusb"]).stdout.lower()
-    for pid in pids:
-        if f"{vid:04x}:{pid:04x}" in lsusb:
-            return True
-    return False
+
+    def to_int(value: Any) -> Optional[int]:
+        try:
+            return int(value, 16) if isinstance(value, str) else int(value)
+        except (TypeError, ValueError):
+            logging.warning("Ignoring malformed USB ID %r", value)
+            return None
+
+    vid_int = to_int(vid)
+    pids_int = [p for p in (to_int(pid) for pid in pids) if p is not None]
+    if vid_int is None or not pids_int:
+        return False
+
+    # Fast sysfs search (instant, non-blocking)
+    for dev_dir in glob.glob("/sys/bus/usb/devices/*"):
+        vid_f = os.path.join(dev_dir, "idVendor")
+        pid_f = os.path.join(dev_dir, "idProduct")
+        if os.path.exists(vid_f) and os.path.exists(pid_f):
+            try:
+                with open(vid_f, "r", encoding="utf-8") as f:
+                    v_str = f.read().strip()
+                with open(pid_f, "r", encoding="utf-8") as f:
+                    p_str = f.read().strip()
+                if int(v_str, 16) == vid_int and int(p_str, 16) in pids_int:
+                    return True
+            except (OSError, ValueError):
+                continue
+
+    # Fallback to lsusb with strict 0.5s timeout
+    try:
+        proc = run_command(["lsusb"], check=False, timeout=0.5)
+    except (OSError, subprocess.SubprocessError) as e:
+        logging.debug("lsusb fallback failed: %s", e)
+        return False
+    lsusb_out = (proc.stdout or "").lower()
+    return any(f"{vid_int:04x}:{pid_int:04x}" in lsusb_out for pid_int in pids_int)
 
 
 def wait_for_usb_devices(

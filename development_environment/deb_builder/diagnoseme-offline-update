@@ -1,0 +1,341 @@
+#!/bin/bash
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# Applies a DiagnoseMe offline update bundle (Debian package, Docker images
+# and Maui firmware, see build-offline-bundle.sh).
+#
+# Usage: diagnoseme-offline-update [BUNDLE_PATH]
+#
+# BUNDLE_PATH may be the bundle directory (containing MANIFEST.json), a
+# directory containing diagnoseme-update/, or a bundle .zip file. Without it,
+# $BUNDLE_DIR is used, and then mounted media and block devices are searched.
+
+set -e
+
+echo "=================================================="
+echo " DiagnoseMe Offline USB Update Tool"
+echo "=================================================="
+
+# Check for root / sudo
+if [ "$EUID" -ne 0 ]; then
+    echo "This tool must be run as root (or via sudo)."
+    exit 1
+fi
+
+TEMP_MOUNT_POINT="/mnt/diagnoseme_usb_tmp"
+ZIP_EXTRACT_DIR="/tmp/diagnoseme-update-pkg"
+ZIP_NAME_PATTERN="*diagnoseme*offline*.zip"
+CLEANUP_TEMP_MOUNT=false
+VERIFIED_LIST=""
+
+cleanup() {
+    if [ "$CLEANUP_TEMP_MOUNT" = true ] && mountpoint -q "$TEMP_MOUNT_POINT" 2>/dev/null; then
+        echo "Cleaning up temporary USB mount at $TEMP_MOUNT_POINT..."
+        umount "$TEMP_MOUNT_POINT" 2>/dev/null || true
+        rm -rf "$TEMP_MOUNT_POINT" 2>/dev/null || true
+    fi
+    if [ -n "$VERIFIED_LIST" ]; then
+        rm -f "$VERIFIED_LIST"
+    fi
+}
+trap cleanup EXIT INT TERM
+
+# Extracts a bundle .zip and sets BUNDLE_DIR to the bundle directory in it.
+extract_zip() {
+    local zip_file="$1"
+    echo "Extracting bundle to /tmp..."
+    rm -rf "$ZIP_EXTRACT_DIR" && mkdir -p "$ZIP_EXTRACT_DIR"
+    # python3 zipfile instead of unzip: the diagnoseme package does not
+    # depend on unzip. File modes stored in the archive are kept.
+    python3 - "$zip_file" "$ZIP_EXTRACT_DIR" <<'EOF'
+import os
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    for info in archive.infolist():
+        path = archive.extract(info, sys.argv[2])
+        mode = (info.external_attr >> 16) & 0o777
+        if mode and not info.is_dir():
+            os.chmod(path, mode)
+EOF
+    if [ -d "$ZIP_EXTRACT_DIR/diagnoseme-update" ]; then
+        BUNDLE_DIR="$ZIP_EXTRACT_DIR/diagnoseme-update"
+    else
+        BUNDLE_DIR="$ZIP_EXTRACT_DIR"
+    fi
+}
+
+# Sets BUNDLE_DIR to the bundle found in DIR: DIR/diagnoseme-update, DIR
+# itself or an extracted bundle .zip (searched up to ZIP_DEPTH levels deep).
+# Returns non-zero when DIR holds no bundle.
+find_bundle_in() {
+    local dir="$1"
+    local zip_depth="$2"
+    local zip_file
+    if [ -f "$dir/diagnoseme-update/MANIFEST.json" ]; then
+        BUNDLE_DIR="$dir/diagnoseme-update"
+    elif [ -f "$dir/MANIFEST.json" ]; then
+        BUNDLE_DIR="$dir"
+    else
+        zip_file=$(find "$dir" -maxdepth "$zip_depth" -type f -name "$ZIP_NAME_PATTERN" 2>/dev/null | head -n 1 || true)
+        if [ -z "$zip_file" ]; then
+            return 1
+        fi
+        echo "Found update ZIP file: $zip_file"
+        extract_zip "$zip_file"
+    fi
+}
+
+# Mounts DEV read-only on TEMP_MOUNT_POINT and sets BUNDLE_DIR to the bundle
+# on it. The mount is kept (and removed on exit) only if the bundle lives on
+# it. Returns 1 if DEV holds no bundle and 2 if it cannot be mounted.
+find_bundle_on_device() {
+    local dev="$1"
+    mkdir -p "$TEMP_MOUNT_POINT"
+    if ! mount -o ro "$dev" "$TEMP_MOUNT_POINT" > /dev/null 2>&1; then
+        return 2
+    fi
+    if find_bundle_in "$TEMP_MOUNT_POINT" 2; then
+        echo "Found update bundle on $dev!"
+        if [[ "$BUNDLE_DIR" == "$TEMP_MOUNT_POINT"* ]]; then
+            CLEANUP_TEMP_MOUNT=true
+        else
+            umount "$TEMP_MOUNT_POINT" 2>/dev/null || true
+        fi
+        return 0
+    fi
+    umount "$TEMP_MOUNT_POINT" 2>/dev/null || true
+    return 1
+}
+
+# An explicit bundle path wins over $BUNDLE_DIR and auto-detection.
+BUNDLE_PATH="${1:-${BUNDLE_DIR:-}}"
+BUNDLE_DIR=""
+
+if [ -n "$BUNDLE_PATH" ]; then
+    if [ -f "$BUNDLE_PATH" ] && [[ "$BUNDLE_PATH" == *.zip ]]; then
+        extract_zip "$BUNDLE_PATH"
+    elif [ -d "$BUNDLE_PATH" ]; then
+        find_bundle_in "$BUNDLE_PATH" 1 || true
+    fi
+    if [ -z "$BUNDLE_DIR" ]; then
+        echo "Error: No DiagnoseMe offline update bundle found at '$BUNDLE_PATH'."
+        exit 1
+    fi
+else
+    # Search mounted removable drives for diagnoseme-update or offline_bundle
+    echo "Scanning mounted storage for update bundle..."
+    while IFS= read -r -d '' D; do
+        if [ -f "$D/MANIFEST.json" ]; then
+            BUNDLE_DIR="$D"
+            break
+        fi
+    done < <(find /media /mnt /run/media -maxdepth 3 -type d \( -name "diagnoseme-update" -o -name "offline_bundle" \) -print0 2>/dev/null || true)
+
+    # Check for raw .zip archive on already mounted USB media
+    if [ -z "$BUNDLE_DIR" ]; then
+        ZIP_FILE=$(find /media /mnt /run/media -maxdepth 3 -type f -name "$ZIP_NAME_PATTERN" 2>/dev/null | head -n 1 || true)
+        if [ -n "$ZIP_FILE" ]; then
+            echo "Found update ZIP file: $ZIP_FILE"
+            extract_zip "$ZIP_FILE"
+        fi
+    fi
+
+    # If still not found, probe all unmounted block devices / partitions
+    if [ -z "$BUNDLE_DIR" ]; then
+        echo "Searching unmounted USB / block devices..."
+        # Partitions and whole disks that are not currently mounted
+        while IFS= read -r DEV; do
+            # Skip loop/ram devices
+            if [ -z "$DEV" ] || [[ "$DEV" =~ loop|ram|zram ]]; then
+                continue
+            fi
+            if find_bundle_on_device "$DEV"; then
+                break
+            fi
+        done < <(lsblk -lnpo NAME,TYPE,MOUNTPOINT | awk '$2=="part" || $2=="disk" {if ($3=="") print $1}')
+    fi
+
+    # If still not found, prompt user with interactive device selection
+    if [ -z "$BUNDLE_DIR" ]; then
+        echo ""
+        echo "No update bundle found automatically. Let's inspect available drives:"
+        echo "=================================================="
+
+        DEVS=()
+        i=1
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            dev_name=$(echo "$line" | awk '{print $1}')
+            [[ "$dev_name" =~ loop|ram|zram ]] && continue
+            DEVS+=("$dev_name")
+            echo "  [$i] $line"
+            ((i++))
+        done < <(lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT -pn 2>/dev/null)
+
+        if [ ${#DEVS[@]} -gt 0 ]; then
+            echo "=================================================="
+            read -r -p "Select device number to mount [1-${#DEVS[@]}] (or 'q' to cancel): " choice
+            if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#DEVS[@]}" ]; then
+                SELECTED_DEV="${DEVS[$((choice-1))]}"
+                echo "Mounting $SELECTED_DEV to $TEMP_MOUNT_POINT..."
+                RC=0
+                find_bundle_on_device "$SELECTED_DEV" || RC=$?
+                if [ "$RC" -eq 2 ]; then
+                    echo "Failed to mount $SELECTED_DEV."
+                fi
+            fi
+        fi
+    fi
+fi
+
+if [ -z "$BUNDLE_DIR" ] || [ ! -d "$BUNDLE_DIR" ]; then
+    echo "Error: Could not locate a valid DiagnoseMe offline update bundle or ZIP."
+    echo "Please insert your update USB stick and try again."
+    exit 1
+fi
+
+echo "Found update bundle at: $BUNDLE_DIR"
+cd "$BUNDLE_DIR"
+
+if [ ! -f "MANIFEST.json" ]; then
+    echo "Error: MANIFEST.json not found in $BUNDLE_DIR"
+    exit 1
+fi
+
+# Verify every file listed in MANIFEST.json and record the verified paths.
+# Only verified files are installed below.
+echo "Verifying SHA256 checksums from MANIFEST.json..."
+VERIFIED_LIST=$(mktemp)
+python3 - "$VERIFIED_LIST" <<'EOF'
+import hashlib
+import json
+import os
+import sys
+
+verified_list = sys.argv[1]
+
+try:
+    with open("MANIFEST.json") as f:
+        manifest = json.load(f)
+    files = manifest["files"]
+    if not isinstance(files, dict):
+        raise ValueError("'files' is not an object")
+except Exception as e:  # pylint: disable=broad-except
+    print(f"Error: Failed to parse MANIFEST.json ({e}). Aborting update.")
+    sys.exit(1)
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+for rel_path, expected_sha in files.items():
+    norm = os.path.normpath(rel_path)
+    if os.path.isabs(norm) or norm.startswith(".."):
+        print(f"Error: Invalid path in MANIFEST.json: {rel_path}")
+        sys.exit(1)
+    if not os.path.isfile(norm):
+        print(f"Error: Missing bundle file {rel_path}")
+        sys.exit(1)
+    computed = sha256_file(norm)
+    if computed != expected_sha:
+        print(f"Checksum mismatch for {rel_path}!")
+        print(f"  Expected: {expected_sha}")
+        print(f"  Got:      {computed}")
+        sys.exit(1)
+    print(f"  Verified OK: {rel_path}")
+
+with open(verified_list, "w") as f:
+    for rel_path in files:
+        f.write(os.path.normpath(rel_path) + "\0")
+print("All bundle checksums verified successfully.")
+EOF
+
+# Prints (NUL separated) the verified bundle files below DIR matching PATTERN.
+verified_files() {
+    local dir="$1"
+    local pattern="$2"
+    local f
+    while IFS= read -r -d '' f; do
+        # shellcheck disable=SC2053  # PATTERN is a glob on purpose.
+        if [[ "$f" == "$dir"/* ]] && [[ "$(basename "$f")" == $pattern ]]; then
+            printf '%s\0' "$f"
+        fi
+    done < "$VERIFIED_LIST"
+}
+
+# 1. Update Debian Package if provided
+DEB_FILE=""
+while IFS= read -r -d '' F; do
+    DEB_FILE="$F"
+    break
+done < <(verified_files deb "*.deb")
+if [ -n "$DEB_FILE" ]; then
+    echo "Installing updated Debian package ($DEB_FILE)..."
+    dpkg -i "$DEB_FILE" || apt-get install -f -y
+fi
+
+# 2. Load Docker Images if provided
+IMG_ARCHIVES=()
+while IFS= read -r -d '' F; do
+    IMG_ARCHIVES+=("$F")
+done < <(verified_files images "*.tar.gz"; verified_files images "*.tar")
+if [ ${#IMG_ARCHIVES[@]} -gt 0 ]; then
+    echo "Loading Docker images from bundle..."
+    for IMG_ARCHIVE in "${IMG_ARCHIVES[@]}"; do
+        echo "  Loading $IMG_ARCHIVE into Docker..."
+        docker load -i "$IMG_ARCHIVE"
+    done
+fi
+
+# 3. Update Offline Firmware Cache if provided
+FW_TARGET="/var/lib/diagnoseme/firmware"
+mkdir -p "$FW_TARGET/mcu" "$FW_TARGET/pdc"
+
+if [ -d "firmware" ]; then
+    echo "Updating offline Maui firmware cache in $FW_TARGET..."
+    for FW_KIND in mcu pdc; do
+        FW_FILES=()
+        while IFS= read -r -d '' F; do
+            FW_FILES+=("$F")
+        done < <(verified_files "firmware/$FW_KIND" "*")
+        if [ ${#FW_FILES[@]} -eq 0 ]; then
+            continue
+        fi
+        if [ -f "firmware/$FW_KIND/STABLE.json" ]; then
+            # A stable release (see fetch-maui-firmware) replaces the whole
+            # directory, so no files of older releases are left behind.
+            FW_NEW="$FW_TARGET/.$FW_KIND.new.$$"
+            FW_OLD="$FW_TARGET/.$FW_KIND.old.$$"
+            rm -rf "$FW_NEW" "$FW_OLD"
+            mkdir -m 755 "$FW_NEW"
+            cp -v "${FW_FILES[@]}" "$FW_NEW/"
+            chmod 644 "$FW_NEW"/*
+            mv "$FW_TARGET/$FW_KIND" "$FW_OLD"
+            mv "$FW_NEW" "$FW_TARGET/$FW_KIND"
+            rm -rf "$FW_OLD"
+        else
+            for F in "${FW_FILES[@]}"; do
+                cp -v "$F" "$FW_TARGET/$FW_KIND/" || true
+            done
+        fi
+    done
+fi
+
+# 4. Restart Services
+echo "Restarting DiagnoseMe services..."
+if [ -f "/usr/local/bin/start-diagnoseme" ]; then
+    /usr/local/bin/start-diagnoseme --offline --no-browser
+fi
+
+echo "=================================================="
+echo " Offline update completed successfully!"
+echo "=================================================="

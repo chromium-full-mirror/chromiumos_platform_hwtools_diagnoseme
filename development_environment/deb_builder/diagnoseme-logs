@@ -1,0 +1,116 @@
+#!/bin/bash
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+COMPOSE_FILE="/etc/diagnoseme/docker-compose.yaml"
+DEVICE_LOG_DIR="/var/log/diagnoseme/devices"
+RESULTS_DIR="/var/log/diagnoseme/maui_v11_results"
+# Locations used by older releases, still searched for existing stations.
+LEGACY_RESULTS_DIR="${HOME:-/home/diagnoseme}/diagnoseme_results"
+LEGACY_DEVICE_LOG_ROOT="/tmp"
+
+usage() {
+    echo "Usage: diagnoseme-logs [all | <service>]"
+    echo "       diagnoseme-logs [--device | -d] [<SERIAL>]"
+    echo ""
+    echo "  (no argument), all   Follow the logs of all DiagnoseMe containers"
+    echo "  <service>            Follow the logs of one container (e.g. server, ui, envoy)"
+    echo "  --device <SERIAL>    List result files and device logs of a device serial"
+    echo "  <SERIAL>             Same as --device <SERIAL> (any argument that is not a service)"
+    echo "  --device             List all device log and result directories"
+    echo ""
+    echo "Device logs: $DEVICE_LOG_DIR/<SERIAL>/, results: $RESULTS_DIR/"
+}
+
+# Prints the result files matching a serial below DIR, if any.
+show_results() {
+    local dir="$1"
+    local serial="$2"
+    local matches
+    [ -d "$dir" ] || return 1
+    matches=$(find "$dir" -name "*${serial}*" 2>/dev/null)
+    [ -n "$matches" ] || return 1
+    echo "Final results in $dir:"
+    echo "$matches"
+}
+
+# Lists a device log directory, if it exists.
+show_log_dir() {
+    local dir="$1"
+    [ -d "$dir" ] || return 1
+    echo "Device logs in $dir:"
+    ls -la "$dir"
+}
+
+# Prints the result files and device logs for a serial, or all available
+# result and log directories when no serial is given.
+show_device_logs() {
+    local serial="$1"
+    if [ -n "$serial" ]; then
+        local found=false
+        show_results "$RESULTS_DIR" "$serial" && found=true
+        show_results "$LEGACY_RESULTS_DIR" "$serial" && found=true
+        show_log_dir "$DEVICE_LOG_DIR/$serial" && found=true
+        show_log_dir "$LEGACY_DEVICE_LOG_ROOT/${serial}_diagnoseme_logs" && found=true
+        if [ "$found" = false ]; then
+            echo "No logs found for device serial '$serial'."
+        fi
+    else
+        echo "=================================================="
+        echo " Available Device Log & Result Directories:"
+        echo "=================================================="
+        {
+            find "$DEVICE_LOG_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null
+            find "$RESULTS_DIR" "$LEGACY_RESULTS_DIR" "$LEGACY_DEVICE_LOG_ROOT" -maxdepth 2 -type d \( -name "*diagnoseme_logs" -o -name "highlevel" -o -name "detailed" -o -name "results" -o -name "logs" \) 2>/dev/null
+        } | sort -u
+    fi
+}
+
+# Services of the DiagnoseMe compose file, used when docker compose cannot
+# list them (e.g. docker not running or the user lacks docker permissions).
+STATIC_SERVICES="ui server envoy watchtower"
+
+# Lists the compose services, one per line. Falls back to STATIC_SERVICES
+# and shows the docker error when docker compose fails.
+compose_services() {
+    local services
+    if services=$(docker compose -f "$COMPOSE_FILE" config --services 2>&1) \
+            && [ -n "$services" ]; then
+        echo "$services"
+    else
+        echo "WARNING: Could not list DiagnoseMe services via docker compose:" >&2
+        echo "$services" >&2
+        echo "Using the default service list: $STATIC_SERVICES" >&2
+        tr ' ' '\n' <<< "$STATIC_SERVICES"
+    fi
+}
+
+case "${1:-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    --device|-d)
+        show_device_logs "${2:-}"
+        exit 0
+        ;;
+esac
+
+if [ ! -f "$COMPOSE_FILE" ]; then
+    echo "Error: Docker compose file not found at $COMPOSE_FILE"
+    exit 1
+fi
+
+SERVICE="${1:-}"
+if [ -z "$SERVICE" ] || [ "$SERVICE" = "all" ]; then
+    docker compose -f "$COMPOSE_FILE" logs -f
+    exit $?
+fi
+
+# A bare argument that is not a compose service is treated as a device serial.
+if compose_services | grep -qxF -- "$SERVICE"; then
+    docker compose -f "$COMPOSE_FILE" logs -f "$SERVICE"
+else
+    show_device_logs "$SERVICE"
+fi

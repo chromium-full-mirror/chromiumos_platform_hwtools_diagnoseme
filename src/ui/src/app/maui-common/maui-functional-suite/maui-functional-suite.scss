@@ -1,0 +1,24 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+.barcode-input-container {
+  margin-top: 8px;
+  max-width: 400px;
+
+  .barcode-field {
+    width: 100%;
+  }
+}
+
+.badge-fail {
+  background-color: #fce8e6;
+  color: #c5221f;
+}
+
+.led-checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}

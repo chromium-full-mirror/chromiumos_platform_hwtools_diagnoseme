@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Start DiagnoseMe (Offline)
+Comment=Start DiagnoseMe testing services using local offline images
+Exec=xfce4-terminal --title="Starting DiagnoseMe (Offline)" --hold -e "start-diagnoseme --offline"
+Icon=utilities-terminal
+Terminal=false
+Categories=System;Utility;

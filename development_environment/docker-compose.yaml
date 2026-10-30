@@ -31,12 +31,16 @@ services:
       - TEST_DUT=brya
       - TEST_MODEL=banshee
       - RESULTS_SERVER=${RESULTS_SERVER:-}
+      - DIAGNOSEME_DEVICE_LOG_DIR=/var/log/diagnoseme/devices
+      - DIAGNOSEME_RESULTS_DIR=/var/log/diagnoseme/maui_v11_results
 
     volumes:
       - logs:/var/log/rpcserver
       - /dev:/dev
       - /sys:/sys
       - /var/run/docker.sock:/var/run/docker.sock
+      - /var/log/diagnoseme/devices:/var/log/diagnoseme/devices
+      - /var/log/diagnoseme/maui_v11_results:/var/log/diagnoseme/maui_v11_results
 
   #############################################################################
   envoy:

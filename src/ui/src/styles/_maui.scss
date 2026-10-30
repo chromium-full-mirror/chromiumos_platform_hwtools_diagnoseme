@@ -1,0 +1,412 @@
+// Copyright 2026 The ChromiumOS Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+// Shared look of the Maui Step pages (Steps 1-4).
+//
+// These rules are global (instead of being @import-ed into every Maui
+// component stylesheet) so the CSS is shipped once. They are scoped to
+// `.maui-container`, the root element of every Maui Step page, so they do not
+// leak into the Servo/Dolos pages.
+.maui-container {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+
+  .header-section {
+    margin-bottom: 24px;
+    h2 {
+      margin: 0 0 6px 0;
+      color: #202124;
+      font-size: 22px;
+      font-weight: 500;
+    }
+    .subtitle {
+      margin: 0;
+      color: #5f6368;
+      font-size: 14px;
+    }
+  }
+
+  .cards-column {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .steps-vertical-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .instructions-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 1.4;
+
+    .step-num {
+      background-color: #e8f0fe;
+      color: #1a73e8;
+      font-weight: 600;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      white-space: nowrap;
+    }
+    .step-text {
+      color: #3c4043;
+    }
+  }
+
+  .status-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+
+    .info-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+
+      .label {
+        font-weight: 500;
+        color: #5f6368;
+        min-width: 130px;
+      }
+      .value {
+        font-weight: 600;
+        color: #202124;
+      }
+    }
+
+    .actions-wrapper {
+      margin-top: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+  }
+
+  .action-btn-wide {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 16px;
+    white-space: nowrap;
+  }
+
+  // Badges & Status Tags
+  .serial-badge {
+    background: #e6f4ea;
+    color: #137333;
+    font-weight: 700;
+    font-family: monospace;
+    padding: 3px 8px;
+    border-radius: 4px;
+  }
+
+  .tag-prog {
+    background: #e8f0fe;
+    color: #1a73e8;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .tag-unprog {
+    background: #fef7e0;
+    color: #b06000;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .tag-bypass {
+    background: #fef7e0;
+    color: #b06000;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .device-status-badge {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    margin-top: 12px;
+    font-size: 14px;
+
+    &.connected {
+      background-color: #e6f4ea;
+      color: #137333;
+      border: 1px solid #ceead6;
+    }
+    &.warning {
+      background-color: #fef7e0;
+      color: #b06000;
+      border: 1px solid #feefc3;
+    }
+    &.disconnected {
+      background-color: #fce8e6;
+      color: #c5221f;
+      border: 1px solid #fad2cf;
+    }
+
+    .device-status-text {
+      flex: 1;
+    }
+  }
+
+  .operator-warning-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background-color: #fef7e0;
+    border: 1px solid #f9ab00;
+    color: #b06000;
+    font-weight: 500;
+    font-size: 13px;
+    margin: 8px 0;
+
+    mat-icon {
+      color: #e37400;
+      font-size: 22px;
+      width: 22px;
+      height: 22px;
+    }
+  }
+
+  .operator-ready-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background-color: #e6f4ea;
+    border: 1px solid #34a853;
+    color: #137333;
+    font-weight: 500;
+    font-size: 13px;
+    margin: 8px 0;
+
+    mat-icon {
+      color: #137333;
+      font-size: 22px;
+      width: 22px;
+      height: 22px;
+    }
+  }
+
+  .station-completion-hero {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #e6f4ea 0%, #ceead6 100%);
+    border: 2px solid #34a853;
+    color: #0d652d;
+    margin: 12px 0;
+
+    .hero-icon {
+      font-size: 36px;
+      width: 36px;
+      height: 36px;
+      color: #137333;
+    }
+
+    .hero-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .hero-sub {
+      font-size: 13px;
+      color: #3c4043;
+    }
+  }
+
+  // Step 2/4: log checklist and final report (functional suite, Card 9).
+  .logs-checklist-container {
+    margin: 12px 0;
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    overflow: hidden;
+    background-color: #fafafa;
+
+    .logs-checklist-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background-color: #f1f3f4;
+      font-weight: 600;
+      font-size: 12px;
+      color: #3c4043;
+      border-bottom: 1px solid #dadce0;
+
+      mat-icon {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+        color: #5f6368;
+      }
+    }
+
+    .logs-checklist-list {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .log-item-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      border-bottom: 1px solid #f1f3f4;
+      font-size: 13px;
+
+      &:last-child {
+        border-bottom: none;
+      }
+
+      &.log-missing {
+        opacity: 0.7;
+      }
+
+      .log-item-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+
+        .log-status-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+
+          &.icon-pass {
+            color: #1e8e3e;
+          }
+          &.icon-fail {
+            color: #d93025;
+          }
+          &.icon-bypass {
+            color: #e37400;
+          }
+          &.icon-missing {
+            color: #80868b;
+          }
+        }
+
+        .log-filename {
+          font-family: monospace;
+          font-weight: 600;
+          color: #202124;
+        }
+      }
+
+      .log-item-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+
+        .log-details {
+          font-size: 12px;
+          color: #5f6368;
+        }
+
+        .log-size {
+          font-size: 11px;
+          color: #80868b;
+          font-family: monospace;
+        }
+
+        .verdict-badge {
+          font-size: 11px;
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-weight: 600;
+        }
+      }
+    }
+  }
+
+  .final-report-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background-color: #e6f4ea;
+    border: 1px solid #ceead6;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 12px 0;
+
+    mat-icon {
+      color: #137333;
+      font-size: 28px;
+      width: 28px;
+      height: 28px;
+    }
+
+    .banner-content {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+
+      .banner-title {
+        font-weight: 700;
+        color: #137333;
+        font-size: 14px;
+      }
+
+      .banner-tracking {
+        font-size: 13px;
+        font-weight: 600;
+        color: #202124;
+      }
+
+      .banner-sub {
+        font-size: 11px;
+        color: #5f6368;
+      }
+    }
+  }
+
+  // Step 3: label printing assistant.
+  .copy-success-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background-color: #e6f4ea;
+    color: #137333;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-weight: 500;
+    font-size: 13px;
+    margin-bottom: 8px;
+  }
+
+  .barcode-error-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    background-color: #fce8e6;
+    border: 1px solid #ea4335;
+    color: #c5221f;
+    font-size: 13px;
+    margin-bottom: 14px;
+  }
+}

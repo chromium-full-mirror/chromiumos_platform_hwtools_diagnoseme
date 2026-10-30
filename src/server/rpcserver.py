@@ -7,13 +7,18 @@
 end can use.
 Current hosted services:
     dolos
+    diagnoseme
     servod
-    servo_manufacturing
+    servo_manufacturing (Servo v4.1 and Servo Micro)
+    maui_manufacturing (Maui Step 1 flashing, PDC flashing, functional testing
+        and device management). These are optional: if the Maui modules fail to
+        import or initialize, the error is logged and the other services still run.
 """
 
 import argparse
 import asyncio
 from concurrent import futures
+import importlib
 import logging
 import sys
 
@@ -53,6 +58,67 @@ from server.generated.servo_manufacturing_pb2_grpc import (
 
 
 BACKEND_GRPC_SERVICE_PORT = config.BACKEND_GRPC_SERVICE_PORT
+
+# (gRPC service name, servicer module, servicer class) of the optional Maui services.
+MAUI_SERVICES = (
+    (
+        "MauiStation1InitialFlashing",
+        "server.maui_station1_service",
+        "MauiStation1Servicer",
+    ),
+    ("MauiPdcFlashing", "server.maui_station1_service", "MauiPdcServicer"),
+    (
+        "MauiStation2FunctionalTesting",
+        "server.maui_station2_service",
+        "MauiStation2Servicer",
+    ),
+    (
+        "MauiDeviceManagement",
+        "server.maui_station1_service",
+        "MauiDeviceManagementServicer",
+    ),
+)
+
+
+def register_maui_services(server) -> bool:
+    """Registers the Maui manufacturing services on |server|.
+
+    The Maui modules are imported lazily so that an import or initialization
+    failure (e.g. a missing dependency) is logged and does not take down the
+    Servo/Dolos services hosted by the same server.
+
+    Returns:
+        True if all Maui services were registered.
+    """
+    try:
+        maui_pb2 = importlib.import_module("server.generated.maui_manufacturing_pb2")
+        maui_pb2_grpc = importlib.import_module(
+            "server.generated.maui_manufacturing_pb2_grpc"
+        )
+        # Create every servicer first so that a failure registers none of them.
+        servicers = [
+            (
+                service,
+                getattr(importlib.import_module(module_name), class_name)(),
+            )
+            for service, module_name, class_name in MAUI_SERVICES
+        ]
+    except Exception:  # pylint: disable=broad-exception-caught
+        logging.exception(
+            "Maui manufacturing services unavailable; continuing without them."
+        )
+        return False
+
+    for service, servicer in servicers:
+        getattr(maui_pb2_grpc, f"add_{service}Servicer_to_server")(servicer, server)
+        reflection.enable_server_reflection(
+            (
+                maui_pb2.DESCRIPTOR.services_by_name[service].full_name,
+                reflection.SERVICE_NAME,
+            ),
+            server,
+        )
+    return True
 
 
 def setup_logging(level):
@@ -150,6 +216,8 @@ async def serve():
                 reflection.SERVICE_NAME,
             )
             reflection.enable_server_reflection(service_name, server)
+
+            register_maui_services(server)
 
         serving_port = BACKEND_GRPC_SERVICE_PORT
         server.add_insecure_port(f"0.0.0.0:{serving_port}")

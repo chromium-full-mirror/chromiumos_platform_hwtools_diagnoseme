@@ -1,0 +1,68 @@
+#!/bin/sh
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# Debian postinst: sets up DKMS, Docker permissions, desktop shortcuts and the
+# host directories used by the DiagnoseMe containers.
+
+set -e
+
+# Replaced with the STATION_PROFILE build argument (generic or maui) when
+# the package is built.
+STATION_PROFILE="@STATION_PROFILE@"
+
+echo "Setting up Realtek driver via DKMS..."
+dkms add -m r8152 -v 2.21.4 || true
+dkms install -m r8152 -v 2.21.4 || echo "Warning: DKMS install failed. Headers may be missing."
+
+echo "Unloading conflicting modules..."
+modprobe -r cdc_ether || true
+modprobe -r r8152 || true
+
+echo "Configuring Docker permissions..."
+getent group docker >/dev/null || groupadd docker
+if [ -n "$SUDO_USER" ]; then
+    echo "Adding user '$SUDO_USER' to docker group..."
+    usermod -aG docker "$SUDO_USER"
+else
+    echo "Warning: Could not detect sudo user. Please run 'sudo usermod -aG docker \$USER' manually."
+fi
+
+# Only Maui station packages ship the Maui desktop launchers.
+if [ "$STATION_PROFILE" = "maui" ] && [ -d /home/diagnoseme ]; then
+    echo "Setting up desktop shortcuts..."
+    mkdir -p /home/diagnoseme/Desktop
+    cp -u /usr/share/applications/start-diagnoseme*.desktop /usr/share/applications/stop-diagnoseme.desktop /usr/share/applications/diagnoseme-*.desktop /home/diagnoseme/Desktop/ 2>/dev/null || true
+    chmod +x /home/diagnoseme/Desktop/*.desktop 2>/dev/null || true
+    chown -R diagnoseme:diagnoseme /home/diagnoseme/Desktop 2>/dev/null || true
+fi
+
+echo "Setting up directories..."
+mkdir -p /var/lib/diagnoseme/firmware/mcu /var/lib/diagnoseme/firmware/pdc
+
+# Log, device log and result directories are written by the (root) server
+# container and read by the station user 'diagnoseme', so they are owned by
+# that user and group-writable instead of world-writable.
+DM_OWNER="root:root"
+if id diagnoseme >/dev/null 2>&1; then
+    DM_OWNER="diagnoseme:diagnoseme"
+fi
+for DIR in /var/log/diagnoseme \
+           /var/log/diagnoseme/rpcserver \
+           /var/log/diagnoseme/nginx \
+           /var/log/diagnoseme/envoy \
+           /var/log/diagnoseme/devices \
+           /var/log/diagnoseme/maui_v11_results; do
+    mkdir -p "$DIR"
+    chown "$DM_OWNER" "$DIR"
+    chmod 0775 "$DIR"
+done
+
+# Older releases made these world-writable (chmod -R 777); remove the
+# world-writable bits on upgraded stations.
+chmod -R o-w /var/log/diagnoseme 2>/dev/null || true
+DM_HOME="$(getent passwd diagnoseme | cut -d: -f6)"
+if [ -n "$DM_HOME" ] && [ -d "$DM_HOME/diagnoseme_results" ]; then
+    chmod -R o-w "$DM_HOME/diagnoseme_results" 2>/dev/null || true
+fi

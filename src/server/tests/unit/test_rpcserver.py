@@ -38,6 +38,24 @@ class TestRpcServer(unittest.TestCase):
         args = rpcserver.parse_arguments([])
         self.assertFalse(args.verbose)
 
+    def test_register_maui_services(self):
+        """All Maui services are registered when the modules import cleanly."""
+        server = mock.MagicMock()
+        self.assertTrue(rpcserver.register_maui_services(server))
+        self.assertGreaterEqual(
+            server.add_generic_rpc_handlers.call_count, len(rpcserver.MAUI_SERVICES)
+        )
+
+    def test_register_maui_services_failure_is_contained(self):
+        """A Maui import failure is logged and registers nothing."""
+        server = mock.MagicMock()
+        with mock.patch(
+            "server.rpcserver.importlib.import_module",
+            side_effect=ImportError("no serial"),
+        ), self.assertLogs(level="ERROR"):
+            self.assertFalse(rpcserver.register_maui_services(server))
+        server.add_generic_rpc_handlers.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,15 +6,196 @@
 set -e
 
 COMPOSE_FILE="/etc/diagnoseme/docker-compose.yaml"
+CONFIG_FILE="/etc/diagnoseme/config.env"
+DEFAULT_UI_URL="http://localhost:8888/"
+
+# Load configuration if available. The generic (Servo/Dolos) package ships no
+# config.env, so the defaults below match the original start-diagnoseme:
+# pull the :release images and run with watchtower. Maui station packages
+# ship a config.env selecting offline mode and the :maui images.
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    source "$CONFIG_FILE"
+fi
+
+MODE="${MODE:-online}"
+AUTO_OPEN_BROWSER="${AUTO_OPEN_BROWSER:-false}"
+UI_URL="${UI_URL:-$DEFAULT_UI_URL}"
+DOCKER_TAG="${DOCKER_TAG:-release}"
+SYNC_MAUI_FIRMWARE="${SYNC_MAUI_FIRMWARE:-false}"
+
+# Parse command line options
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --online)
+            MODE="online"
+            shift
+            ;;
+        --offline)
+            MODE="offline"
+            shift
+            ;;
+        --no-browser)
+            AUTO_OPEN_BROWSER="false"
+            shift
+            ;;
+        --tag)
+            DOCKER_TAG="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: start-diagnoseme [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --online        Run in online mode (pulls latest Docker images, runs watchtower)"
+            echo "  --offline       Run in offline mode (uses pre-loaded local images)"
+            echo "                  Default mode: MODE from $CONFIG_FILE, else online"
+            echo "  --no-browser    Start services without launching the web browser"
+            echo "  --tag <tag>     Override Docker image tag (default: DOCKER_TAG from config, else release)"
+            echo "  -h, --help      Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Run 'start-diagnoseme --help' for usage."
+            exit 1
+            ;;
+    esac
+done
 
 if [ ! -f "$COMPOSE_FILE" ]; then
     echo "Error: Docker compose file not found at $COMPOSE_FILE"
     exit 1
 fi
 
-echo "Starting Diagnose Me services..."
-docker compose -f "$COMPOSE_FILE" down
-docker compose -f "$COMPOSE_FILE" pull
-docker compose -f "$COMPOSE_FILE" up -d
+echo "=================================================="
+echo " Starting DiagnoseMe [Mode: ${MODE^^}]"
+echo " Image Tag: ${DOCKER_TAG}"
+echo "=================================================="
 
-echo "Diagnose Me services started successfully."
+export DOCKER_TAG
+
+# Ensure local image aliases exist for Docker Compose
+for IMG in ui server envoy; do
+    if docker image inspect "${IMG}:${DOCKER_TAG}" > /dev/null 2>&1 && ! docker image inspect "us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/${IMG}:${DOCKER_TAG}" > /dev/null 2>&1; then
+        docker tag "${IMG}:${DOCKER_TAG}" "us-docker.pkg.dev/chromeos-hw-tools/diagnoseme/${IMG}:${DOCKER_TAG}" 2>/dev/null || true
+    fi
+done
+
+# Ensure host log and results directories exist. Ownership and permissions
+# are set up once by the deb postinst.
+mkdir -p /var/log/diagnoseme/nginx /var/log/diagnoseme/rpcserver /var/log/diagnoseme/envoy /var/lib/diagnoseme/firmware/mcu /var/lib/diagnoseme/firmware/pdc /var/log/diagnoseme/devices /var/log/diagnoseme/maui_v11_results 2>/dev/null || true
+
+# Services started by 'up'. In offline mode watchtower is left out (Maui
+# factory stations must not update themselves; its image is not in the
+# offline bundle either). Naming the services keeps compose from pulling the
+# watchtower image, which '--scale watchtower=0' would still do.
+UP_SERVICES=()
+if [ "$MODE" == "online" ]; then
+    # Online mode always pulls the latest images, as before; the PULL_POLICY
+    # from config.env only applies to offline mode.
+    export PULL_POLICY="always"
+    echo "Pulling updated Docker images (:tag ${DOCKER_TAG})..."
+    docker compose -f "$COMPOSE_FILE" pull || {
+        echo "WARNING: Online pull failed. Falling back to existing local images."
+        export PULL_POLICY="if_not_present"
+    }
+
+    # Non-fatal: the cached offline firmware is used if the sync fails. The
+    # download is skipped when the local STABLE.json already matches.
+    if [ "$SYNC_MAUI_FIRMWARE" = "true" ] && command -v fetch-maui-firmware > /dev/null 2>&1; then
+        echo "Checking for updated Maui firmware from cloud..."
+        fetch-maui-firmware --dest /var/lib/diagnoseme/firmware \
+            --timeout 5 --download-timeout 15 --quiet \
+            || echo "WARNING: Maui firmware sync failed. Using cached offline firmware."
+    fi
+else
+    export PULL_POLICY="${PULL_POLICY:-if_not_present}"
+    mapfile -t UP_SERVICES < <(docker compose -f "$COMPOSE_FILE" config --services | grep -vx watchtower)
+    if [ ${#UP_SERVICES[@]} -eq 0 ]; then
+        UP_SERVICES=(ui server envoy)
+    fi
+fi
+
+echo "Bringing up DiagnoseMe containers..."
+docker compose -f "$COMPOSE_FILE" down --remove-orphans || true
+docker compose -f "$COMPOSE_FILE" up -d "${UP_SERVICES[@]}"
+
+# Returns success when the web UI answers. Uses curl if installed, else
+# python3 (the diagnoseme package does not depend on curl).
+ui_ready() {
+    if command -v curl > /dev/null 2>&1; then
+        curl -s -f "$UI_URL" > /dev/null 2>&1
+    else
+        python3 -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=5)' "$UI_URL" > /dev/null 2>&1
+    fi
+}
+
+echo "Waiting for services to become ready..."
+MAX_WAIT=30
+WAITED=0
+HEALTHY=false
+
+while [ $WAITED -lt $MAX_WAIT ]; do
+    if ui_ready; then
+        HEALTHY=true
+        break
+    fi
+    sleep 2
+    WAITED=$((WAITED + 2))
+    echo -n "."
+done
+echo ""
+
+if [ "$HEALTHY" = true ]; then
+    echo "DiagnoseMe services are healthy and running at $UI_URL."
+else
+    echo "DiagnoseMe services started, but web UI did not respond within ${MAX_WAIT}s."
+    echo "Check logs with 'diagnoseme-logs'."
+fi
+
+if [ "$AUTO_OPEN_BROWSER" = "true" ]; then
+    echo "Opening web interface in browser..."
+    export DISPLAY="${DISPLAY:-:0}"
+
+    # Determine desktop user and Xauthority for reliable graphical launch
+    TARGET_USER="${SUDO_USER:-$USER}"
+    if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ]; then
+        if [ -d /home/diagnoseme ]; then
+            TARGET_USER="diagnoseme"
+        fi
+    fi
+    TARGET_HOME=$(getent passwd "$TARGET_USER" 2>/dev/null | cut -d: -f6 || echo "/home/$TARGET_USER")
+    if [ -z "$XAUTHORITY" ] && [ -f "$TARGET_HOME/.Xauthority" ]; then
+        export XAUTHORITY="$TARGET_HOME/.Xauthority"
+    fi
+
+    BROWSER_BIN=""
+    for B in google-chrome google-chrome-stable chromium chromium-browser x-www-browser xdg-open firefox-esr firefox; do
+        if command -v "$B" > /dev/null 2>&1; then
+            BROWSER_BIN="$B"
+            break
+        fi
+    done
+
+    if [ -n "$BROWSER_BIN" ]; then
+        CHROME_FLAGS=(--start-maximized --no-first-run --no-default-browser-check --disable-session-crashed-bubble)
+        if [ "$(id -u)" -eq 0 ]; then
+            if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+                sudo -u "$SUDO_USER" env DISPLAY="${DISPLAY:-:0}" XAUTHORITY="${XAUTHORITY:-$TARGET_HOME/.Xauthority}" nohup "$BROWSER_BIN" "${CHROME_FLAGS[@]}" "$UI_URL" > /dev/null 2>&1 &
+            else
+                nohup "$BROWSER_BIN" --no-sandbox "${CHROME_FLAGS[@]}" "$UI_URL" > /dev/null 2>&1 &
+            fi
+        else
+            nohup "$BROWSER_BIN" "${CHROME_FLAGS[@]}" "$UI_URL" > /dev/null 2>&1 &
+        fi
+        disown 2>/dev/null || true
+        echo "Launched $BROWSER_BIN at $UI_URL"
+    else
+        echo "Browser not found. Please navigate manually to $UI_URL"
+    fi
+fi
+
+echo "=================================================="
+echo " Done! Use 'stop-diagnoseme' to stop all services."
+echo "=================================================="

@@ -31,3 +31,11 @@ src/ui/package-lock.json
 src/ui/src/proto/**
 src/ui/src/assets/build_info.json
 dist/**
+# dist/firmware/ must exist for the deb and server Dockerfiles (COPY), even
+# when no firmware is staged, so keep its placeholder file tracked.
+!dist/firmware/
+!dist/firmware/.keep
+*.iso
+test_server/iso_build/**
+iso_build/**
+offline_update_bundle/**

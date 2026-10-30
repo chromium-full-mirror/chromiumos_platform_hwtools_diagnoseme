@@ -1,0 +1,479 @@
+#!/usr/bin/env python3
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+"""DiagnoseMe Maui Multi-Station Manufacturing Dashboard.
+
+Reads test results from /var/log/diagnoseme/maui_v11_results/ (and the
+~/diagnoseme_results/ locations of older releases) across 3 production phases:
+1. SMT Step 1: Provisioning Pipeline (MCU + PDC + FTDI)
+2. SMT Step 2: SMT Functional Testing (Host + DUT + Charger)
+3. FATP Step 4: FATP Quick Test Suite (QT0 + Barcode Verification)
+
+Displays multi-station KPIs and section breakdowns. Gracefully skips any section
+with no data, and supports continuous auto-refresh (--watch).
+"""
+
+import argparse
+import glob
+import json
+import os
+import shutil
+import sys
+import time
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import Tuple
+
+
+# ANSI color codes
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+GREEN = "\033[32m"
+RED = "\033[31m"
+YELLOW = "\033[33m"
+CYAN = "\033[36m"
+WHITE = "\033[37m"
+MAGENTA = "\033[35m"
+
+# Yield thresholds (percent) for coloring. Progress bars use their own,
+# lower thresholds than the yield figures.
+YIELD_GOOD_PCT = 95.0
+YIELD_WARN_PCT = 85.0
+BAR_GOOD_PCT = 90.0
+BAR_WARN_PCT = 75.0
+
+# Record categories (see categorize_record).
+CAT_SMT_STEP1 = "SMT_STEP1"
+CAT_SMT_STEP2 = "SMT_STEP2"
+CAT_FATP_QT0 = "FATP_QT0"
+CAT_OTHER = "OTHER"
+
+STATUS_PASS = "PASS"
+STATUS_PASS_WITH_BYPASS = "PASS_WITH_BYPASS"
+STATUS_FAIL = "FAIL"
+
+# JSON output section names and the record category they summarize.
+JSON_SECTIONS = (
+    ("smt_step1_provisioning", CAT_SMT_STEP1),
+    ("smt_step2_functional", CAT_SMT_STEP2),
+    ("fatp_step4_qt0", CAT_FATP_QT0),
+)
+
+# Results directory written by the server container (DIAGNOSEME_RESULTS_DIR).
+RESULTS_DIR = "/var/log/diagnoseme/maui_v11_results"
+
+STAGE_DISPLAY_NAMES = {
+    "mcu_bsl_flashing": "1. MCU BSL Flashing",
+    "ftdi_eeprom_programming": "2. FTDI EEPROM Programming",
+    "pdc_fw_flashing": "3. PDC Firmware Flashing",
+    "host_only_verification": "4. Host-Only Verification",
+    "host_dut_verification": "5. Host-DUT Verification",
+    "label_verified": "6. Barcode Label Verification",
+}
+
+
+def find_result_files() -> List[str]:
+  """Searches for all result JSON files across standard and phase-specific directories."""
+  search_patterns = [
+      f"{RESULTS_DIR}/smt_provisioning/results/*.json",
+      f"{RESULTS_DIR}/smt_functional/results/*.json",
+      f"{RESULTS_DIR}/fatp_tests/results/*.json",
+      f"{RESULTS_DIR}/smt_provisioning/*.json",
+      f"{RESULTS_DIR}/smt_functional/*.json",
+      f"{RESULTS_DIR}/fatp_tests/*.json",
+      f"{RESULTS_DIR}/highlevel/*.json",
+      f"{RESULTS_DIR}/*.json",
+      # Read-only fallback: locations used by older releases.
+      os.path.expanduser("~/diagnoseme_results/smt_provisioning/results/*.json"),
+      os.path.expanduser("~/diagnoseme_results/smt_functional/results/*.json"),
+      os.path.expanduser("~/diagnoseme_results/fatp_tests/results/*.json"),
+      os.path.expanduser("~/diagnoseme_results/smt_provisioning/*.json"),
+      os.path.expanduser("~/diagnoseme_results/smt_functional/*.json"),
+      os.path.expanduser("~/diagnoseme_results/fatp_tests/*.json"),
+      os.path.expanduser("~/diagnoseme_results/highlevel/*.json"),
+      os.path.expanduser("~/diagnoseme_results/*.json"),
+      "/home/*/diagnoseme_results/smt_provisioning/results/*.json",
+      "/home/*/diagnoseme_results/smt_functional/results/*.json",
+      "/home/*/diagnoseme_results/fatp_tests/results/*.json",
+      "/root/diagnoseme_results/smt_provisioning/results/*.json",
+      "/root/diagnoseme_results/smt_functional/results/*.json",
+      "/root/diagnoseme_results/fatp_tests/results/*.json",
+      "/tmp/diagnoseme_results/*/*/*.json",
+      "/tmp/diagnoseme_results/*/*.json",
+      "/tmp/diagnoseme_results/*.json",
+  ]
+  seen_paths = set()
+  result_files = []
+
+  for pat in search_patterns:
+    for path in glob.glob(pat):
+      real_path = os.path.realpath(path)
+      if real_path not in seen_paths and not os.path.basename(real_path).startswith("final_results"):
+        seen_paths.add(real_path)
+        result_files.append(real_path)
+
+  return sorted(result_files)
+
+
+def load_records(files: List[str]) -> List[Dict[str, Any]]:
+  """Loads and deduplicates records by (serial_number, station_id/phase, completion_time)."""
+  records_by_key: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+
+  for f in files:
+    try:
+      with open(f, "r", encoding="utf-8") as fp:
+        data = json.load(fp)
+      serial = data.get("serial_number") or os.path.basename(f).split("_")[0]
+      station_id = data.get("station_id") or data.get("phase") or "UNKNOWN"
+      comp_time = data.get("completion_time") or ""
+      key = (str(serial), str(station_id), str(comp_time))
+
+      if key not in records_by_key or len(str(data)) > len(str(records_by_key[key])):
+        records_by_key[key] = data
+    except Exception:  # pylint: disable=broad-except
+      continue
+
+  return sorted(
+      records_by_key.values(), key=lambda r: r.get("completion_time", "")
+  )
+
+
+def categorize_record(r: Dict[str, Any]) -> str:
+  """Categorizes a test record into 'SMT_STEP1', 'SMT_STEP2', 'FATP_QT0' or 'OTHER'."""
+  station_id = (r.get("station_id") or "").upper()
+  phase = (r.get("phase") or "").upper()
+  stages = r.get("stage_statuses", {})
+  serial = (r.get("serial_number") or "").upper()
+  verdict_tag = (r.get("verdict_tag") or "").upper()
+
+  if "STEP1" in station_id or "PROVISIONING" in station_id or "BATCH_STEP1" in serial or phase == "SMT_STEP1":
+    return CAT_SMT_STEP1
+  if "FATP" in station_id or "FATP" in phase or "FATP" in verdict_tag or r.get("scanned_barcode"):
+    return CAT_FATP_QT0
+  if "FUNCTIONAL" in station_id or "SMT" in phase or "host_dut_verification" in stages:
+    return CAT_SMT_STEP2
+  if "host_only_verification" in stages:
+    return CAT_SMT_STEP2
+  if "mcu_bsl_flashing" in stages and "host_dut_verification" not in stages:
+    return CAT_SMT_STEP1
+
+  return CAT_OTHER
+
+
+def group_records(records: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+  """Groups records by category, categorizing each record once."""
+  groups: Dict[str, List[Dict[str, Any]]] = {
+      CAT_SMT_STEP1: [],
+      CAT_SMT_STEP2: [],
+      CAT_FATP_QT0: [],
+      CAT_OTHER: [],
+  }
+  for r in records:
+    groups[categorize_record(r)].append(r)
+  return groups
+
+
+def compute_stats(records: List[Dict[str, Any]]) -> Dict[str, Any]:
+  """Computes unit counts and yields for a list of records."""
+  total = len(records)
+  passed = sum(1 for r in records if r.get("overall_status") == STATUS_PASS)
+  bypassed = sum(1 for r in records if r.get("overall_status") == STATUS_PASS_WITH_BYPASS)
+  failed = sum(1 for r in records if r.get("overall_status") == STATUS_FAIL)
+  total_passed = passed + bypassed
+  return {
+      "total": total,
+      "passed": passed,
+      "bypassed": bypassed,
+      "failed": failed,
+      "total_passed": total_passed,
+      "yield": (total_passed / total * 100.0) if total > 0 else 0.0,
+      "strict_yield": (passed / total * 100.0) if total > 0 else 0.0,
+  }
+
+
+def yield_color(percentage: float) -> str:
+  """Returns the color for a yield percentage."""
+  if percentage >= YIELD_GOOD_PCT:
+    return GREEN
+  return YELLOW if percentage >= YIELD_WARN_PCT else RED
+
+
+def format_progress_bar(percentage: float, width: int = 20) -> str:
+  """Generates an ASCII progress bar for yield percentage."""
+  if percentage < 0:
+    percentage = 0.0
+  elif percentage > 100:
+    percentage = 100.0
+  filled_len = int(round(width * percentage / 100.0))
+  empty_len = width - filled_len
+
+  bar_color = GREEN if percentage >= BAR_GOOD_PCT else (YELLOW if percentage >= BAR_WARN_PCT else RED)
+  return f"{bar_color}[{'█' * filled_len}{'░' * empty_len}]{RESET}"
+
+
+def print_section_table(
+    section_name: str,
+    records: List[Dict[str, Any]],
+    stage_keys: List[str],
+    show_all: bool = False,
+):
+  """Renders a single manufacturing section table with KPIs, stage breakdowns, and history."""
+  stats = compute_stats(records)
+  total_units = stats["total"]
+  pass_count = stats["passed"]
+  bypass_count = stats["bypassed"]
+  fail_count = stats["failed"]
+  overall_yield = stats["yield"]
+  strict_yield = stats["strict_yield"]
+
+  print(f"\n{BOLD}{CYAN}=== {section_name.upper()} ==={RESET}")
+  print(
+      f"  • Units Tested: {BOLD}{WHITE}{total_units:<5}{RESET} "
+      f" Passed: {BOLD}{GREEN}{pass_count:<5}{RESET} ({strict_yield:5.1f}% First-Pass) "
+      f" Bypassed: {BOLD}{YELLOW}{bypass_count:<4}{RESET} "
+      f" Failed: {BOLD}{RED}{fail_count:<4}{RESET} "
+      f" Yield: {BOLD}{yield_color(overall_yield)}{overall_yield:>5.1f}%{RESET} {format_progress_bar(overall_yield, 15)}"
+  )
+
+  # Stage Breakdown
+  if stage_keys:
+    print(f"\n  {BOLD}{'Stage Name':<32} {'Tested':>8} {'Passed':>8} {'Failed':>8} {'Bypassed':>9} {'Stage Yield':>13}{RESET}")
+    print(f"  {'-'*32} {'-'*8} {'-'*8} {'-'*8} {'-'*9} {'-'*13}")
+
+    for key in stage_keys:
+      stage_name = STAGE_DISPLAY_NAMES.get(key, key)
+      s_tested = 0
+      s_passed = 0
+      s_failed = 0
+      s_bypassed = 0
+
+      for r in records:
+        stages = r.get("stage_statuses", {})
+        status = stages.get(key)
+        if status:
+          s_tested += 1
+          if status == "PASSED":
+            s_passed += 1
+          elif status == "FAILED":
+            s_failed += 1
+          elif "BYPASS" in status:
+            s_bypassed += 1
+
+      if s_tested > 0:
+        s_yield = (s_passed + s_bypassed) / s_tested * 100.0
+        y_col = yield_color(s_yield)
+        print(
+            f"  {stage_name:<32} {s_tested:>8} {GREEN}{s_passed:>8}{RESET} {RED}{s_failed:>8}{RESET} {YELLOW}{s_bypassed:>9}{RESET} {BOLD}{y_col}{s_yield:>12.1f}%{RESET}"
+        )
+
+  # Recent Submissions for this Section
+  display_records = records if show_all else records[-5:]
+  print(f"\n  {BOLD}{WHITE}Recent Submissions (Last {len(display_records)} of {total_units}):{RESET}")
+  print(f"  {BOLD}{'Timestamp (UTC)':<19} {'Serial Number':<18} {'Operator':<12} {'Verdict':<16} {'Notes / Stage Failures'}{RESET}")
+  print(f"  {'-'*19} {'-'*18} {'-'*12} {'-'*16} {'-'*24}")
+
+  for r in reversed(display_records):
+    ts = (r.get("completion_time") or "").replace("T", " ").replace("Z", "")[:19]
+    serial = r.get("serial_number") or "UNKNOWN"
+    operator = r.get("operator_id") or "OP_FACTORY"
+    status = r.get("overall_status") or "UNKNOWN"
+
+    if status == STATUS_PASS:
+      status_str = f"{GREEN}{BOLD}PASS{RESET}"
+    elif status == STATUS_PASS_WITH_BYPASS:
+      status_str = f"{YELLOW}{BOLD}PASS (BYPASS){RESET}"
+    elif status == STATUS_FAIL:
+      status_str = f"{RED}{BOLD}FAIL{RESET}"
+    else:
+      status_str = f"{WHITE}{status}{RESET}"
+
+    stages = r.get("stage_statuses", {})
+    failed_stages = [k for k, v in stages.items() if v == "FAILED"]
+    bypassed_stages = [k for k, v in stages.items() if "BYPASS" in v]
+
+    notes = []
+    if failed_stages:
+      notes.append(f"Failed: {', '.join(failed_stages)}")
+    if bypassed_stages:
+      notes.append(f"Bypassed: {', '.join(bypassed_stages)}")
+    notes_str = " | ".join(notes) if notes else "All stages OK"
+
+    print(f"  {ts:<19} {CYAN}{serial:<18}{RESET} {operator:<12} {status_str:<25} {DIM}{notes_str}{RESET}")
+
+
+def render_dashboard(records: List[Dict[str, Any]], show_all: bool = False):
+  """Renders the formatted CLI multi-section manufacturing dashboard."""
+  term_width = shutil.get_terminal_size((80, 24)).columns
+  width = min(term_width, 105)
+  separator = "=" * width
+  thin_sep = "-" * width
+
+  # Header
+  now_utc = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+  print(separator)
+  print(f"{BOLD}{CYAN}{'MAUI MANUFACTURING PRODUCTION DASHBOARD':^{width}}{RESET}")
+  print(separator)
+  print(f"  Time: {BOLD}{now_utc}{RESET}  |  Storage: {DIM}{RESULTS_DIR}/{RESET}")
+  print(thin_sep)
+
+  if not records:
+    print(f"\n{YELLOW}{BOLD}  No manufacturing results found yet.{RESET}")
+    print("  Results will automatically appear here once units are saved in")
+    print("  Maui Station 1 (Provisioning), Station 2 (SMT), or Station 4 (FATP QT0).\n")
+    print(separator)
+    return
+
+  # Group records into 3 sections
+  groups = group_records(records)
+  sec1_records = groups[CAT_SMT_STEP1]
+  sec2_records = groups[CAT_SMT_STEP2]
+  sec3_records = groups[CAT_FATP_QT0]
+  other_records = groups[CAT_OTHER]
+
+  # Overall Consolidated Production Metrics
+  stats = compute_stats(records)
+  total_units = stats["total"]
+  pass_count = stats["passed"]
+  bypass_count = stats["bypassed"]
+  fail_count = stats["failed"]
+  overall_yield = stats["yield"]
+
+  active_sections = []
+  if sec1_records:
+    active_sections.append(f"SMT Step 1 ({len(sec1_records)} units)")
+  if sec2_records:
+    active_sections.append(f"SMT Step 2 ({len(sec2_records)} units)")
+  if sec3_records:
+    active_sections.append(f"FATP QT0 ({len(sec3_records)} units)")
+
+  print(f"{BOLD}{WHITE}OVERALL PRODUCTION SUMMARY ({', '.join(active_sections) if active_sections else 'All Results'}):{RESET}")
+  print(
+      f"  • Total Reports: {BOLD}{WHITE}{total_units:<6}{RESET} "
+      f" Full Pass: {BOLD}{GREEN}{pass_count:<6}{RESET} "
+      f" Bypass: {BOLD}{YELLOW}{bypass_count:<6}{RESET} "
+      f" Failed: {BOLD}{RED}{fail_count:<6}{RESET} "
+      f" Overall Pass Rate: {BOLD}{yield_color(overall_yield)}{overall_yield:>6.1f}%{RESET} {format_progress_bar(overall_yield, 20)}"
+  )
+  print(thin_sep)
+
+  # Section 1: SMT Step 1 Provisioning Pipeline
+  if sec1_records:
+    print_section_table(
+        "Section 1: SMT Step 1 — Provisioning Pipeline (MCU + PDC + FTDI)",
+        sec1_records,
+        ["mcu_bsl_flashing", "ftdi_eeprom_programming", "pdc_fw_flashing"],
+        show_all,
+    )
+    print(thin_sep)
+
+  # Section 2: SMT Step 2 Functional Verification
+  if sec2_records:
+    print_section_table(
+        "Section 2: SMT Step 2 — SMT Functional Test Suite (Host + DUT + Charger)",
+        sec2_records,
+        ["host_only_verification", "host_dut_verification"],
+        show_all,
+    )
+    print(thin_sep)
+
+  # Section 3: FATP Step 4 Quick Test Suite
+  if sec3_records:
+    print_section_table(
+        "Section 3: FATP Step 4 — Quick Test Suite (QT0 + Barcode Verification)",
+        sec3_records,
+        ["label_verified", "host_only_verification", "host_dut_verification"],
+        show_all,
+    )
+    print(thin_sep)
+
+  # Other / Uncategorized if any
+  if other_records and not (sec1_records or sec2_records or sec3_records):
+    print_section_table(
+        "Section: Manufacturing Test Results",
+        other_records,
+        list(STAGE_DISPLAY_NAMES.keys()),
+        show_all,
+    )
+    print(thin_sep)
+
+  print(separator)
+  print(
+      f"  {DIM}Commands: 'diagnoseme-logs <SERIAL>' for detailed logs | 'diagnoseme-dashboard --watch' for live refresh{RESET}"
+  )
+  print(separator)
+
+
+def main():
+  parser = argparse.ArgumentParser(
+      description="DiagnoseMe Maui Multi-Station Manufacturing Dashboard"
+  )
+  parser.add_argument(
+      "-w",
+      "--watch",
+      action="store_true",
+      help="Continuously refresh the dashboard every 3 seconds",
+  )
+  parser.add_argument(
+      "-i",
+      "--interval",
+      type=int,
+      default=3,
+      help="Refresh interval in seconds when using --watch (default: 3)",
+  )
+  parser.add_argument(
+      "-a",
+      "--all",
+      action="store_true",
+      help="Display all submitted devices in history table (not just last 5)",
+  )
+  parser.add_argument(
+      "-j",
+      "--json",
+      action="store_true",
+      help="Output summary metrics as JSON instead of formatted text",
+  )
+
+  args = parser.parse_args()
+
+  def run_once():
+    files = find_result_files()
+    records = load_records(files)
+
+    if args.json:
+      groups = group_records(records)
+      sections = {}
+      for name, category in JSON_SECTIONS:
+        stats = compute_stats(groups[category])
+        sections[name] = {
+            "count": stats["total"],
+            "passed": stats["total_passed"],
+            "failed": stats["failed"],
+        }
+      payload = {
+          "total_reports": len(records),
+          "sections": sections,
+      }
+      print(json.dumps(payload, indent=2))
+    else:
+      render_dashboard(records, show_all=args.all)
+
+  if args.watch:
+    try:
+      while True:
+        os.system("clear")
+        run_once()
+        print(f"\n  {DIM}Auto-refreshing every {args.interval}s. Press Ctrl+C to exit.{RESET}")
+        time.sleep(args.interval)
+    except KeyboardInterrupt:
+      print(f"\n{GREEN}Exited dashboard.{RESET}")
+      sys.exit(0)
+  else:
+    run_once()
+
+
+if __name__ == "__main__":
+  main()
