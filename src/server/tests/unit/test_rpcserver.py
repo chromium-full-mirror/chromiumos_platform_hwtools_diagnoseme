@@ -56,6 +56,79 @@ class TestRpcServer(unittest.TestCase):
             self.assertFalse(rpcserver.register_maui_services(server))
         server.add_generic_rpc_handlers.assert_not_called()
 
+    def test_maui_services_required_on_maui_editions_only(self):
+        """Only Maui editions other than the dev edition 'all' need Maui."""
+        for edition in rpcserver.editions.EDITIONS.values():
+            has_maui = any(s in rpcserver.MAUI_SERVICES for s in edition.services)
+            self.assertEqual(
+                rpcserver.maui_services_required(edition),
+                has_maui and edition.edition_id != "all",
+                edition.edition_id,
+            )
+        self.assertTrue(
+            rpcserver.maui_services_required(rpcserver.editions.EDITIONS["maui-v1.1"])
+        )
+        self.assertFalse(
+            rpcserver.maui_services_required(rpcserver.editions.EDITIONS["all"])
+        )
+
+    def _register_with_failing_maui(self, services, maui_required):
+        with mock.patch.object(
+            rpcserver, "register_maui_services", return_value=False
+        ), mock.patch.dict(
+            rpcserver.SERVICE_REGISTRARS,
+            {key: mock.Mock() for key in rpcserver.SERVICE_REGISTRARS},
+        ):
+            with rpcserver.contextlib.ExitStack() as stack:
+                rpcserver.register_services(
+                    mock.MagicMock(), services, stack, maui_required=maui_required
+                )
+
+    def test_maui_failure_stops_a_maui_edition(self):
+        """S3: a Maui import failure stops startup on a Maui edition."""
+        with self.assertRaisesRegex(
+            rpcserver.MauiServicesUnavailableError, "Not starting the server"
+        ), self.assertLogs(level="CRITICAL"):
+            self._register_with_failing_maui(
+                [
+                    rpcserver.editions.SERVICE_DIAGNOSEME,
+                    rpcserver.editions.SERVICE_MAUI_STATION1,
+                ],
+                maui_required=True,
+            )
+
+    def test_maui_failure_is_optional_without_required(self):
+        """The dev edition keeps running without the Maui services."""
+        with self.assertLogs(level="WARNING") as logs:
+            self._register_with_failing_maui(
+                [
+                    rpcserver.editions.SERVICE_DIAGNOSEME,
+                    rpcserver.editions.SERVICE_MAUI_STATION1,
+                ],
+                maui_required=False,
+            )
+        self.assertIn("Continuing without the Maui", "\n".join(logs.output))
+        # No Maui service requested: nothing to fail.
+        self._register_with_failing_maui(
+            [rpcserver.editions.SERVICE_DIAGNOSEME], maui_required=True
+        )
+
+    def test_serve_stops_when_maui_fails_on_a_maui_edition(self):
+        """serve() propagates the error for a Maui edition (no half-working UI)."""
+        with mock.patch.dict(
+            "os.environ", {"DIAGNOSEME_EDITION": "maui-v1.1"}
+        ), mock.patch.object(rpcserver, "setup_logging"), mock.patch.object(
+            rpcserver, "parse_arguments"
+        ), mock.patch.object(
+            rpcserver, "register_maui_services", return_value=False
+        ), mock.patch.object(
+            rpcserver.grpc.aio, "server"
+        ) as mock_server:
+            mock_server.return_value.stop = mock.AsyncMock()
+            with self.assertRaises(rpcserver.MauiServicesUnavailableError):
+                rpcserver.asyncio.run(rpcserver.serve())
+            mock_server.return_value.start.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

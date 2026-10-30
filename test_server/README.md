@@ -5,11 +5,13 @@ This project provides a system for generating a custom Debian 13 (Trixie) instal
 ## Quick Start: Generate the USB Stick
 
 1. **Build the ISO:**
-   Run the provided build script. It will download the official Debian 13.3.0 netinst ISO, download the latest stable Maui firmware, embed initial Docker assets, and inject the `preseed.cfg`.
+   Run the provided build script for one edition (see `editions.json`). It will download the official Debian 13.3.0 netinst ISO, download the latest stable Maui firmware, embed the edition's Docker images and Debian package, and inject the `preseed.cfg`.
    ```bash
-   ./build_iso.sh
+   ./build_iso.sh --edition maui-v1.1             # the release images of this commit (:maui-v1.1-<commit>)
+   ./build_iso.sh --edition maui-v1.1 --build-local  # or build them from this checkout
    ```
-   The build fails if no MCU or PDC firmware could be staged (from GCS or `dist/firmware/<mcu|pdc>/`), because a Maui station ISO must contain the firmware. Pass `--skip-fw` only to build an ISO without firmware on purpose.
+   The result is `custom-debian-preseed-<edition>.iso` (`--output` overrides it).
+   For Maui editions the build fails if no firmware of a component (e.g. MCU or PDC) could be staged (from GCS or `dist/firmware/<component>/`), because a Maui station ISO must contain the firmware. Pass `--skip-fw` only to build an ISO without downloading the firmware on purpose.
 
 2. **Identify your USB Drive:**
    Plug in your USB stick and find its device name (e.g., `/dev/sda`, `/dev/sdb`).
@@ -20,7 +22,7 @@ This project provides a system for generating a custom Debian 13 (Trixie) instal
 3. **Flash the ISO:**
    Use `dd` to write the ISO to the **entire device** (replace `/dev/sda` with your actual device).
    ```bash
-   sudo dd if=custom-debian-preseed.iso of=/dev/sda bs=4M status=progress oflag=sync
+   sudo dd if=custom-debian-preseed-<edition>.iso of=/dev/sda bs=4M status=progress oflag=sync
    ```
 
 ---
@@ -39,30 +41,33 @@ The `preseed.cfg` automates the Debian installation process and handles several 
 * **Late Command:**
   * Configures GRUB with `nvme_core.default_ps_max_latency_us=0` for NVMe stability.
   * Copies bundled `offline_assets/` (Docker images, Maui firmware, and Debian package) to `/var/lib/diagnoseme/`, and the CLI tools, config and desktop launchers from the ISO.
-  * Installs the `diagnoseme` Debian package. Its postinst triggers a **DKMS build** of the `r8152` Realtek driver and creates the log, device log and result directories below `/var/log/diagnoseme/` (owned by `diagnoseme`).
+  * Installs the edition's Debian package (output in `/var/log/diagnoseme/deb-install.log`). For the editions with the Realtek tools (`realtek_tools` in `editions.json`: servo-dolos) its postinst triggers a **DKMS build** of the `r8152` Realtek driver; for every edition it creates the log, device log and result directories below `/var/log/diagnoseme/` (owned by `diagnoseme`).
   * Adds user `diagnoseme` to the `docker` group and grants it passwordless `sudo`.
   * Configures LightDM autologin for user `diagnoseme` into an XFCE session.
   * Installs desktop shortcuts (**Start DiagnoseMe**, **Stop DiagnoseMe**, **Offline Update**, **Manufacturing Dashboard**, **Web UI**) onto `/home/diagnoseme/Desktop/`.
   * Loads `r8152` at boot, blacklists the conflicting `cdc_ether` module and updates `initramfs`.
   * Installs Google Chrome (if the download succeeds).
-  * Creates the one-shot `diagnoseme-setup.service` for the first boot.
+  * Online editions (servo-dolos, `MODE=online`): opens Chrome on `http://localhost:8888` at login (`~/.config/autostart`), as the pre-editions ISO did.
+  * Installs `iso_setup/post-install-setup.sh` and creates `diagnoseme-setup.service` for the first boot.
 
 The installer then reboots into the installed system.
 
 ### 2. First Boot (Automated Setup)
-On the first boot, `diagnoseme-setup.service` runs once:
+On the first boot, `diagnoseme-setup.service` runs `post-install-setup.sh`:
 * Loads the embedded Docker images (`docker load -i /var/lib/diagnoseme/images/*.tar.gz`).
-* Disables itself and removes its setup script. There is no extra reboot.
+* Online editions (servo-dolos): adds the `diagnoseme-deb` apt source (`https://us-apt.pkg.dev/projects/chromeos-hw-tools`) and its key, as the pre-editions ISO did, and installs the package from it, so the station keeps getting package updates with `apt upgrade`. Maui editions stay offline.
+* Checks that the edition's package is installed (`dpkg-query`); if not, it writes `/var/log/diagnoseme/INSTALL_FAILED` and `DIAGNOSEME_INSTALL_FAILED.txt` on the desktop.
+* Disables itself and removes its setup script once every step succeeded (otherwise it runs again on the next boot). There is no extra reboot.
 
 The machine boots directly into the **XFCE4 Desktop** with user `diagnoseme` logged in.
-* Double-click **"Start DiagnoseMe (Offline)"** (or run `start-diagnoseme`) to bring up container services and automatically launch Google Chrome to `http://localhost:8888/maui-initial-flashing`.
+* Double-click **"Start DiagnoseMe (Offline)"** (or run `start-diagnoseme`) to bring up container services and automatically launch Google Chrome to the edition's start page (`UI_URL` in `/etc/diagnoseme/config.env`, e.g. `http://localhost:8888/maui/v1.1/provisioning`).
 
 ---
 
 ## Managing DiagnoseMe & Offline Updates
 
 ### CLI Commands
-* `start-diagnoseme [--offline | --online] [--no-browser]`: Starts DiagnoseMe testing containers and opens Google Chrome to Maui Station 1.
+* `start-diagnoseme [--offline | --online] [--no-browser]`: Starts DiagnoseMe testing containers and (Maui editions) opens Google Chrome to the edition's start page.
 * `stop-diagnoseme`: Stops all DiagnoseMe containers.
 * `diagnoseme-dashboard [--watch | --json | --all]`: Computes real-time Maui manufacturing statistics, pass/fail yields, and stage breakdowns.
 * `diagnoseme-logs [service]`: Follows container logs in real time (all containers by default).
@@ -71,21 +76,49 @@ The machine boots directly into the **XFCE4 Desktop** with user `diagnoseme` log
 
 ### Log and Result Locations
 * Device logs: `/var/log/diagnoseme/devices/<SERIAL>/`
-* Final results: `/var/log/diagnoseme/maui_v11_results/`
+* Final results: the edition's results directory (`DIAGNOSEME_RESULTS_DIR` in `config.env`), `/var/log/diagnoseme/maui_v11_results/` for Maui v1.1
 * Container logs: `/var/log/diagnoseme/{rpcserver,nginx,envoy}/`
 
 Results in `~/diagnoseme_results/` from older releases are still shown by `diagnoseme-dashboard` and `diagnoseme-logs`.
 
 ### Station Configuration
-The ISO and offline bundle install the Maui station configuration `/etc/diagnoseme/config.env` (offline mode, `:maui` images, browser auto-start) and the Maui desktop launchers. The generic `diagnoseme` package (Servo/Dolos) ships no `config.env` and only a `DiagnoseMe Web` menu entry; `start-diagnoseme` then pulls the `:release` images and runs watchtower.
+Every station runs one edition (`editions.json`); the ISO, the offline bundle and the Debian package are built per edition (`--edition` is required, there is no default edition). The shipped editions are `servo-dolos` (every Servo and Dolos page, package `diagnoseme`, images `:servo-dolos` and `:release`, its stations follow `:release`, ISO `custom-debian-preseed-latest.iso`) and `maui-v1.1` (package `diagnoseme-maui-v1.1`, ISO `custom-debian-preseed-maui-v1.1-latest.iso`). The edition packages conflict with / replace each other and `diagnoseme`. The package installs `/etc/diagnoseme/config.env` rendered for the edition by `tools/edition_info.py render-config`:
+* Maui editions: the Maui station configuration (offline mode, the edition's images, browser auto-start, firmware components, maui-utils image, results directory, `COMPOSE_FILE` with the Maui compose override `docker-compose-maui.yaml`, which alone mounts the firmware, maui-utils staging, device log and results directories) and the Maui desktop launchers.
+* servo-dolos (and the unshipped split editions): the generic online configuration (`MODE=online`, `DOCKER_TAG=<edition>`, `release` for servo-dolos, `PULL_POLICY=always`, watchtower, no browser start, no Maui keys) and only a `DiagnoseMe Web` menu entry.
 
-`start-diagnoseme --online` always pulls the latest images and runs watchtower; on Maui stations it also downloads the latest stable Maui firmware into `/var/lib/diagnoseme/firmware/<mcu|pdc>/` (skipped when the `STABLE.json` there already names the same version and MD5; failures are not fatal). In offline mode watchtower is not started.
+Without a `config.env` (Servo / Dolos stations installed before the editions), `start-diagnoseme` pulls the `:release` images and runs watchtower; `apt upgrade` to the `servo-dolos` package keeps them online.
+
+`config.env` belongs to the package and is replaced on every upgrade. Station specific settings (`STATION_ID`, `RESULTS_SERVER`, the `MAUI_*` test overrides, ...) go into `/etc/diagnoseme/config.local.env`: the package never ships or overwrites it, and `start-diagnoseme`, `stop-diagnoseme`, `diagnoseme-logs`, `diagnoseme-dashboard` and `maui-flash` read it after `config.env`. The first upgrade from a package without `config.local.env` (the pre-editions packages) moves the station specific values of the old `config.env` that differ from the new one into it; empty values, the old default station IDs (`MAUI_STATION_1`, `MAUI_V1_1_STATION`) and edition switches are skipped.
+
+`start-diagnoseme --online` always pulls the latest images and runs watchtower; on Maui stations it also downloads the latest stable Maui firmware into `/var/lib/diagnoseme/firmware/<component>/` (skipped when the `STABLE.json` there already names the same version and MD5; failures are not fatal). In offline mode watchtower is not started.
+
+### Releasing an Edition
+`dockerfiles/cloudbuild_release.yaml` builds one edition: every release trigger sets `_EDITION` (the existing Servo / Dolos trigger needs `_EDITION=servo-dolos`; add a trigger per Maui edition if wanted) and `_COMMIT_SHA`. It pushes the images as `:<edition>-<commit>` and uploads the edition's deb and ISO. Online stations only get the new images after a promotion, and `tools/promote.sh` is the only way to promote:
+```bash
+tools/promote.sh --edition servo-dolos --commit <sha> [--dry-run]
+```
+It moves the edition tag and its `docker_tag_aliases` (servo-dolos: `:servo-dolos` and `:release`, which every Servo / Dolos station follows) for the ui, server and envoy images. Do not move `:release` by hand, and never promote a CQ image (CQ pushes the development `all` edition).
 
 ### Building an Offline Update Bundle for Factory USBs
 From the repository root on a connected development machine:
 ```bash
-./development_environment/build-offline-bundle.sh --tag maui
+./development_environment/build-offline-bundle.sh --edition maui-v1.1 \
+    [--build-local | --use-local]
 ```
-This downloads the latest stable MCU/PDC firmware from GCS (failing if none could be staged, unless `--skip-fw` or `--allow-missing-fw` is given), exports `:maui` Docker images, builds the Debian package, computes SHA256 checksums, and creates a ready-to-copy update directory and ZIP file. On the station, run `sudo ./install-update.sh` from the bundle directory (or `sudo diagnoseme-offline-update`).
+This exports the edition's Docker images of `--tag` (default `<edition>-<commit>`, the release build of the checked out commit; the server image must be the edition, there is no fallback to `:latest`), tagged with the station tags, e.g. `:maui-v1.1` ( the old `:maui` tag is not saved, the bundle's deb switches the station to `:maui-v1.1`), copies/downloads the edition's firmware components (failing if none could be staged for a component, or if a `firmware_stable_required` component, e.g. `mcu` and `pdc` of maui-v1.1, has no valid `STABLE.json`, unless `--allow-missing-fw` is given), builds the edition's Debian package (Maui editions include the maui-utils image), computes SHA256 checksums, and creates a ready-to-copy update directory and ZIP file in `offline_update_bundle/<edition>/`. On the station, run `sudo ./install-update.sh` from the bundle directory (or `sudo diagnoseme-offline-update`). `MANIFEST.json` names the bundle's edition, package, commit and the image ids and digests; a firmware component with a `STABLE.json` replaces the station's directory. The edition and package are checked: the update refuses a bundle of another edition than the station's (old Maui stations without `DIAGNOSEME_EDITION` count as `maui-v1.1`, the old `diagnoseme` package without `config.env` as `servo-dolos`) unless `--switch-edition` is given (`sudo ./install-update.sh --switch-edition`), and a deb whose `Package` is not the edition's.
 
 `build_iso.sh` reuses this script to embed the same images, firmware and Debian package into the ISO.
+
+### Maui Firmware and maui-utils Versions
+Builds and stations always use the releases marked stable in the public `gs://maui-firmware` bucket: there are no version options or pinned versions.
+
+* **Firmware:** `tools/maui_fw_fetch.py` (installed on stations as `fetch-maui-firmware`) downloads the edition's firmware components (`editions.json` `"firmware"`) into `firmware/<component>/` when the ISO or an offline bundle is built (`--skip-fw` skips the download; `dist/firmware` is still bundled) and when a Maui station starts with `start-diagnoseme --online` (`FIRMWARE_COMPONENTS` in `/etc/diagnoseme/config.env`; a failed download only prints a warning). Each component follows the stable marker of the edition's Maui device (`editions.json` `"maui_device"`, `MAUI_DEVICE` in `config.env`), an empty file in the version directory, e.g. `pdc-fw/v20_0325_100W/stable.maui_v11.pdcfw`:
+
+  | Component | Bucket directory | Stable marker | Image |
+  |---|---|---|---|
+  | `mcu` | `mcu-fw/mspm0/<version>/` | `stable.<device>.mcufw` | the `*.txt` file (`zephyr.txt`) |
+  | `pdc` | `pdc-fw/<version>/` | `stable.<device>.pdcfw` | the `*.bin` file (`<version>.bin`) |
+
+  A missing marker fails the fetch. If a version directory holds several images, the preferred name (else the alphabetically first) is used with a warning. Downloads are size- and md5-checked. `firmware/<component>/` is replaced as a whole (downloaded next to it, then swapped in, so a failed download keeps the previous firmware) and holds exactly the stable image and `STABLE.json`, which records it as `{"version", "file", "md5", "source"}`. Nothing is downloaded when `STABLE.json` already names the same version and md5 (`--force` downloads anyway); `--dry-run` shows what would be fetched.
+* **Flashing:** station 1 flashes the MCU and PDC images named by `STABLE.json` after checking their md5.
+* **maui-utils:** Maui editions always bundle the stable maui-utils release, the `<version>` marked by `docker/<version>/stable.dockertag` in `gs://maui-firmware` (`tools/fetch_maui_utils.sh`, which downloads it with `tools/maui_fw_fetch.py maui-utils`: the same marker resolution with numeric version order, a crc32c check because the bucket has no md5 of this composite object, and a `STABLE.json` with its md5); there is no version option. A Maui deb build fails without it (`ALLOW_NO_MAUI_UTILS=1` for development builds only). `start-diagnoseme` checks the md5 of the bundled tar against its `STABLE.json` before `docker load`. The deb records it in `config.env` as `MAUI_UTILS_IMAGE=maui-utils:<version>`; a server without `MAUI_UTILS_IMAGE` uses the newest local `maui-utils:*` image. Developer-only override: `--maui-utils-tar <file>` (`build_iso.sh`, `build-offline-bundle.sh`, `build-diagnoseme.sh`) bundles a local `docker save` tar of an unreleased build instead.

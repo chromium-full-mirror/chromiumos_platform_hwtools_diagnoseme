@@ -13,6 +13,8 @@ import {MatDividerModule} from '@angular/material/divider';
 import {MatTooltipModule} from '@angular/material/tooltip';
 import {RouterModule} from '@angular/router';
 import {DiagnoseMeService} from './services/diagnoseme.service';
+import {ACTIVE_EDITION} from './editions/active-edition';
+import {Edition} from './editions/edition.model';
 import JSZip from 'jszip';
 import {saveAs} from 'file-saver';
 
@@ -40,6 +42,10 @@ interface BuildInfo {
 export class AppComponent implements OnInit {
   title = 'HW Tools Diagnose Me™';
   buildInfo: BuildInfo | null = null;
+  /** Edition compiled into this UI build. */
+  readonly edition: Edition = ACTIVE_EDITION;
+  /** Edition reported by the backend, when it differs from the UI one. */
+  serverEditionMismatch: string | null = null;
 
   constructor(
     private diagnoseMeService: DiagnoseMeService,
@@ -55,6 +61,21 @@ export class AppComponent implements OnInit {
         console.error('Failed to load build_info.json:', err);
       },
     });
+    this.diagnoseMeService.getStationConfig().subscribe({
+      next: config => {
+        // The 'all' edition is a development build working with any backend.
+        if (
+          this.edition.id !== 'all' &&
+          config.edition &&
+          config.edition !== this.edition.id
+        ) {
+          this.serverEditionMismatch = config.edition;
+        }
+      },
+      error: err => {
+        console.error('Failed to get station config:', err);
+      },
+    });
   }
 
   downloadLogs() {
@@ -63,10 +84,12 @@ export class AppComponent implements OnInit {
         const zip = new JSZip();
         zip.file('rpcserver.log', response.logContent);
 
-        if (this.buildInfo) {
-          const infoString = `Build Date: ${this.buildInfo.buildDate}\nCommit: ${this.buildInfo.commitSha}\n`;
-          zip.file('build_info.txt', infoString);
-        }
+        const buildDate = this.buildInfo?.buildDate ?? 'unknown';
+        const commitSha = this.buildInfo?.commitSha ?? 'unknown';
+        const infoString =
+          `Build Date: ${buildDate}\nCommit: ${commitSha}\n` +
+          `Edition: ${this.edition.id}\n`;
+        zip.file('build_info.txt', infoString);
 
         zip
           .generateAsync({type: 'blob'})

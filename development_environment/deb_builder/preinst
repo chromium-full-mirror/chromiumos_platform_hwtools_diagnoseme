@@ -1,0 +1,25 @@
+#!/bin/sh
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# Debian preinst: keeps a copy of the current /etc/diagnoseme/config.env,
+# which the package replaces, so that postinst can move its station specific
+# values (STATION_ID, RESULTS_SERVER, MAUI_* overrides) into
+# /etc/diagnoseme/config.local.env.
+
+set -e
+
+CONFIG_FILE="/etc/diagnoseme/config.env"
+SAVED_CONFIG="/var/lib/diagnoseme/config.env.pre-upgrade"
+
+case "$1" in
+    install|upgrade)
+        if [ -f "$CONFIG_FILE" ]; then
+            mkdir -p "$(dirname "$SAVED_CONFIG")"
+            cp -p "$CONFIG_FILE" "$SAVED_CONFIG"
+        fi
+        ;;
+esac
+
+exit 0

@@ -3,22 +3,168 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# Debian postinst: sets up DKMS, Docker permissions, desktop shortcuts and the
-# host directories used by the DiagnoseMe containers.
+# Debian postinst: sets up DKMS (editions with the Realtek tools), Docker
+# permissions, desktop shortcuts and the host directories used by the
+# DiagnoseMe containers.
 
 set -e
 
-# Replaced with the STATION_PROFILE build argument (generic or maui) when
-# the package is built.
-STATION_PROFILE="@STATION_PROFILE@"
+# Replaced when the package is built (deb_builder/Dockerfile, editions.json):
+# the edition, whether it is a Maui edition (true|false), whether it has the
+# Realtek tools (true|false: rtunicpg and the r8152 DKMS driver, Servo v4p1
+# tooling), its firmware components and its Maui results directory (empty for
+# the other editions).
+DIAGNOSEME_EDITION="@EDITION@"
+MAUI_EDITION="@MAUI_EDITION@"
+REALTEK_TOOLS="@REALTEK_TOOLS@"
+FIRMWARE_COMPONENTS="@FIRMWARE_COMPONENTS@"
+RESULTS_DIR="@RESULTS_DIR@"
+MAUI_UTILS_DIR="/var/lib/diagnoseme/maui-utils"
+CONFIG_DIR="/etc/diagnoseme"
+# Copy of the config.env before this upgrade (written by preinst).
+SAVED_CONFIG="/var/lib/diagnoseme/config.env.pre-upgrade"
 
-echo "Setting up Realtek driver via DKMS..."
-dkms add -m r8152 -v 2.21.4 || true
-dkms install -m r8152 -v 2.21.4 || echo "Warning: DKMS install failed. Headers may be missing."
+# Prints the value of variable $2 after sourcing the config file $1 (empty
+# when it is not set). The file is sourced in a subshell, as start-diagnoseme
+# sources it.
+config_value() {
+    (
+        set +e
+        # shellcheck disable=SC1090
+        . "$1" > /dev/null 2>&1
+        eval "printf '%s' \"\${$2-}\""
+    )
+}
 
-echo "Unloading conflicting modules..."
-modprobe -r cdc_ether || true
-modprobe -r r8152 || true
+# STATION_ID values that older packages shipped as their default (a8a85a8:
+# MAUI_STATION_1, the first editions packages: MAUI_V1_1_STATION, also on
+# Maui v1.2 stations). They are package defaults, not station settings.
+OLD_DEFAULT_STATION_IDS="MAUI_STATION_1 MAUI_V1_1_STATION"
+
+# Prints the edition of the config file $1: its DIAGNOSEME_EDITION, or
+# maui-v1.1 for the pre-editions Maui packages (DOCKER_TAG=maui); empty when
+# unknown.
+config_edition() {
+    edition=$(config_value "$1" DIAGNOSEME_EDITION)
+    if [ -z "$edition" ] && [ "$(config_value "$1" DOCKER_TAG)" = "maui" ]; then
+        edition="maui-v1.1"
+    fi
+    printf '%s' "$edition"
+}
+
+# Moves the station specific values of the config.env of an older package
+# ($1) that differ from the new config.env ($2) into the station config
+# ($3, config.local.env), which the package never ships or overwrites.
+# Station specific: STATION_ID, RESULTS_SERVER and the MAUI_* overrides
+# (except MAUI_UTILS_IMAGE and MAUI_DEVICE, which belong to the package).
+# Only a config.env written before config.local.env existed (it does not
+# mention config.local.env) is migrated: since then config.env holds package
+# defaults only. Nothing is moved when the edition changes, empty values and
+# known old package defaults are never written, and keys already set in $3
+# are left alone.
+migrate_station_config() {
+    old_config="$1"
+    new_config="$2"
+    local_config="$3"
+    [ -f "$old_config" ] || return 0
+    if grep -q 'config\.local\.env' "$old_config"; then
+        return 0
+    fi
+    old_edition=$(config_edition "$old_config")
+    new_edition=""
+    if [ -f "$new_config" ]; then
+        new_edition=$(config_value "$new_config" DIAGNOSEME_EDITION)
+    fi
+    if [ -n "$old_edition" ] && [ -n "$new_edition" ] &&
+        [ "$old_edition" != "$new_edition" ]; then
+        echo "Edition change ${old_edition} -> ${new_edition}: station settings are not moved."
+        return 0
+    fi
+    keys=$(sed -n 's/^\(STATION_ID\|RESULTS_SERVER\|MAUI_[A-Z0-9_]*\)=.*/\1/p' "$old_config" | sort -u)
+    for key in $keys; do
+        case "$key" in
+            MAUI_UTILS_IMAGE|MAUI_DEVICE) continue ;;
+        esac
+        if [ -f "$local_config" ] && grep -q "^${key}=" "$local_config"; then
+            continue
+        fi
+        old_value=$(config_value "$old_config" "$key")
+        if [ -z "$old_value" ]; then
+            continue
+        fi
+        if [ "$key" = "STATION_ID" ]; then
+            is_default=false
+            for default_id in $OLD_DEFAULT_STATION_IDS; do
+                if [ "$old_value" = "$default_id" ]; then
+                    is_default=true
+                fi
+            done
+            if [ "$is_default" = "true" ]; then
+                continue
+            fi
+        fi
+        new_value=""
+        if [ -f "$new_config" ]; then
+            new_value=$(config_value "$new_config" "$key")
+        fi
+        if [ "$old_value" = "$new_value" ]; then
+            continue
+        fi
+        if [ ! -f "$local_config" ]; then
+            printf '%s\n' \
+                "# DiagnoseMe station settings (read after config.env, never" \
+                "# overwritten by package upgrades)." > "$local_config"
+            chmod 644 "$local_config"
+        fi
+        echo "Keeping the station setting ${key} in ${local_config}."
+        quoted=$(printf '%s' "$old_value" | sed "s/'/'\\\\''/g")
+        printf "%s='%s'\n" "$key" "$quoted" >> "$local_config"
+    done
+}
+
+R8152_VERSION="2.21.4"
+# r8152 driver source of the deb and its DKMS registration (overridable for
+# the unit tests only).
+R8152_SRC_DIR="${R8152_SRC_DIR:-/usr/src/r8152-${R8152_VERSION}}"
+R8152_DKMS_DIR="${R8152_DKMS_DIR:-/var/lib/dkms/r8152/${R8152_VERSION}}"
+
+# Builds the r8152 DKMS driver of the editions with the Realtek tools and
+# unloads the conflicting modules. The other editions ship no driver source;
+# a registration left by an older package whose source is gone now (the
+# pre-editions 'diagnoseme' package of the ODM Maui stations) is removed, as
+# it would break the dkms autoinstall of later kernel upgrades. Never fails.
+setup_realtek_driver() {
+    if [ "$REALTEK_TOOLS" = "true" ] && [ -f "${R8152_SRC_DIR}/dkms.conf" ]; then
+        echo "Setting up Realtek driver via DKMS..."
+        if [ ! -d "$R8152_DKMS_DIR" ]; then
+            dkms add -m r8152 -v "$R8152_VERSION" || true
+        fi
+        dkms install -m r8152 -v "$R8152_VERSION" || echo "Warning: DKMS install failed. Headers may be missing."
+
+        echo "Unloading conflicting modules..."
+        modprobe -r cdc_ether || true
+        modprobe -r r8152 || true
+        return 0
+    fi
+    if [ "$REALTEK_TOOLS" = "true" ]; then
+        echo "Warning: ${R8152_SRC_DIR}/dkms.conf is missing; the r8152 DKMS driver is not built."
+    fi
+    if [ -d "$R8152_DKMS_DIR" ] && [ ! -f "${R8152_SRC_DIR}/dkms.conf" ]; then
+        echo "Removing the r8152 DKMS driver of an older package (its source is gone)..."
+        if command -v dkms > /dev/null 2>&1; then
+            dkms remove -m r8152 -v "$R8152_VERSION" --all ||
+                echo "Warning: dkms remove of r8152 ${R8152_VERSION} failed."
+        fi
+    fi
+    return 0
+}
+
+# Unit tests source this script for its functions only.
+if [ -n "${DIAGNOSEME_LIB_ONLY:-}" ]; then
+    return 0
+fi
+
+setup_realtek_driver
 
 echo "Configuring Docker permissions..."
 getent group docker >/dev/null || groupadd docker
@@ -29,8 +175,8 @@ else
     echo "Warning: Could not detect sudo user. Please run 'sudo usermod -aG docker \$USER' manually."
 fi
 
-# Only Maui station packages ship the Maui desktop launchers.
-if [ "$STATION_PROFILE" = "maui" ] && [ -d /home/diagnoseme ]; then
+# Only Maui editions ship the Maui desktop launchers.
+if [ "$MAUI_EDITION" = "true" ] && [ -d /home/diagnoseme ]; then
     echo "Setting up desktop shortcuts..."
     mkdir -p /home/diagnoseme/Desktop
     cp -u /usr/share/applications/start-diagnoseme*.desktop /usr/share/applications/stop-diagnoseme.desktop /usr/share/applications/diagnoseme-*.desktop /home/diagnoseme/Desktop/ 2>/dev/null || true
@@ -38,8 +184,9 @@ if [ "$STATION_PROFILE" = "maui" ] && [ -d /home/diagnoseme ]; then
     chown -R diagnoseme:diagnoseme /home/diagnoseme/Desktop 2>/dev/null || true
 fi
 
-echo "Setting up directories..."
-mkdir -p /var/lib/diagnoseme/firmware/mcu /var/lib/diagnoseme/firmware/pdc
+echo "Moving station specific settings into ${CONFIG_DIR}/config.local.env..."
+migrate_station_config "$SAVED_CONFIG" "${CONFIG_DIR}/config.env" "${CONFIG_DIR}/config.local.env"
+rm -f "$SAVED_CONFIG"
 
 # Log, device log and result directories are written by the (root) server
 # container and read by the station user 'diagnoseme', so they are owned by
@@ -48,12 +195,35 @@ DM_OWNER="root:root"
 if id diagnoseme >/dev/null 2>&1; then
     DM_OWNER="diagnoseme:diagnoseme"
 fi
-for DIR in /var/log/diagnoseme \
-           /var/log/diagnoseme/rpcserver \
-           /var/log/diagnoseme/nginx \
-           /var/log/diagnoseme/envoy \
-           /var/log/diagnoseme/devices \
-           /var/log/diagnoseme/maui_v11_results; do
+DM_DIRS="/var/log/diagnoseme /var/log/diagnoseme/rpcserver /var/log/diagnoseme/nginx /var/log/diagnoseme/envoy"
+
+echo "Setting up directories for edition ${DIAGNOSEME_EDITION}..."
+# Only the Maui editions have firmware, maui-utils staging, device log and
+# results directories (mounted by docker-compose-maui.yaml).
+if [ "$MAUI_EDITION" = "true" ]; then
+    mkdir -p /var/lib/diagnoseme/firmware
+    for COMP in $FIRMWARE_COMPONENTS; do
+        mkdir -p "/var/lib/diagnoseme/firmware/$COMP"
+    done
+    # Firmware staged by the server for the maui-utils container
+    # (bind-mounted into the server, written by root only).
+    mkdir -p "$MAUI_UTILS_DIR/staging"
+    chmod 0755 "$MAUI_UTILS_DIR" "$MAUI_UTILS_DIR/staging"
+    DM_DIRS="$DM_DIRS /var/log/diagnoseme/devices"
+    if [ -n "$RESULTS_DIR" ]; then
+        DM_DIRS="$DM_DIRS $RESULTS_DIR"
+    fi
+
+    # The bundled stable maui-utils image is loaded (md5 checked against its
+    # STABLE.json) by start-diagnoseme.
+    for F in "$MAUI_UTILS_DIR/maui-utils.tar" "$MAUI_UTILS_DIR/STABLE.json"; do
+        if [ -f "$F" ]; then
+            chmod 644 "$F"
+        fi
+    done
+fi
+
+for DIR in $DM_DIRS; do
     mkdir -p "$DIR"
     chown "$DM_OWNER" "$DIR"
     chmod 0775 "$DIR"

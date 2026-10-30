@@ -5,8 +5,11 @@
 import {TestBed} from '@angular/core/testing';
 import {RouterTestingModule} from '@angular/router/testing';
 import {HttpClientTestingModule} from '@angular/common/http/testing';
+import {MatIconRegistry} from '@angular/material/icon';
 import {AppComponent} from './app';
 import {DiagnoseMeService} from './services/diagnoseme.service';
+import {StationConfig} from '../proto/diagnoseme.pb';
+import {of} from 'rxjs';
 
 describe('AppComponent', () => {
   let mockDiagnoseMeService: jasmine.SpyObj<DiagnoseMeService>;
@@ -14,7 +17,11 @@ describe('AppComponent', () => {
   beforeEach(async () => {
     mockDiagnoseMeService = jasmine.createSpyObj('DiagnoseMeService', [
       'getLogs',
+      'getStationConfig',
     ]);
+    mockDiagnoseMeService.getStationConfig.and.returnValue(
+      of(new StationConfig({edition: 'all'})),
+    );
     await TestBed.configureTestingModule({
       imports: [RouterTestingModule, HttpClientTestingModule, AppComponent],
       providers: [
@@ -42,5 +49,35 @@ describe('AppComponent', () => {
     expect(
       compiled.querySelector('.diagnoseme-toolbar')?.textContent,
     ).toContain('HW Tools Diagnose Me');
+  });
+
+  it('should render the menu of the active edition', () => {
+    const fixture = TestBed.createComponent(AppComponent);
+    const app = fixture.componentInstance;
+    expect(app.edition.menu.length).toBeGreaterThan(0);
+    expect(app.edition.routes.length).toBeGreaterThan(0);
+  });
+
+  it('should not flag a mismatch for the development edition', () => {
+    const fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    expect(fixture.componentInstance.serverEditionMismatch).toBeNull();
+  });
+
+  it('should keep the filled Material Icons font set (as on main)', () => {
+    const fixture = TestBed.createComponent(AppComponent);
+    fixture.detectChanges();
+    const registry = TestBed.inject(MatIconRegistry);
+    const fontSet = registry.getDefaultFontSetClass();
+    expect(fontSet).toContain('material-icons');
+    expect(fontSet).not.toContain('material-symbols-outlined');
+    const icons = (fixture.nativeElement as HTMLElement).querySelectorAll(
+      'mat-icon',
+    );
+    expect(icons.length).toBeGreaterThan(0);
+    icons.forEach(icon => {
+      expect(icon.classList).toContain('material-icons');
+      expect(icon.classList).not.toContain('material-symbols-outlined');
+    });
   });
 });

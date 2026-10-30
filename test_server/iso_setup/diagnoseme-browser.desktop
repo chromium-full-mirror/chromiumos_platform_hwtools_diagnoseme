@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=DiagnoseMe Browser
+Comment=Opens the DiagnoseMe UI at login (online editions, as the pre-editions ISO did)
+Exec=google-chrome --start-maximized --no-first-run --no-default-browser-check http://localhost:8888
+Terminal=false
+X-GNOME-Autostart-enabled=true

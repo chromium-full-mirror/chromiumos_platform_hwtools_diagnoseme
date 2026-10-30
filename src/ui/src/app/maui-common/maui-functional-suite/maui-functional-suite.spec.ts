@@ -12,7 +12,7 @@ import {
 } from '@angular/core/testing';
 import {NoopAnimationsModule} from '@angular/platform-browser/animations';
 import {provideRouter} from '@angular/router';
-import {of, throwError} from 'rxjs';
+import {Subject, of, throwError} from 'rxjs';
 import {MauiFunctionalSuiteComponent} from './maui-functional-suite';
 import {MauiStation2Service} from '../../services/maui-station2.service';
 import {MauiDeviceMgmtService} from '../../services/maui-device-mgmt.service';
@@ -24,6 +24,7 @@ import {
   STABILIZATION_DELAY_MS,
 } from '../maui-constants';
 import {
+  MauiAdbTransferTestResponse,
   MauiBslButtonTestResponse,
   MauiFinalSubmissionResponse,
   MauiHostDutTestResponse,
@@ -53,6 +54,20 @@ function connected(serial = SERIAL): MauiReadSerialResponse {
 
 const DISCONNECTED = new MauiReadSerialResponse({isConnected: false});
 
+function adbTransferPassed(): MauiAdbTransferTestResponse {
+  return new MauiAdbTransferTestResponse({
+    success: true,
+    message: 'ADB transfer OK',
+    adbSerial: 'DUT123',
+    fileSizeBytes: '800000000',
+    pushSeconds: 16,
+    pullSeconds: 16,
+    pushMbPerS: 50,
+    pullMbPerS: 50,
+    totalSeconds: 40,
+  });
+}
+
 describe('MauiFunctionalSuiteComponent', () => {
   let fixture: ComponentFixture<MauiFunctionalSuiteComponent>;
   let component: MauiFunctionalSuiteComponent;
@@ -70,6 +85,7 @@ describe('MauiFunctionalSuiteComponent', () => {
         'testResetButton',
         'testBslButton',
         'runHostDutTests',
+        'runAdbTransferTest',
       ],
     );
     deviceMgmt = jasmine.createSpyObj<MauiDeviceMgmtService>(
@@ -149,6 +165,7 @@ describe('MauiFunctionalSuiteComponent', () => {
         }),
       ),
     );
+    station2.runAdbTransferTest.and.returnValue(of(adbTransferPassed()));
     deviceMgmt.readConnectedDeviceSerial.and.returnValue(of(connected()));
     deviceMgmt.verifyScannedLabel.and.returnValue(
       of(new MauiVerifyLabelResponse({matches: true, message: 'Matched'})),
@@ -209,7 +226,7 @@ describe('MauiFunctionalSuiteComponent', () => {
     discardPeriodicTasks();
   }
 
-  /** Runs Cards 1-8 with the configured (passing) responses. */
+  /** Runs Cards 1-9 with the configured (passing) responses. */
   function runAllCards(): void {
     component.runUsbCheck();
     tick(STABILIZATION_DELAY_MS);
@@ -227,6 +244,7 @@ describe('MauiFunctionalSuiteComponent', () => {
     tick(STABILIZATION_DELAY_MS);
     component.runChargerDisconnect();
     tick(STABILIZATION_DELAY_MS);
+    component.runAdbTransfer();
   }
 
   it('polls the connected device', fakeAsync(() => {
@@ -295,6 +313,10 @@ describe('MauiFunctionalSuiteComponent', () => {
 
     const summary = deviceMgmt.saveCardLog.calls.mostRecent().args[2];
     expect(summary).toContain('OVERALL RESULT: PASS\n');
+    expect(summary).toContain(
+      'Card 9 (ADB Transfer, two ~400 MB random files, must finish within 60 s): PASSED',
+    );
+    expect(summary).toContain('push 50.0 MB/s, pull 50.0 MB/s, 800 MB, 40.0 s');
     const results =
       deviceMgmt.submitFinalManufacturingResults.calls.mostRecent().args[0];
     expect(results.serialNumber).toBe(SERIAL);
@@ -313,6 +335,7 @@ describe('MauiFunctionalSuiteComponent', () => {
       host_dut_charger: 'PASSED',
       dut_sbu_flip: 'PASSED',
       charger_disconnect: 'PASSED',
+      adb_transfer_test: 'PASSED',
     });
     expect(component.logsSaved).toBeTrue();
     expect(component.finalMesTrackingId).toBe('MES-1');
@@ -424,6 +447,7 @@ describe('MauiFunctionalSuiteComponent', () => {
     tick(STABILIZATION_DELAY_MS);
     component.runChargerDisconnect();
     tick(STABILIZATION_DELAY_MS);
+    component.runAdbTransfer();
     pollDevice(DISCONNECTED);
     component.saveLogs();
 
@@ -452,6 +476,88 @@ describe('MauiFunctionalSuiteComponent', () => {
     expect(component.overallVerdict).toBe('FAIL');
     component.cards.bsl.status = 'NOT_RUN';
     expect(component.overallVerdict).toBe('FAIL');
+    finish();
+  }));
+
+  it('unlocks log saving only after the ADB transfer card', fakeAsync(() => {
+    create();
+    runAllCards();
+    expect(component.cards.adbTransfer.status).toBe('PASSED');
+    expect(station2.runAdbTransferTest).toHaveBeenCalledOnceWith(
+      SERIAL,
+      SERIAL,
+    );
+    component.cards.adbTransfer = {
+      inProgress: false,
+      done: false,
+      status: 'NOT_RUN',
+    };
+    pollDevice(DISCONNECTED);
+    expect(component.cards.chargerDisconnect.done).toBeTrue();
+    expect(component.canSaveLogs).toBeFalse();
+    finish();
+  }));
+
+  it('reports a failed and bypassed ADB transfer as BYPASSED', fakeAsync(() => {
+    station2.runAdbTransferTest.and.returnValue(
+      of(
+        new MauiAdbTransferTestResponse({
+          success: false,
+          message: 'Data corrupted on pull',
+        }),
+      ),
+    );
+    create();
+    runAllCards();
+
+    expect(component.cards.adbTransfer.status).toBe('FAILED');
+    expect(component.cards.adbTransfer.done).toBeFalse();
+    const [title, message] = dialog.openFailure.calls.mostRecent().args;
+    expect(title).toBe('ADB Transfer Test Failed');
+    expect(message).toBe('Data corrupted on pull');
+    expect(component.adbTransferResult?.message).toBe('Data corrupted on pull');
+
+    lastDialogBypass()();
+    expect(component.cards.adbTransfer).toEqual({
+      inProgress: false,
+      done: true,
+      status: 'BYPASSED',
+    });
+    pollDevice(DISCONNECTED);
+    component.saveLogs();
+    expect(deviceMgmt.saveCardLog.calls.mostRecent().args[2]).toContain(
+      'Card 9 (ADB Transfer, two ~400 MB random files, must finish within 60 s): BYPASSED',
+    );
+    const results =
+      deviceMgmt.submitFinalManufacturingResults.calls.mostRecent().args[0];
+    expect(results.stageStatuses?.['adb_transfer_test']).toBe('BYPASSED');
+    expect(component.overallVerdict).toBe('PASS_WITH_BYPASS');
+    finish();
+  }));
+
+  it('marks the ADB transfer FAILED when its RPC errors', fakeAsync(() => {
+    station2.runAdbTransferTest.and.returnValue(
+      throwError(() => new Error('no ADB device')),
+    );
+    create();
+    runAllCards();
+    expect(component.cards.adbTransfer.status).toBe('FAILED');
+    expect(component.cards.adbTransfer.inProgress).toBeFalse();
+    expect(dialog.openFailure.calls.mostRecent().args[0]).toBe(
+      'ADB Transfer Test Error',
+    );
+    expect(component.canSaveLogs).toBeFalse();
+    finish();
+  }));
+
+  it('drops a pending ADB transfer when destroyed', fakeAsync(() => {
+    const pending = new Subject<MauiAdbTransferTestResponse>();
+    station2.runAdbTransferTest.and.returnValue(pending);
+    create();
+    component.runAdbTransfer();
+    expect(pending.observed).toBeTrue();
+    fixture.destroy();
+    expect(pending.observed).toBeFalse();
     finish();
   }));
 

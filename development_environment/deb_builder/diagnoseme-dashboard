@@ -20,6 +20,7 @@ import glob
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 from typing import Any
@@ -63,8 +64,40 @@ JSON_SECTIONS = (
     ("fatp_step4_qt0", CAT_FATP_QT0),
 )
 
+# Station config: config.env of the package, then the station overrides of
+# config.local.env (read last, so its values win).
+CONFIG_FILES = ("/etc/diagnoseme/config.env", "/etc/diagnoseme/config.local.env")
+DEFAULT_RESULTS_DIR = "/var/log/diagnoseme/maui_v11_results"
+
+
+def station_results_dir(config_files=CONFIG_FILES) -> str:
+  """Returns the results directory of the station (DIAGNOSEME_RESULTS_DIR).
+
+  The environment wins, then the config files (sourced by bash like
+  start-diagnoseme does), then the Maui v1.1 default.
+  """
+  value = os.environ.get("DIAGNOSEME_RESULTS_DIR", "").strip()
+  if value:
+    return value
+  script = (
+      'for f in "$@"; do if [ -f "$f" ]; then . "$f"; fi; done; '
+      'printf "%s" "${DIAGNOSEME_RESULTS_DIR:-}"'
+  )
+  try:
+    value = subprocess.run(
+        ["bash", "-c", script, "station-config", *config_files],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    ).stdout.strip()
+  except (OSError, subprocess.SubprocessError):
+    value = ""
+  return value or DEFAULT_RESULTS_DIR
+
+
 # Results directory written by the server container (DIAGNOSEME_RESULTS_DIR).
-RESULTS_DIR = "/var/log/diagnoseme/maui_v11_results"
+RESULTS_DIR = station_results_dir()
 
 STAGE_DISPLAY_NAMES = {
     "mcu_bsl_flashing": "1. MCU BSL Flashing",

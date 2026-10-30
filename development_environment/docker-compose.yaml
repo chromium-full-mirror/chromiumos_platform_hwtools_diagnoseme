@@ -2,6 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+# Development compose file (images built by build-diagnoseme.sh). For a Maui
+# or "all" edition, add the Maui mounts and environment with
+#   docker compose -f development_environment/docker-compose.yaml \
+#       -f development_environment/docker-compose-dev-maui.yaml up -d
+
 services:
   ##############################################################################
   ui:
@@ -31,16 +36,13 @@ services:
       - TEST_DUT=brya
       - TEST_MODEL=banshee
       - RESULTS_SERVER=${RESULTS_SERVER:-}
-      - DIAGNOSEME_DEVICE_LOG_DIR=/var/log/diagnoseme/devices
-      - DIAGNOSEME_RESULTS_DIR=/var/log/diagnoseme/maui_v11_results
+    # The Maui mounts and environment are in docker-compose-dev-maui.yaml.
 
     volumes:
       - logs:/var/log/rpcserver
       - /dev:/dev
       - /sys:/sys
       - /var/run/docker.sock:/var/run/docker.sock
-      - /var/log/diagnoseme/devices:/var/log/diagnoseme/devices
-      - /var/log/diagnoseme/maui_v11_results:/var/log/diagnoseme/maui_v11_results
 
   #############################################################################
   envoy:

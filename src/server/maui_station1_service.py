@@ -9,6 +9,7 @@ final results submission) shared by all Maui Steps.
 """
 
 import asyncio
+import contextlib
 import dataclasses
 import glob
 import json
@@ -20,6 +21,8 @@ import subprocess
 import threading
 import time
 from typing import AsyncGenerator
+from typing import AsyncIterator
+from typing import Callable
 from typing import Dict
 from typing import List
 from typing import Mapping
@@ -31,18 +34,19 @@ from google.protobuf import empty_pb2
 import grpc
 
 from server import maui_common
+from server import maui_console_tester
+from server import maui_utils_runner
 from server import util
 from server.generated import maui_manufacturing_pb2
 from server.generated import maui_manufacturing_pb2_grpc
 from server.maui_common import ensure_zephyr_shell_awake
 from server.maui_common import find_offline_fw_file
+from server.maui_common import FirmwareSelectionError
 from server.maui_common import FTDI_PID_PROGRAMMED
 from server.maui_common import FTDI_PID_UNPROGRAMMED
 from server.maui_common import FTDI_VID
 from server.maui_common import get_device_log_dir
-from server.maui_common import get_maui_env
 from server.maui_common import LogStatus
-from server.maui_common import resolve_maui_flash_command
 from server.maui_common import resolve_maui_tool
 from server.maui_common import SYSFS_WALK_STOP_DIRS
 from server.maui_common import write_device_log
@@ -63,8 +67,11 @@ MCU_FLASH_TIMEOUT_SEC = 30
 MCU_BSL_RETRY_DELAY_SEC = 0.2
 MCU_BSL_RETRY_MARKERS = ("Unable to connect to BSL", "Check if device is in BSL mode")
 MCU_BSL_RETRY_EXIT_CODE = 1
-DEFAULT_MCU_FW_FILE = "/var/lib/diagnoseme/firmware/mcu/zephyr.txt"
 MCU_TOOL_MISSING_MESSAGE = "Flashing tool not installed on host system."
+MCU_OFFLINE_FW_MISSING_LOGS = (
+    "Error: Local MCU firmware binary (.txt/.hex/.bin) not found in "
+    "/usr/local/server/firmware/mcu or /var/lib/diagnoseme/firmware/mcu."
+)
 
 # FTDI EEPROM programming.
 FTDI_PROGRAM_TIMEOUT_SEC = 10
@@ -83,6 +90,9 @@ PDC_EXIT_TIMEOUT_SEC = 15.0
 PDC_WAKE_TIMEOUT_SEC = 2.5
 PDC_RETRY_WAKE_TIMEOUT_SEC = 3.0
 PDC_RETRY_DELAY_SEC = 0.3
+# DIAGNOSEME_SIMULATE_MAUI=1 only: simulated PDC progress steps.
+PDC_SIMULATION_STEP_PERCENT = 20
+PDC_SIMULATION_STEP_DELAY_SEC = 0.5
 PDC_PROMPT_TIMEOUT_MARKERS = (
     "Exclusive logging enabled",
     "Timeout while waiting for prompt",
@@ -99,6 +109,18 @@ _ftdi_programming_lock = threading.Lock()
 # Per-port lock to prevent concurrent MCU BSL flashing collisions
 _mcu_flashing_locks: Dict[str, threading.Lock] = {}
 _mcu_locks_guard = threading.Lock()
+
+
+@contextlib.asynccontextmanager
+async def _maui_utils_session() -> AsyncIterator[maui_utils_runner.MauiUtilsSession]:
+    """maui-utils session for async handlers (setup and cleanup run off the event loop)."""
+    runner = await asyncio.to_thread(maui_utils_runner.MauiUtilsRunner)
+    session_cm = runner.session()
+    session = await asyncio.to_thread(session_cm.__enter__)
+    try:
+        yield session
+    finally:
+        await asyncio.to_thread(session_cm.__exit__, None, None, None)
 
 
 def _get_port_flashing_lock(dev_port: str) -> threading.Lock:
@@ -440,6 +462,19 @@ class MauiStation1Servicer(
                 logs=f"Duplicate concurrent flash request on {dev_port} was rejected.",
             )
 
+        # The one console lock (maui_console_tester): Station 2 cards and a PDC
+        # flash on this console are refused while the MCU flashes.
+        holder = maui_console_tester.claim_ports(
+            [dev_port], f"MCU flashing on {dev_port}"
+        )
+        if holder:
+            port_lock.release()
+            busy = f"Console {dev_port} busy: {holder} is running."
+            logging.warning(busy)
+            return maui_manufacturing_pb2.MauiProgramMcuResponse(
+                success=False, message=busy, logs=busy
+            )
+
         try:
             # A new board starts on this port: logs written before its serial is
             # known (PORT_<tty>) are merged once the serial is programmed.
@@ -448,108 +483,105 @@ class MauiStation1Servicer(
                 dev_port,
                 curr_ftdi_ser or "",
             )
-            cmd, error_resp = self._build_mcu_flash_command(
-                fw_channel, dev_port, serial_no
-            )
-            if error_resp is not None:
-                return error_resp
-            return self._run_mcu_flash(cmd, dev_port, serial_no, curr_ftdi_ser)
+            try:
+                offline_fw = find_offline_fw_file("mcu")
+            except FirmwareSelectionError as e:
+                # Fail closed: never guess the image (broken STABLE.json or
+                # several images without one).
+                return self._mcu_firmware_invalid(serial_no, e)
+            if not offline_fw and fw_channel == "offline":
+                logging.error(
+                    "Offline MCU firmware file not found in /usr/local/server/firmware/mcu or "
+                    "/var/lib/diagnoseme/firmware/mcu."
+                )
+                return maui_manufacturing_pb2.MauiProgramMcuResponse(
+                    success=False,
+                    message="Offline MCU firmware not found on system.",
+                    logs=MCU_OFFLINE_FW_MISSING_LOGS,
+                )
+            # The flashing tools run in the maui-utils container.
+            with contextlib.ExitStack() as stack:
+                try:
+                    maui_utils = stack.enter_context(
+                        maui_utils_runner.MauiUtilsRunner().session()
+                    )
+                    tool, tool_args = self._mcu_flash_tool(
+                        fw_channel, dev_port, offline_fw, maui_utils.stage
+                    )
+                except (maui_utils_runner.MauiUtilsError, OSError) as e:
+                    return self._mcu_setup_failed(serial_no, e)
+                return self._run_mcu_flash(
+                    maui_utils, tool, tool_args, dev_port, serial_no, curr_ftdi_ser
+                )
         finally:
+            maui_console_tester.release_ports([dev_port])
             port_lock.release()
 
     @staticmethod
-    def _build_mcu_flash_command(
-        fw_channel: str, dev_port: str, serial_no: str
-    ) -> Tuple[List[str], Optional[maui_manufacturing_pb2.MauiProgramMcuResponse]]:
-        """Selects the MCU flashing tool. Returns (cmd, None) or ([], error_response).
+    def _mcu_flash_tool(
+        fw_channel: str,
+        dev_port: str,
+        offline_fw: Optional[str],
+        stage: Callable[[str], str],
+    ) -> Tuple[str, List[str]]:
+        """Selects the maui-utils tool and its arguments for the MCU flash.
 
         Precedence:
-          1. fw-updater + local offline firmware (direct BSL mode, no shell sync).
-          2. maui-flash (bin, maui_flash.py or scripts/maui-flash) with the local firmware file
-             for the 'offline'/'stable' channels.
-          3. 'offline' channel without local firmware -> error.
-          4. maui-flash (bin or maui_flash.py) with --fw_channel, else fw-updater with the
-             default firmware path.
-        A missing tool is reported as an error instead of being simulated.
+          1. fw-updater with the local firmware (direct BSL mode, no shell sync);
+             `stage` hands the file to the maui-utils container.
+          2. Without local firmware (not for the 'offline' channel): maui-flash
+             with --fw_channel.
         """
-        offline_fw = find_offline_fw_file("mcu")
-        fw_updater_bin = resolve_maui_tool("fw-updater")
-        port_args = ["--port", dev_port]
-        cmd: Optional[List[str]] = None
-
-        if fw_updater_bin and offline_fw:
+        if offline_fw:
             logging.info(
                 "Directly invoking fw-updater on %s with firmware %s (BSL mode)...",
                 dev_port,
                 offline_fw,
             )
-            cmd = [fw_updater_bin, offline_fw, "--uart", dev_port, "--bsl-mode"]
-        elif offline_fw and fw_channel in ("offline", "stable"):
-            logging.info(
-                "Found local offline MCU firmware: %s. Using --file with maui-flash.",
-                offline_fw,
-            )
-            if "ACM" in dev_port or (
-                "usb" in dev_port.lower() and "ttyusb" not in dev_port.lower()
-            ):
-                port_args.append("--usb")
-            maui_flash = resolve_maui_flash_command(include_script=True)
-            if maui_flash:
-                cmd = (
-                    maui_flash + port_args + ["mcu", "--file", offline_fw, "--bsl-mode"]
-                )
-        elif fw_channel == "offline":
-            logging.error(
-                "Offline MCU firmware file not found in /usr/local/server/firmware/mcu or "
-                "/var/lib/diagnoseme/firmware/mcu."
-            )
-            return [], maui_manufacturing_pb2.MauiProgramMcuResponse(
-                success=False,
-                message="Offline MCU firmware not found on system.",
-                logs=(
-                    "Error: Local MCU firmware binary (.txt/.hex/.bin) not found in "
-                    "/usr/local/server/firmware/mcu or /var/lib/diagnoseme/firmware/mcu."
-                ),
-            )
-        else:
-            maui_flash = resolve_maui_flash_command(include_script=False)
-            if maui_flash:
-                cmd = (
-                    maui_flash
-                    + port_args
-                    + ["mcu", "--fw_channel", fw_channel, "--bsl-mode"]
-                )
-            elif fw_updater_bin:
-                cmd = [
-                    fw_updater_bin,
-                    DEFAULT_MCU_FW_FILE,
-                    "--uart",
-                    dev_port,
-                    "--bsl-mode",
-                ]
-
-        if cmd is None:
-            return [], MauiStation1Servicer._mcu_tool_missing(serial_no)
-        return cmd, None
+            return maui_utils_runner.TOOL_FW_UPDATER, [
+                stage(offline_fw),
+                "--uart",
+                dev_port,
+                "--bsl-mode",
+            ]
+        return maui_utils_runner.TOOL_MAUI_FLASH, [
+            "--port",
+            dev_port,
+            "mcu",
+            "--fw_channel",
+            fw_channel,
+            "--bsl-mode",
+        ]
 
     @staticmethod
-    def _mcu_tool_missing(
-        serial_no: str,
+    def _mcu_firmware_invalid(
+        serial_no: str, error: Exception
     ) -> maui_manufacturing_pb2.MauiProgramMcuResponse:
-        """Fails the MCU flash because no flashing tool is installed."""
-        err = "ERROR: No MCU flashing tool (fw-updater / maui-flash) found on host system."
-        logging.error(err)
+        """Fails the MCU flash because the station firmware cannot be chosen."""
+        err = f"ERROR: {error}"
         write_device_log(serial_no, "mcu_flashing", err, status=LogStatus.FAILED)
         return maui_manufacturing_pb2.MauiProgramMcuResponse(
             success=False,
-            message=MCU_TOOL_MISSING_MESSAGE,
+            message="Station MCU firmware is invalid; update the station firmware.",
             logs=err,
         )
 
     @staticmethod
-    def _run_flash_tool(
-        cmd: List[str], env: Dict[str, str]
-    ) -> subprocess.CompletedProcess:
+    def _mcu_setup_failed(
+        serial_no: str, error: Exception
+    ) -> maui_manufacturing_pb2.MauiProgramMcuResponse:
+        """Fails the MCU flash because maui-utils could not be prepared."""
+        err = f"ERROR: Cannot prepare the maui-utils flashing tool: {error}"
+        logging.error(err)
+        write_device_log(serial_no, "mcu_flashing", err, status=LogStatus.FAILED)
+        return maui_manufacturing_pb2.MauiProgramMcuResponse(
+            success=False,
+            message=f"MCU BSL Flashing error: {error}",
+            logs=err,
+        )
+
+    @staticmethod
+    def _run_flash_tool(cmd: List[str]) -> subprocess.CompletedProcess:
         return subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
@@ -557,7 +589,6 @@ class MauiStation1Servicer(
             text=True,
             check=True,
             timeout=MCU_FLASH_TIMEOUT_SEC,
-            env=env,
         )
 
     @staticmethod
@@ -567,15 +598,20 @@ class MauiStation1Servicer(
             m in output for m in MCU_BSL_RETRY_MARKERS
         )
 
-    def _run_mcu_flash(
-        self, cmd: List[str], dev_port: str, serial_no: str, ftdi_serial: Optional[str]
+    def _run_mcu_flash(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        maui_utils: maui_utils_runner.MauiUtilsSession,
+        tool: str,
+        tool_args: List[str],
+        dev_port: str,
+        serial_no: str,
+        ftdi_serial: Optional[str],
     ) -> maui_manufacturing_pb2.MauiProgramMcuResponse:
         """Runs the MCU flashing tool with one fast retry inside the ROM BSL window."""
-        env = get_maui_env()
         retried = False
         try:
             try:
-                proc = self._run_flash_tool(cmd, env)
+                proc = self._run_flash_tool(maui_utils.command(tool, tool_args))
             except subprocess.CalledProcessError as first_error:
                 # Fast 1x automatic retry while still inside the 10s hardware ROM BSL window
                 if not self._is_bsl_retryable(first_error):
@@ -585,7 +621,9 @@ class MauiStation1Servicer(
                     dev_port,
                 )
                 time.sleep(MCU_BSL_RETRY_DELAY_SEC)
-                proc = self._run_flash_tool(cmd, env)
+                # A fresh command (container name): the first container may
+                # still be being removed.
+                proc = self._run_flash_tool(maui_utils.command(tool, tool_args))
                 retried = True
         except subprocess.CalledProcessError as e:
             err_logs = str(e.output or "")
@@ -600,10 +638,15 @@ class MauiStation1Servicer(
             )
             return maui_manufacturing_pb2.MauiProgramMcuResponse(
                 success=False,
-                message=f"MCU BSL Flashing failed with exit code {e.returncode}.",
+                message=(
+                    maui_utils_runner.explain_failure(err_logs, maui_utils.image)
+                    or f"MCU BSL Flashing failed with exit code {e.returncode}."
+                ),
                 logs=err_logs,
             )
         except subprocess.TimeoutExpired as e:
+            # Killing the docker CLI does not stop the container.
+            maui_utils.kill()
             err_logs = str(e.output or "")
             logging.error(
                 "MCU BSL Flashing timed out after %ss on %s", e.timeout, dev_port
@@ -1343,12 +1386,18 @@ class MauiStation1Servicer(
             )
 
 
+class SlotConsoleBusyError(RuntimeError):
+    """The console of a PDC slot is used by another operation."""
+
+
 @dataclasses.dataclass
 class _PdcRunResult:
     """Outcome of one maui-flash PDC run."""
 
     returncode: Optional[int] = None
     output: str = ""
+    # Command line of the run (for the device log).
+    command: str = ""
 
 
 class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
@@ -1412,20 +1461,25 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
 
     async def _stream_pdc_flash(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
-        cmd: List[str],
-        env: Dict[str, str],
+        maui_utils: maui_utils_runner.MauiUtilsSession,
+        tool_args: List[str],
         context: grpc.ServicerContext,
         slot_index: int,
         serial_no: str,
         status_label: str,
         result: _PdcRunResult,
     ) -> AsyncGenerator[maui_manufacturing_pb2.MauiProgramPdcProgressResponse, None]:
-        """Runs maui-flash once, yielding progress; stores exit code and output in `result`."""
+        """Runs maui-flash once in maui-utils, yielding progress; stores the result in `result`.
+
+        Every run builds a fresh maui-utils command (container name), so a retry
+        never collides with a container that is still being removed.
+        """
+        cmd = maui_utils.command(maui_utils_runner.TOOL_MAUI_FLASH, tool_args)
+        result.command = " ".join(cmd)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env=env,
         )
         tool_output: List[str] = []
 
@@ -1455,6 +1509,8 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
             logging.warning("[Slot %d] Killing hung PDC flash process", slot_index)
             proc.kill()
             await proc.wait()
+            # Killing the docker CLI does not stop the container.
+            await asyncio.to_thread(maui_utils.kill)
 
         # Drain remaining output if any
         try:
@@ -1492,6 +1548,32 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
         # PORT_<tty>) join the serial's dir.
         _merge_pre_serial_logs(serial_no, port=requested_port)
         return serial_no
+
+    @contextlib.asynccontextmanager
+    async def _hold_slot_console(self, dev_port: str) -> AsyncIterator[None]:
+        """Holds the slot console for the whole PDC flash.
+
+        Maui v1.1 claims the FTDI console (maui_console_tester.claim_ports),
+        so Station 2 cards (port_lock) and an MCU flash on it are refused
+        while the PDC flashes; raises SlotConsoleBusyError when another
+        operation uses it. Without a resolved console port nothing can be
+        claimed. Revision hook: Maui v1.2 claims its CDC-ACM MCU console.
+        """
+        if not dev_port:
+            yield
+            return
+        holder = maui_console_tester.claim_ports(
+            [dev_port], f"PDC flashing on {dev_port}"
+        )
+        if holder:
+            raise SlotConsoleBusyError(
+                f"Console {dev_port} busy: {holder} is running. Retry when it "
+                "has finished."
+            )
+        try:
+            yield
+        finally:
+            maui_console_tester.release_ports([dev_port])
 
     async def program_single_pdc(  # pylint: disable=too-many-locals
         self,
@@ -1536,13 +1618,26 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
             else (["--serial", serial_no] if serial_no else [])
         )
 
-        offline_fw = find_offline_fw_file("pdc")
-        if offline_fw and fw_channel in ("offline", "stable"):
-            logging.info(
-                "Found local offline PDC firmware: %s. Using --file.", offline_fw
-            )
-            pdc_flash_args = ["pdc", "--file", offline_fw]
-        elif fw_channel == "offline":
+        uses_local_fw = fw_channel in ("offline", "stable")
+        try:
+            offline_fw = find_offline_fw_file("pdc")
+        except FirmwareSelectionError as e:
+            if uses_local_fw:
+                # Fail closed: never guess the PDC image (broken STABLE.json
+                # or several images without one).
+                logging.error("[Slot %d] %s", slot_index, e)
+                write_device_log(
+                    serial_no, "pdc_flashing", f"ERROR: {e}", status=LogStatus.FAILED
+                )
+                yield failure(
+                    "Failed",
+                    "Station PDC firmware is invalid; update the station firmware.",
+                    f"Error: {e}",
+                )
+                return
+            # The '--fw_channel' download does not use the station image.
+            offline_fw = None
+        if not offline_fw and fw_channel == "offline":
             logging.error(
                 "[Slot %d] Offline PDC firmware file not found in firmware cache directories.",
                 slot_index,
@@ -1554,34 +1649,108 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
                 "/var/lib/diagnoseme/firmware/pdc.",
             )
             return
-        else:
-            pdc_flash_args = ["pdc", "--fw_channel", fw_channel]
 
-        maui_flash = resolve_maui_flash_command(include_script=False)
-        if not maui_flash:
-            err = "PDC flashing tool (maui-flash) not installed on host system."
-            logging.error("[Slot %d] %s", slot_index, err)
-            write_device_log(
-                serial_no, "pdc_flashing", f"ERROR: {err}", status=LogStatus.FAILED
+        # Nothing else may use the slot console while maui-flash talks to it.
+        async with contextlib.AsyncExitStack() as stack:
+            try:
+                await stack.enter_async_context(
+                    self._hold_slot_console(dev_port if port_exists else "")
+                )
+            except SlotConsoleBusyError as e:
+                # Nothing was attempted: keep the board's previous log.
+                logging.warning("[Slot %d] %s", slot_index, e)
+                yield failure("Busy", str(e), str(e))
+                return
+            if maui_utils_runner.simulation_enabled():
+                async for resp in self._simulate_pdc_flash(slot_index, serial_no):
+                    yield resp
+                return
+            # maui-flash runs in the maui-utils container; the session owns
+            # the host-shared staging directory of the firmware file.
+            try:
+                maui_utils = await stack.enter_async_context(_maui_utils_session())
+                if offline_fw and uses_local_fw:
+                    logging.info(
+                        "Found local offline PDC firmware: %s. Using --file.",
+                        offline_fw,
+                    )
+                    staged_fw = await asyncio.to_thread(maui_utils.stage, offline_fw)
+                    pdc_flash_args = ["pdc", "--file", staged_fw]
+                else:
+                    pdc_flash_args = ["pdc", "--fw_channel", fw_channel]
+            except (maui_utils_runner.MauiUtilsError, OSError) as e:
+                err = f"Cannot prepare the maui-utils flashing tool: {e}"
+                logging.error("[Slot %d] %s", slot_index, err)
+                write_device_log(
+                    serial_no, "pdc_flashing", f"ERROR: {err}", status=LogStatus.FAILED
+                )
+                yield failure("Failed", "PDC Firmware update failed.", err)
+                return
+            async for resp in self._flash_pdc(
+                maui_utils,
+                common_args + pdc_flash_args,
+                context,
+                slot_index,
+                serial_no,
+                dev_port if port_exists else "",
+            ):
+                yield resp
+
+    @staticmethod
+    async def _simulate_pdc_flash(
+        slot_index: int, serial_no: str
+    ) -> AsyncGenerator[maui_manufacturing_pb2.MauiProgramPdcProgressResponse, None]:
+        """DIAGNOSEME_SIMULATE_MAUI=1 only: streams simulated progress, writes no log."""
+        logging.warning(
+            "%s=1: Simulating PDC flash for dev mode.",
+            maui_utils_runner.SIMULATE_ENV_VAR,
+        )
+        for p in range(0, 101, PDC_SIMULATION_STEP_PERCENT):
+            yield maui_manufacturing_pb2.MauiProgramPdcProgressResponse(
+                is_complete=(p == 100),
+                progress_percent=p,
+                current_block=f"Block {p // 10}/10",
+                status_message=f"[DEV MODE] Flashing PDC... {p}%",
+                slot_index=slot_index,
+                serial_number=serial_no,
             )
-            yield failure("Failed", err, err)
-            return
+            await asyncio.sleep(PDC_SIMULATION_STEP_DELAY_SEC)
 
-        cmd = maui_flash + common_args + pdc_flash_args
-        cmd_str = " ".join(cmd)
+    async def _flash_pdc(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self,
+        maui_utils: maui_utils_runner.MauiUtilsSession,
+        tool_args: List[str],
+        context: grpc.ServicerContext,
+        slot_index: int,
+        serial_no: str,
+        console_port: str,
+    ) -> AsyncGenerator[maui_manufacturing_pb2.MauiProgramPdcProgressResponse, None]:
+        """Runs maui-flash (one retry on a console prompt timeout) and writes the PDC log."""
 
-        # Ensure Zephyr shell on dev_port is responsive before launching maui-flash
-        if port_exists:
+        def failure(
+            block: str, status: str, error: str = ""
+        ) -> maui_manufacturing_pb2.MauiProgramPdcProgressResponse:
+            return maui_manufacturing_pb2.MauiProgramPdcProgressResponse(
+                is_complete=True,
+                progress_percent=0,
+                current_block=block,
+                status_message=status,
+                error_message=error,
+                slot_index=slot_index,
+                serial_number=serial_no,
+            )
+
+        # Ensure Zephyr shell on the console is responsive before launching maui-flash
+        if console_port:
             await asyncio.to_thread(
-                ensure_zephyr_shell_awake, dev_port, PDC_WAKE_TIMEOUT_SEC
+                ensure_zephyr_shell_awake, console_port, PDC_WAKE_TIMEOUT_SEC
             )
 
+        result = _PdcRunResult()
         try:
-            env = get_maui_env()
-            result = _PdcRunResult()
             async for resp in self._stream_pdc_flash(
-                cmd,
-                env,
+                maui_utils,
+                tool_args,
                 context,
                 slot_index,
                 serial_no,
@@ -1597,17 +1766,19 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
                 logging.warning(
                     "[Slot %d] PDC flash encountered prompt timeout on %s. Re-awakening Zephyr console and retrying...",
                     slot_index,
-                    dev_port,
+                    console_port,
                 )
-                if dev_port and os.path.exists(dev_port):
+                if console_port and os.path.exists(console_port):
                     await asyncio.to_thread(
-                        ensure_zephyr_shell_awake, dev_port, PDC_RETRY_WAKE_TIMEOUT_SEC
+                        ensure_zephyr_shell_awake,
+                        console_port,
+                        PDC_RETRY_WAKE_TIMEOUT_SEC,
                     )
                 await asyncio.sleep(PDC_RETRY_DELAY_SEC)
                 retry_result = _PdcRunResult()
                 async for resp in self._stream_pdc_flash(
-                    cmd,
-                    env,
+                    maui_utils,
+                    tool_args,
                     context,
                     slot_index,
                     serial_no,
@@ -1625,7 +1796,7 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
                 write_device_log(
                     serial_no,
                     "pdc_flashing",
-                    f"COMMAND: {cmd_str}\nEXIT_CODE: 0\n\nTOOL_OUTPUT:\n{result.output}",
+                    f"COMMAND: {result.command}\nEXIT_CODE: 0\n\nTOOL_OUTPUT:\n{result.output}",
                     status=LogStatus.PASSED,
                 )
                 yield maui_manufacturing_pb2.MauiProgramPdcProgressResponse(
@@ -1645,20 +1816,21 @@ class MauiPdcServicer(maui_manufacturing_pb2_grpc.MauiPdcFlashingServicer):
                 write_device_log(
                     serial_no,
                     "pdc_flashing",
-                    f"COMMAND: {cmd_str}\nEXIT_CODE: {result.returncode}\n\nTOOL_OUTPUT:\n{result.output}",
+                    f"COMMAND: {result.command}\nEXIT_CODE: {result.returncode}\n\nTOOL_OUTPUT:\n{result.output}",
                     status=LogStatus.FAILED,
                 )
                 yield failure(
                     "Failed",
                     "PDC Firmware update failed.",
-                    f"Process exited with code {result.returncode}",
+                    maui_utils_runner.explain_failure(result.output, maui_utils.image)
+                    or f"Process exited with code {result.returncode}",
                 )
         except (OSError, ValueError, RuntimeError) as e:
             logging.exception("[Slot %d] PDC Firmware update exception", slot_index)
             write_device_log(
                 serial_no,
                 "pdc_flashing",
-                f"COMMAND: {cmd_str}\nRESULT: EXCEPTION\nERROR: {e}",
+                f"COMMAND: {result.command}\nRESULT: EXCEPTION\nERROR: {e}",
                 status=LogStatus.FAILED,
             )
             yield failure("Error", str(e), str(e))
@@ -1689,6 +1861,7 @@ STAGE_LOGS = (
     ("pdc_fw_flashing", "pdc_flashing.log", "PDC FW Flashing"),
     ("host_only_verification", "host_only_tests.log", "Host-Only Verification"),
     ("host_dut_verification", "host_dut_tests.log", "Host + DUT Verification"),
+    ("adb_transfer_test", "adb_transfer_test.log", "ADB Transfer Reliability"),
 )
 # Auxiliary subtest logs (BSL button, RESET button, Host replug) that can fail Host-Only Verification.
 HOST_ONLY_AUX_LOGS = (
@@ -1797,11 +1970,13 @@ def _merge_ui_stage_statuses(
 
 def analyze_device_manufacturing_logs(
     serial_number: str,
+    stage_logs: Optional[Tuple[Tuple[str, str, str], ...]] = None,
 ) -> Tuple[Dict[str, str], str, List[maui_manufacturing_pb2.MauiLogFileInfo], int]:
     """Parses the device log dir <device log base>/<serial> (read-only) to evaluate stage statuses.
 
     Each Step log is judged only by its machine-readable STATUS line; a log without
     a valid STATUS line counts as FAILED, a missing log as NOT_RUN.
+    `stage_logs` (stage key, log file, label) defaults to the Maui v1.1 STAGE_LOGS.
 
     Returns:
       (stage_statuses, overall_verdict, log_file_infos, present_count)
@@ -1811,7 +1986,7 @@ def analyze_device_manufacturing_logs(
     log_file_infos: List[maui_manufacturing_pb2.MauiLogFileInfo] = []
     present_count = 0
 
-    for stage_key, log_name, _ in STAGE_LOGS:
+    for stage_key, log_name, _ in STAGE_LOGS if stage_logs is None else stage_logs:
         fpath = os.path.join(dir_path, log_name)
         content = _read_log_file(fpath)
         if content is not None:
@@ -1919,6 +2094,14 @@ class MauiDeviceManagementServicer(
     maui_manufacturing_pb2_grpc.MauiDeviceManagementServicer
 ):
     """Servicer for inspecting logs, label verification, and final manufacturing submission."""
+
+    # Revision hooks. Maui v1.1 (FTDI console) is the default implementation;
+    # other hardware revisions subclass this servicer and override them.
+    # Manufacturing stages evaluated from the device logs (None: STAGE_LOGS).
+    STAGE_LOGS: Optional[Tuple[Tuple[str, str, str], ...]] = None
+    # Name / USB identity of the MCU console endpoint used in messages.
+    CONSOLE_LABEL = "FTDI"
+    CONSOLE_USB_ID_TEXT = "VID 0403, PID 6002"
 
     def read_connected_device_serial(
         self,
@@ -2055,7 +2238,7 @@ class MauiDeviceManagementServicer(
         )
 
         stage_statuses, overall_verdict, log_infos, present_count = (
-            analyze_device_manufacturing_logs(serial_no)
+            analyze_device_manufacturing_logs(serial_no, self.STAGE_LOGS)
         )
 
         return maui_manufacturing_pb2.MauiLogsStatusResponse(
@@ -2129,24 +2312,24 @@ class MauiDeviceManagementServicer(
         if all_match:
             msg = (
                 f"Verification PASSED: Scanned barcode '{scanned}' matches both ADB Endpoint "
-                f"({adb_serial}) and FTDI Endpoint ({ftdi_serial})."
+                f"({adb_serial}) and {self.CONSOLE_LABEL} Endpoint ({ftdi_serial})."
             )
         elif not adb_serial and not ftdi_serial:
-            msg = "Verification FAILED: No connected Maui USB hardware (ADB/FTDI) detected on USB bus."
+            msg = f"Verification FAILED: No connected Maui USB hardware (ADB/{self.CONSOLE_LABEL}) detected on USB bus."
         elif not dual_match and adb_serial and ftdi_serial:
             msg = (
                 f"Verification FAILED (Hardware Endpoint Mismatch): ADB Serial '{adb_serial}' "
-                f"does not match FTDI Serial '{ftdi_serial}'."
+                f"does not match {self.CONSOLE_LABEL} Serial '{ftdi_serial}'."
             )
         elif adb_serial and not ftdi_serial:
             msg = (
-                f"Verification FAILED: FTDI endpoint (VID 0403, PID 6002) not detected. "
+                f"Verification FAILED: {self.CONSOLE_LABEL} endpoint ({self.CONSOLE_USB_ID_TEXT}) not detected. "
                 f"ADB Serial is '{adb_serial}'."
             )
         elif ftdi_serial and not adb_serial:
             msg = (
                 f"Verification FAILED: ADB endpoint (VID 18d1, PID 506d) not detected. "
-                f"FTDI Serial is '{ftdi_serial}'."
+                f"{self.CONSOLE_LABEL} Serial is '{ftdi_serial}'."
             )
         else:
             msg = (
@@ -2159,7 +2342,7 @@ class MauiDeviceManagementServicer(
             f"Label Verification Result: {'PASSED' if all_match else 'FAILED'}\n"
             f"Scanned Barcode: '{scanned}'\n"
             f"ADB Serial: '{adb_serial}'\n"
-            f"FTDI Serial: '{ftdi_serial}'\n"
+            f"{self.CONSOLE_LABEL} Serial: '{ftdi_serial}'\n"
             f"Electronic Serial: '{electronic_serial}'\n"
             f"Message: {msg}\n"
         )
@@ -2266,7 +2449,9 @@ class MauiDeviceManagementServicer(
         dir_path = maui_common.device_log_dir_path(serial_no)
 
         # Authoritatively analyze real log files from the device log directory
-        stage_statuses, _, log_infos, _ = analyze_device_manufacturing_logs(serial_no)
+        stage_statuses, _, log_infos, _ = analyze_device_manufacturing_logs(
+            serial_no, self.STAGE_LOGS
+        )
 
         # If label verification was explicitly provided in request, update label_verified status
         if request.label_verified or (

@@ -6,13 +6,157 @@
 # Applies a DiagnoseMe offline update bundle (Debian package, Docker images
 # and Maui firmware, see build-offline-bundle.sh).
 #
-# Usage: diagnoseme-offline-update [BUNDLE_PATH]
+# Usage: diagnoseme-offline-update [--switch-edition] [BUNDLE_PATH]
 #
 # BUNDLE_PATH may be the bundle directory (containing MANIFEST.json), a
 # directory containing diagnoseme-update/, or a bundle .zip file. Without it,
 # $BUNDLE_DIR is used, and then mounted media and block devices are searched.
+#
+# A bundle is built for one edition (MANIFEST.json "edition", e.g. maui-v1.1)
+# and the edition packages replace each other, so a bundle of another edition
+# than the station's is refused unless --switch-edition is given. The deb of
+# the bundle must be the edition's package (MANIFEST.json "deb_package").
 
 set -e
+
+CONFIG_DIR="${DIAGNOSEME_CONFIG_DIR:-/etc/diagnoseme}"
+DPKG_QUERY="${DPKG_QUERY:-dpkg-query}"
+DPKG_DEB="${DPKG_DEB:-dpkg-deb}"
+
+# Prints the edition installed on this station: DIAGNOSEME_EDITION of
+# config.env (config.local.env cannot change it); for the packages installed
+# before the editions, maui-v1.1 for an old Maui config.env (DOCKER_TAG=maui)
+# and servo-dolos for the old 'diagnoseme' package without config.env.
+# Prints nothing when no DiagnoseMe package is installed.
+station_edition() {
+    local config="${CONFIG_DIR}/config.env"
+    local edition=""
+    local tag=""
+    if [ -f "$config" ]; then
+        # shellcheck disable=SC1090,SC2016
+        edition=$(bash -c 'source "$1" > /dev/null 2>&1; printf "%s" "${DIAGNOSEME_EDITION:-}"' _ "$config")
+        # shellcheck disable=SC2016
+        tag=$(bash -c 'source "$1" > /dev/null 2>&1; printf "%s" "${DOCKER_TAG:-}"' _ "$config")
+    fi
+    local legacy_status
+    # shellcheck disable=SC2016 # dpkg-query format, not a shell expansion
+    legacy_status=$("$DPKG_QUERY" -W -f='${Status}' diagnoseme 2> /dev/null || true)
+    if [ -n "$edition" ]; then
+        echo "$edition"
+    elif [ "$tag" = "maui" ]; then
+        echo "maui-v1.1"
+    elif [ "$legacy_status" = "install ok installed" ]; then
+        echo "servo-dolos"
+    fi
+}
+
+# Prints field $2 of the MANIFEST.json $1 (empty when missing).
+manifest_field() {
+    python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))' \
+        "$1" "$2" 2> /dev/null || true
+}
+
+# Refuses a bundle of another edition than the station's (unless
+# SWITCH_EDITION=true) and a deb ($2, may be empty) that is not the package
+# named by the MANIFEST.json ($1).
+check_bundle_edition() {
+    local manifest="$1"
+    local deb="$2"
+    local bundle_edition bundle_package station deb_package
+    bundle_edition=$(manifest_field "$manifest" edition)
+    bundle_package=$(manifest_field "$manifest" deb_package)
+    station=$(station_edition)
+    echo "Bundle edition: ${bundle_edition:-unknown}; station edition: ${station:-none installed}"
+    if [ -z "$bundle_edition" ]; then
+        if [ "$SWITCH_EDITION" != true ]; then
+            echo "Error: the bundle does not name its edition (built by an older"
+            echo "build-offline-bundle.sh). Rerun with --switch-edition to apply it anyway."
+            return 1
+        fi
+    elif [ -n "$station" ] && [ "$station" != "$bundle_edition" ]; then
+        if [ "$SWITCH_EDITION" != true ]; then
+            echo "Error: this is a ${bundle_edition} bundle, but the station runs ${station}."
+            echo "Applying it would convert the station. Rerun with --switch-edition"
+            echo "if that is intended."
+            return 1
+        fi
+        echo "Switching the station from ${station} to ${bundle_edition} (--switch-edition)."
+    fi
+    if [ -n "$deb" ]; then
+        deb_package=$("$DPKG_DEB" -f "$deb" Package 2> /dev/null || true)
+        if [ -z "$deb_package" ] || { [ -n "$bundle_package" ] && [ "$deb_package" != "$bundle_package" ]; }; then
+            echo "Error: the bundle's deb is the package '${deb_package:-unknown}', expected '${bundle_package}'."
+            return 1
+        fi
+        if [ -z "$bundle_package" ] && [ "$SWITCH_EDITION" != true ]; then
+            echo "Error: the bundle does not name its package; rerun with --switch-edition."
+            return 1
+        fi
+    fi
+}
+
+# Installs the verified firmware files ($2...) of one component of the bundle
+# into the station's component directory $1. A component with a STABLE.json
+# (a stable release, see tools/maui_fw_fetch.py) replaces the whole
+# directory, so no image of an older release or ISO is left next to it (the
+# fail-closed selection on the station refuses several images without a
+# valid STABLE.json); other files are added to the directory.
+install_firmware_files() {
+    local target="$1"
+    shift
+    local f has_stable=false
+    for f in "$@"; do
+        if [ "$(basename "$f")" = "STABLE.json" ]; then
+            has_stable=true
+        fi
+    done
+    if [ "$has_stable" = true ]; then
+        local parent kind fw_new fw_old
+        parent="$(dirname "$target")"
+        kind="$(basename "$target")"
+        fw_new="$parent/.$kind.new.$$"
+        fw_old="$parent/.$kind.old.$$"
+        rm -rf "$fw_new" "$fw_old"
+        mkdir -m 755 "$fw_new"
+        cp -v "$@" "$fw_new/"
+        chmod 644 "$fw_new"/*
+        if [ -e "$target" ]; then
+            mv "$target" "$fw_old"
+        fi
+        mv "$fw_new" "$target"
+        rm -rf "$fw_old"
+    else
+        mkdir -p "$target"
+        for f in "$@"; do
+            cp -v "$f" "$target/" || true
+        done
+    fi
+}
+
+# Unit tests source this script for its functions only.
+if [ -n "${DIAGNOSEME_LIB_ONLY:-}" ]; then
+    # shellcheck disable=SC2317 # exit only when executed, not sourced
+    return 0 2> /dev/null || exit 0
+fi
+
+SWITCH_EDITION=false
+BUNDLE_ARG=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --switch-edition)
+            SWITCH_EDITION=true
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: diagnoseme-offline-update [--switch-edition] [BUNDLE_PATH]"
+            exit 0
+            ;;
+        *)
+            BUNDLE_ARG="$1"
+            shift
+            ;;
+    esac
+done
 
 echo "=================================================="
 echo " DiagnoseMe Offline USB Update Tool"
@@ -112,7 +256,7 @@ find_bundle_on_device() {
 }
 
 # An explicit bundle path wins over $BUNDLE_DIR and auto-detection.
-BUNDLE_PATH="${1:-${BUNDLE_DIR:-}}"
+BUNDLE_PATH="${BUNDLE_ARG:-${BUNDLE_DIR:-}}"
 BUNDLE_DIR=""
 
 if [ -n "$BUNDLE_PATH" ]; then
@@ -278,6 +422,9 @@ while IFS= read -r -d '' F; do
     DEB_FILE="$F"
     break
 done < <(verified_files deb "*.deb")
+# The bundle must be of the station's edition (or --switch-edition) and its
+# deb the edition's package.
+check_bundle_edition "MANIFEST.json" "$DEB_FILE"
 if [ -n "$DEB_FILE" ]; then
     echo "Installing updated Debian package ($DEB_FILE)..."
     dpkg -i "$DEB_FILE" || apt-get install -f -y
@@ -298,11 +445,15 @@ fi
 
 # 3. Update Offline Firmware Cache if provided
 FW_TARGET="/var/lib/diagnoseme/firmware"
-mkdir -p "$FW_TARGET/mcu" "$FW_TARGET/pdc"
+mkdir -p "$FW_TARGET"
 
 if [ -d "firmware" ]; then
     echo "Updating offline Maui firmware cache in $FW_TARGET..."
-    for FW_KIND in mcu pdc; do
+    # One directory per component of the edition (mcu, pdc, ...; see
+    # editions.json); only files verified by the MANIFEST are installed.
+    for COMP_DIR in firmware/*/; do
+        [ -d "$COMP_DIR" ] || continue
+        FW_KIND="$(basename "$COMP_DIR")"
         FW_FILES=()
         while IFS= read -r -d '' F; do
             FW_FILES+=("$F")
@@ -310,23 +461,7 @@ if [ -d "firmware" ]; then
         if [ ${#FW_FILES[@]} -eq 0 ]; then
             continue
         fi
-        if [ -f "firmware/$FW_KIND/STABLE.json" ]; then
-            # A stable release (see fetch-maui-firmware) replaces the whole
-            # directory, so no files of older releases are left behind.
-            FW_NEW="$FW_TARGET/.$FW_KIND.new.$$"
-            FW_OLD="$FW_TARGET/.$FW_KIND.old.$$"
-            rm -rf "$FW_NEW" "$FW_OLD"
-            mkdir -m 755 "$FW_NEW"
-            cp -v "${FW_FILES[@]}" "$FW_NEW/"
-            chmod 644 "$FW_NEW"/*
-            mv "$FW_TARGET/$FW_KIND" "$FW_OLD"
-            mv "$FW_NEW" "$FW_TARGET/$FW_KIND"
-            rm -rf "$FW_OLD"
-        else
-            for F in "${FW_FILES[@]}"; do
-                cp -v "$F" "$FW_TARGET/$FW_KIND/" || true
-            done
-        fi
+        install_firmware_files "$FW_TARGET/$FW_KIND" "${FW_FILES[@]}"
     done
 fi
 

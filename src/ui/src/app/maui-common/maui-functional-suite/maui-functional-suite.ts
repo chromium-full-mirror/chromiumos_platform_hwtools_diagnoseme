@@ -57,6 +57,7 @@ import {MauiStation2Service} from '../../services/maui-station2.service';
 import {MauiDeviceMgmtService} from '../../services/maui-device-mgmt.service';
 import {TestPassFailButton} from '../../test-pass-fail-button/test-pass-fail-button';
 import {
+  MauiAdbTransferTestResponse,
   MauiFinalSubmissionRequest,
   MauiHostOnlyTestResponse,
   MauiHostReplugTestResponse,
@@ -74,7 +75,8 @@ export type FunctionalCardId =
   | 'leds'
   | 'hostDutCharger'
   | 'dutSbuFlip'
-  | 'chargerDisconnect';
+  | 'chargerDisconnect'
+  | 'adbTransfer';
 
 export const FUNCTIONAL_CARD_IDS: readonly FunctionalCardId[] = [
   'barcode',
@@ -86,6 +88,7 @@ export const FUNCTIONAL_CARD_IDS: readonly FunctionalCardId[] = [
   'hostDutCharger',
   'dutSbuFlip',
   'chargerDisconnect',
+  'adbTransfer',
 ];
 
 /** Keys used for the per-card results in MES `stage_statuses`. */
@@ -99,6 +102,8 @@ export const FUNCTIONAL_STAGE_STATUS_KEYS: Record<FunctionalCardId, string> = {
   hostDutCharger: 'host_dut_charger',
   dutSbuFlip: 'dut_sbu_flip',
   chargerDisconnect: 'charger_disconnect',
+  // Same key as the backend's adb_transfer_test stage log.
+  adbTransfer: 'adb_transfer_test',
 };
 
 export interface FunctionalCardState {
@@ -312,7 +317,10 @@ export class MauiFunctionalSuiteComponent implements OnInit {
   // Card 8: Charger Disconnect Verification (No Charger)
   chargerDisconnected = false;
 
-  // Card 9: Log Saving & Finalization
+  // Card 9: ADB Data Transfer Reliability (DUT through the H2H bridge)
+  adbTransferResult: MauiAdbTransferTestResponse | null = null;
+
+  // Card 10: Log Saving & Finalization
   savingLogs = false;
   logsSaved = false;
   logFiles: MauiLogFileInfo[] = [];
@@ -335,6 +343,7 @@ export class MauiFunctionalSuiteComponent implements OnInit {
   @ViewChild('dutSbuFlipStatus') dutSbuFlipStatus?: TestPassFailButton;
   @ViewChild('chargerDisconnectStatus')
   chargerDisconnectStatus?: TestPassFailButton;
+  @ViewChild('adbTransferStatus') adbTransferStatus?: TestPassFailButton;
   @ViewChild('completeStatus') completeStatus?: TestPassFailButton;
 
   @ViewChild('usbCheckBtn', {read: ElementRef})
@@ -353,6 +362,8 @@ export class MauiFunctionalSuiteComponent implements OnInit {
   dutSbuFlipBtn?: ElementRef<HTMLButtonElement>;
   @ViewChild('chargerDisconnectBtn', {read: ElementRef})
   chargerDisconnectBtn?: ElementRef<HTMLButtonElement>;
+  @ViewChild('adbTransferBtn', {read: ElementRef})
+  adbTransferBtn?: ElementRef<HTMLButtonElement>;
   @ViewChild('saveLogsBtn', {read: ElementRef})
   saveLogsBtn?: ElementRef<HTMLButtonElement>;
 
@@ -406,6 +417,11 @@ export class MauiFunctionalSuiteComponent implements OnInit {
     },
     chargerDisconnect: {
       statusButton: () => this.chargerDisconnectStatus,
+      nextCardElementId: 'func-card-adb',
+      nextFocus: () => this.adbTransferBtn,
+    },
+    adbTransfer: {
+      statusButton: () => this.adbTransferStatus,
       nextCardElementId: 'func-card-9',
       nextFocus: () => this.saveLogsBtn,
       onDone: () => this.inspectLogs(),
@@ -428,7 +444,7 @@ export class MauiFunctionalSuiteComponent implements OnInit {
 
   get canSaveLogs(): boolean {
     return (
-      this.cards.chargerDisconnect.done &&
+      this.cards.adbTransfer.done &&
       !this.deviceConnected &&
       !this.otherUnitDetected &&
       !this.savingLogs &&
@@ -975,6 +991,30 @@ export class MauiFunctionalSuiteComponent implements OnInit {
     );
   }
 
+  // Card 9: ADB Data Transfer Reliability
+  runAdbTransfer(): void {
+    this.runCard('adbTransfer', () => this.runAdbTransferRequest(), {
+      isPassed: res => res.success,
+      onResult: res => {
+        this.adbTransferResult = res;
+      },
+      failureTitle: 'ADB Transfer Test Failed',
+      failureMessage: res => res.message || 'ADB data transfer check failed.',
+      errorTitle: 'ADB Transfer Test Error',
+      retry: () => this.runAdbTransfer(),
+    });
+  }
+
+  private runAdbTransferRequest(): Observable<MauiAdbTransferTestResponse> {
+    this.adbTransferResult = null;
+    // The DUT's ADB serial is the unit serial; sending it makes the backend
+    // test exactly this unit instead of the first ADB device it finds.
+    return this.mauiService.runAdbTransferTest(
+      this.serialNumber,
+      this.serialNumber,
+    );
+  }
+
   inspectLogs(): void {
     const targetSerial = this.serialNumber || 'UNKNOWN';
     this.inspectingLogs = true;
@@ -1034,6 +1074,18 @@ export class MauiFunctionalSuiteComponent implements OnInit {
     return statuses;
   }
 
+  /** One-line description of the ADB transfer readings for the summary. */
+  private adbTransferDetails(): string {
+    const t = this.adbTransferResult;
+    if (!t) {
+      return 'no data';
+    }
+    return (
+      `push ${t.pushMbPerS.toFixed(1)} MB/s, pull ${t.pullMbPerS.toFixed(1)} MB/s, ` +
+      `${(Number(t.fileSizeBytes) / 1e6).toFixed(0)} MB, ${t.totalSeconds.toFixed(1)} s`
+    );
+  }
+
   private buildSummary(targetSerial: string, phaseTag: string): string {
     const c1 = this.hostUsbCheck;
     const c2 = this.hostFlipCheck;
@@ -1061,6 +1113,7 @@ export class MauiFunctionalSuiteComponent implements OnInit {
       `Card 6 (Host+DUT+Charger): ${s.hostDutCharger.status} (H2H=${this.h2hLinkSpeed}, PD=${this.negotiatedVoltage}V/${this.calculatedPowerW}W, CCD EC/GSC=${this.ecUartOk && this.gscUartOk})\n` +
       `Card 7 (180° SBU Flip): ${s.dutSbuFlip.status} (DUT SBU Orientation=${this.dutOrientation})\n` +
       `Card 8 (Charger Disconnected): ${s.chargerDisconnect.status} (Disconnected=${this.chargerDisconnected})\n` +
+      `Card 9 (ADB Transfer, two ~400 MB random files, must finish within 60 s): ${s.adbTransfer.status} (${this.adbTransferDetails()})\n` +
       `OVERALL RESULT: ${this.overallVerdict}\n`
     );
   }
@@ -1094,7 +1147,7 @@ export class MauiFunctionalSuiteComponent implements OnInit {
     };
   }
 
-  // Card 9: Save Logs & Export
+  // Card 10: Save Logs & Export
   saveLogs(): void {
     if (this.otherUnitDetected) {
       return;

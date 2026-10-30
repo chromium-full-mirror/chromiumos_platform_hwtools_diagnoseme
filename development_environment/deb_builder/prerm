@@ -1,0 +1,31 @@
+#!/bin/sh
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# Debian prerm: unregisters the r8152 DKMS driver of the editions with the
+# Realtek tools when the package is removed (also when another edition's
+# package replaces it); upgrades keep it (postinst rebuilds it). Never fails:
+# the driver may already be gone.
+
+set -e
+
+# Replaced when the package is built (deb_builder/Dockerfile, editions.json
+# realtek_tools).
+REALTEK_TOOLS="@REALTEK_TOOLS@"
+R8152_VERSION="2.21.4"
+# DKMS registration of the driver (overridable for the unit tests only).
+R8152_DKMS_DIR="${R8152_DKMS_DIR:-/var/lib/dkms/r8152/${R8152_VERSION}}"
+
+case "$1" in
+    remove|deconfigure)
+        if [ "$REALTEK_TOOLS" = "true" ] && [ -d "$R8152_DKMS_DIR" ] &&
+            command -v dkms > /dev/null 2>&1; then
+            echo "Removing the r8152 DKMS driver..."
+            dkms remove -m r8152 -v "$R8152_VERSION" --all ||
+                echo "Warning: dkms remove of r8152 ${R8152_VERSION} failed."
+        fi
+        ;;
+esac
+
+exit 0

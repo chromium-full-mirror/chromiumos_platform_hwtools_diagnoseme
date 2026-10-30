@@ -52,16 +52,113 @@ _CCD_PROMPT_SUFFIXES = (b"> ", b"$ ", b"# ")
 _port_locks: Dict[str, threading.RLock] = {}
 _port_locks_guard = threading.Lock()
 
+# One console lock for every MCU console user: port_lock (tests and cards,
+# serialized per port) and the exclusive claims of long operations (Maui v1.1:
+# MCU and PDC flashing through the FTDI console; Maui v1.2:
+# maui_v12_device.claim_consoles for MCU App / full image / H2H / PDC
+# flashing, serial provisioning, ...). A claimed port fails port_lock at once
+# (a short claim, the unit status query, is waited for), and a port in
+# port_lock cannot be claimed. Claims are not bound to a thread (async RPCs
+# release them from other threads), so they are kept apart from the
+# per-thread RLocks of port_lock.
+ALL_PORTS = "*"
+# realpath of a port (or ALL_PORTS) -> (what holds it, short claim).
+_port_claims: Dict[str, Tuple[str, bool]] = {}
+# realpath of a port -> number of port_lock holders.
+_port_users: Dict[str, int] = {}
+_port_claims_cond = threading.Condition()
+
 
 class ConsolePortBusyError(RuntimeError):
     """Another RPC held the serial console port for longer than the lock timeout."""
 
-    def __init__(self, port_node: str, timeout: float):
-        super().__init__(
-            f"Console port {port_node} busy: another test is still using it "
-            f"(waited {timeout:.0f}s). Retry when the other test has finished."
-        )
+    def __init__(self, port_node: str, timeout: float, holder: str = ""):
+        if holder:
+            message = (
+                f"Console port {port_node} busy: {holder} is running. Retry when "
+                "it has finished."
+            )
+        else:
+            message = (
+                f"Console port {port_node} busy: another test is still using it "
+                f"(waited {timeout:.0f}s). Retry when the other test has finished."
+            )
+        super().__init__(message)
         self.port_node = port_node
+
+
+def _port_key(port_node: str) -> str:
+    return port_node if port_node == ALL_PORTS else os.path.realpath(port_node or "")
+
+
+def claim_ports(port_nodes: List[str], what: str, short: bool = False) -> str:
+    """Claims |port_nodes| (ALL_PORTS: every port) exclusively for |what|.
+
+    Returns '' when claimed, else what uses one of the ports (port_lock
+    holders: 'a console test on <port>'; other claims: their |what|). Never
+    blocks. A |short| claim makes port_lock wait instead of failing. Release
+    with release_ports().
+    """
+    keys = [_port_key(p) for p in port_nodes if p]
+    with _port_claims_cond:
+        for key in keys:
+            if ALL_PORTS in _port_claims:
+                return _port_claims[ALL_PORTS][0]
+            if key == ALL_PORTS:
+                if _port_claims:
+                    return next(iter(_port_claims.values()))[0]
+                users = [k for k, n in _port_users.items() if n]
+                if users:
+                    return f"a console test on {users[0]}"
+            elif key in _port_claims:
+                return _port_claims[key][0]
+            elif _port_users.get(key):
+                return f"a console test on {key}"
+        for key in keys:
+            _port_claims[key] = (what, short)
+    return ""
+
+
+def release_ports(port_nodes: List[str]) -> None:
+    """Ends a claim of claim_ports()."""
+    with _port_claims_cond:
+        for port_node in port_nodes:
+            if port_node:
+                _port_claims.pop(_port_key(port_node), None)
+        _port_claims_cond.notify_all()
+
+
+def port_claim(port_node: str) -> str:
+    """Returns what claims |port_node| exclusively, '' if nothing does."""
+    with _port_claims_cond:
+        claim = _port_claims.get(ALL_PORTS) or _port_claims.get(_port_key(port_node))
+        return claim[0] if claim else ""
+
+
+def _enter_port(key: str, port_node: str, deadline: float, timeout: float) -> None:
+    """Registers a port_lock holder of |key|; waits for short claims only."""
+    with _port_claims_cond:
+        while True:
+            claim = _port_claims.get(ALL_PORTS) or _port_claims.get(key)
+            if not claim:
+                _port_users[key] = _port_users.get(key, 0) + 1
+                return
+            what, short = claim
+            remaining = deadline - time.monotonic()
+            if not short or remaining <= 0:
+                logging.error("Console port %s is used by %s.", port_node, what)
+                raise ConsolePortBusyError(port_node, timeout, holder=what)
+            _port_claims_cond.wait(remaining)
+
+
+def _leave_port(key: str) -> None:
+    with _port_claims_cond:
+        count = _port_users.get(key, 0) - 1
+        if count > 0:
+            _port_users[key] = count
+        else:
+            _port_users.pop(key, None)
+        _port_claims_cond.notify_all()
 
 
 def open_serial_port(
@@ -86,14 +183,19 @@ def open_serial_port(
 def port_lock(port_node: str, timeout: float = PORT_LOCK_TIMEOUT_SEC) -> Iterator[None]:
     """Serializes access to one serial port across overlapping RPCs (re-entrant per thread).
 
+    Also respects the exclusive claims of claim_ports(): a claimed port fails
+    at once (a short claim is waited for), and claim_ports() refuses a port
+    held here.
+
     Raises:
-      ConsolePortBusyError: the port stayed busy for longer than `timeout`; the
-        caller fails its RPC/card instead of using the port unlocked.
+      ConsolePortBusyError: the port stayed busy for longer than `timeout`, or
+        an exclusive operation holds it; the caller fails its RPC/card instead
+        of using the port unlocked.
     """
+    key = os.path.realpath(port_node or "")
+    deadline = time.monotonic() + timeout
     with _port_locks_guard:
-        lock = _port_locks.setdefault(
-            os.path.realpath(port_node or ""), threading.RLock()
-        )
+        lock = _port_locks.setdefault(key, threading.RLock())
     if not lock.acquire(timeout=timeout):
         logging.error(
             "Console port %s still busy after %.0fs; failing the request.",
@@ -102,7 +204,12 @@ def port_lock(port_node: str, timeout: float = PORT_LOCK_TIMEOUT_SEC) -> Iterato
         )
         raise ConsolePortBusyError(port_node, timeout)
     try:
-        yield
+        # Exclusive claims (see claim_ports) win over port_lock.
+        _enter_port(key, port_node, deadline, timeout)
+        try:
+            yield
+        finally:
+            _leave_port(key)
     finally:
         lock.release()
 

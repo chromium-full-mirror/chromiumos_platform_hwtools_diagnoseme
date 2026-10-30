@@ -524,6 +524,12 @@ def parse_log_status(content: str) -> Optional[str]:
     return status if status in LogStatus.ALL else None
 
 
+def safe_log_step_name(log_step_name: Optional[str]) -> str:
+    """Returns |log_step_name| reduced to a plain file name (it may come from the UI)."""
+    name = re.sub(r"[^A-Za-z0-9_.-]", "", os.path.basename(log_step_name or ""))
+    return name.lstrip(".") or "device_log"
+
+
 def write_device_log(
     serial_number: Optional[str],
     log_step_name: str,
@@ -534,13 +540,14 @@ def write_device_log(
     """Writes or overwrites a timestamped Step log in the device log directory.
 
     When `status` is given, a machine-readable `STATUS: <status>` line is written
-    right after the timestamp header (see parse_log_status).
+    right after the timestamp header (see parse_log_status). The step name is
+    reduced to a plain file name so the log always stays inside the device log
+    directory.
     """
     try:
         log_dir = get_device_log_dir(serial_number)
-        filename = (
-            log_step_name if log_step_name.endswith(".log") else f"{log_step_name}.log"
-        )
+        step = safe_log_step_name(log_step_name)
+        filename = step if step.endswith(".log") else f"{step}.log"
         file_path = os.path.join(log_dir, filename)
         body = f"{format_status_line(status)}\n{content}" if status else content
         with open(file_path, "a" if append else "w", encoding="utf-8") as f:
@@ -584,95 +591,187 @@ def _file_md5(path: str) -> str:
     return digest.hexdigest()
 
 
-def _read_stable_marker(marker: str) -> Optional[Dict[str, Any]]:
-    """Parsed STABLE.json marker, or None if it is missing or unreadable."""
-    if not os.path.isfile(marker):
-        return None
+FW_UPDATE_HINT = (
+    "Update the station firmware (start DiagnoseMe online, install the offline "
+    "update bundle or reinstall from the ISO)."
+)
+
+
+class FirmwareSelectionError(Exception):
+    """The station firmware of a component cannot be chosen safely."""
+
+
+@dataclasses.dataclass(frozen=True)
+class FwSelection:
+    """Result of select_offline_fw().
+
+    path: the image to flash (None if there is none or on |error|).
+    version: version named by STABLE.json ('' without a marker).
+    warning: set when the image is used without a STABLE.json.
+    error: set when the image must not be guessed (broken marker, several
+      images without a marker); the step must fail.
+    """
+
+    path: Optional[str] = None
+    version: str = ""
+    warning: str = ""
+    error: str = ""
+
+
+def _read_stable_marker(marker: str) -> Dict[str, Any]:
+    """Parsed STABLE.json |marker| (which exists); raises ValueError if invalid."""
     try:
         with open(marker, "r", encoding="utf-8") as f:
             info = json.load(f)
     except (OSError, ValueError) as e:
-        logging.warning("Ignoring unreadable firmware marker %s: %s", marker, e)
-        return None
+        raise ValueError(f"{marker} is unreadable ({e})") from e
     if not isinstance(info, dict):
-        logging.warning("Ignoring firmware marker %s: not a JSON object", marker)
-        return None
+        raise ValueError(f"{marker} is not a JSON object")
     return info
 
 
-def _stable_marker_fw_file(component_dir: str) -> Optional[str]:
-    """Image named by <component_dir>/STABLE.json if it exists and its MD5 matches."""
+def _stable_marker_fw_file(component_dir: str) -> Tuple[str, str]:
+    """Returns (image, version) named by <component_dir>/STABLE.json.
+
+    The marker must exist. Raises ValueError when it is unreadable, names an
+    invalid or missing file, or the MD5 of the image does not match.
+    """
     marker = os.path.join(component_dir, STABLE_FW_MARKER)
     info = _read_stable_marker(marker)
-    if info is None:
-        return None
     file_name = str(info.get("file") or "")
     expected_md5 = str(info.get("md5") or "").strip().lower()
-    fw_path = os.path.join(component_dir, file_name)
     if not file_name or os.path.basename(file_name) != file_name:
-        logging.warning(
-            "Ignoring firmware marker %s: invalid file name %r", marker, file_name
-        )
-        return None
+        raise ValueError(f"{marker} names an invalid file {file_name!r}")
+    fw_path = os.path.join(component_dir, file_name)
     if not os.path.isfile(fw_path):
-        logging.warning(
-            "Ignoring firmware marker %s: %s does not exist", marker, fw_path
-        )
-        return None
+        raise ValueError(f"{fw_path} named by {marker} does not exist")
     try:
         actual_md5 = _file_md5(fw_path)
     except OSError as e:
         actual_md5 = f"unreadable ({e})"
     if actual_md5 != expected_md5:
-        logging.error(
-            "MD5 mismatch for firmware %s named by %s (expected %s, got %s); "
-            "falling back to the default firmware selection.",
-            fw_path,
-            marker,
-            expected_md5 or "none",
-            actual_md5,
+        raise ValueError(
+            f"MD5 mismatch for {fw_path} named by {marker} "
+            f"(expected {expected_md5 or 'none'}, got {actual_md5})"
         )
-        return None
+    version = str(info.get("version", ""))
     logging.info(
         "Using stable firmware %s (version %s, source %s)",
         fw_path,
-        info.get("version", "unknown"),
+        version or "unknown",
         info.get("source", "unknown"),
     )
-    return fw_path
+    return fw_path, version
+
+
+def stable_marker_version(component_dir: str) -> str:
+    """Version of the valid STABLE.json in |component_dir|, else ''.
+
+    Entries whose image is missing or fails the MD5 check are skipped (for
+    lists of approved firmware versions).
+    """
+    if not os.path.isfile(os.path.join(component_dir, STABLE_FW_MARKER)):
+        return ""
+    try:
+        return _stable_marker_fw_file(component_dir)[1]
+    except ValueError as e:
+        logging.error("Skipping the stable firmware version: %s", e)
+        return ""
+
+
+def _images_without_marker(
+    component: str, directory: str, component_dir: bool
+) -> FwSelection:
+    """Applies the 'exactly one image' rule to |directory| without a marker."""
+    exts = (".txt", ".bin", ".hex") if component == "mcu" else (".bin", ".hex", ".txt")
+    if component_dir:
+        images = sorted(
+            {f for ext in exts for f in glob.glob(os.path.join(directory, f"*{ext}"))}
+        )
+    else:
+        # Legacy flat directories hold every component: the preferred
+        # extension of |component| decides.
+        images = next(
+            (
+                sorted(matches)
+                for matches in (
+                    glob.glob(os.path.join(directory, f"*{ext}")) for ext in exts
+                )
+                if matches
+            ),
+            [],
+        )
+    if len(images) == 1:
+        return FwSelection(
+            path=images[0],
+            warning=(
+                f"No {STABLE_FW_MARKER} in {directory} - flashing the only "
+                f"{component} image {os.path.basename(images[0])}."
+            ),
+        )
+    if images:
+        names = ", ".join(os.path.basename(f) for f in images)
+        return FwSelection(
+            error=(
+                f"{len(images)} {component} images in {directory} ({names}) and "
+                f"no {STABLE_FW_MARKER} to choose the stable one. {FW_UPDATE_HINT}"
+            )
+        )
+    return FwSelection()
+
+
+def select_offline_fw(component: str) -> FwSelection:
+    """Chooses the station firmware image of |component| (fails closed).
+
+    The first firmware directory (FIRMWARE_ROOT_DIRS/<component>, then the
+    legacy FIRMWARE_FLAT_DIRS) holding a STABLE.json or an image decides:
+      * STABLE.json present and valid (existing file, matching MD5): its image;
+      * STABLE.json present but invalid: error with an update hint;
+      * no STABLE.json and exactly one image: that image, with a warning;
+      * no STABLE.json and several images: error (no guessing).
+    Without any image, path is None and error is empty.
+    """
+    component_dirs = [f"{root}/{component}" for root in FIRMWARE_ROOT_DIRS]
+    candidates = [(d, True) for d in component_dirs] + [
+        (d, False) for d in FIRMWARE_FLAT_DIRS
+    ]
+    for d, is_component_dir in candidates:
+        if not os.path.isdir(d):
+            continue
+        if is_component_dir and os.path.isfile(os.path.join(d, STABLE_FW_MARKER)):
+            try:
+                path, version = _stable_marker_fw_file(d)
+            except ValueError as e:
+                return FwSelection(
+                    error=f"Invalid stable {component} firmware: {e}. {FW_UPDATE_HINT}"
+                )
+            return FwSelection(path=path, version=version)
+        selection = _images_without_marker(component, d, is_component_dir)
+        if selection.path or selection.error:
+            return selection
+    return FwSelection()
 
 
 def find_offline_fw_file(component: str) -> Optional[str]:
-    """Checks for local offline firmware files in standard firmware directories.
+    """Returns the station firmware image of |component| (None if there is none).
 
-    In each component directory, the image named by a valid STABLE.json marker
-    (existing file, matching MD5) wins; otherwise the lexicographically last
-    image of the preferred extension is used.
+    See select_offline_fw(). Raises FirmwareSelectionError when the image
+    must not be guessed; a warning (no STABLE.json) is logged.
     """
-    component_dirs = [f"{root}/{component}" for root in FIRMWARE_ROOT_DIRS]
-    candidates = component_dirs + list(FIRMWARE_FLAT_DIRS)
-    exts = [".txt", ".bin", ".hex"] if component == "mcu" else [".bin", ".hex", ".txt"]
-    for d in candidates:
-        if os.path.isdir(d):
-            if d in component_dirs:
-                stable_fw = _stable_marker_fw_file(d)
-                if stable_fw:
-                    return stable_fw
-            for ext in exts:
-                matches = glob.glob(os.path.join(d, f"*{ext}"))
-                if matches:
-                    return sorted(matches)[-1]
-    return None
-
-
-# Fallback locations of the maui-flash tool (in precedence order after $PATH).
-MAUI_FLASH_PY = "/usr/local/maui/tools/src/maui_flash.py"
-MAUI_FLASH_SCRIPT = "/usr/local/maui/tools/scripts/maui-flash"
+    selection = select_offline_fw(component)
+    if selection.error:
+        logging.error("%s", selection.error)
+        raise FirmwareSelectionError(selection.error)
+    if selection.warning:
+        logging.warning("%s", selection.warning)
+    return selection.path
 
 
 def resolve_maui_tool(tool_name: str) -> Optional[str]:
-    """Resolves the executable path for a Maui CLI utility (e.g. maui-flash, ft232r_prog).
+    """Resolves the executable path of a tool installed in the server image (ft232r_prog).
 
+    The Maui host tools (maui-flash, maui-ctl, fw-updater) are not installed in
+    the server image; they run in the maui-utils container (maui_utils_runner).
     Returns None when the tool is not installed ($PATH or /usr/local/bin).
     """
     found = shutil.which(tool_name)
@@ -680,27 +779,6 @@ def resolve_maui_tool(tool_name: str) -> Optional[str]:
         return found
     fallback = f"/usr/local/bin/{tool_name}"
     return fallback if os.path.exists(fallback) else None
-
-
-def resolve_maui_flash_command(include_script: bool = True) -> Optional[List[str]]:
-    """Returns the command prefix to run maui-flash, or None when it is not installed."""
-    maui_flash_bin = resolve_maui_tool("maui-flash")
-    if maui_flash_bin:
-        return [maui_flash_bin]
-    if os.path.exists(MAUI_FLASH_PY):
-        return ["python3", MAUI_FLASH_PY]
-    if include_script and os.path.exists(MAUI_FLASH_SCRIPT):
-        return [MAUI_FLASH_SCRIPT]
-    return None
-
-
-def get_maui_env() -> Dict[str, str]:
-    """Constructs standard environment dictionary for invoking Maui Python CLI tools."""
-    env = os.environ.copy()
-    env["PYTHONPATH"] = (
-        f"/usr/local/maui/tools:/usr/local/maui:{env.get('PYTHONPATH', '')}"
-    )
-    return env
 
 
 ZEPHYR_BAUDRATE = 115200

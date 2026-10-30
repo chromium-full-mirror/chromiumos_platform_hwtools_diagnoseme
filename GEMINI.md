@@ -22,6 +22,10 @@ This project contains the frontend and backend services for the Diagnose Me appl
     ```bash
     docker compose -f development_environment/docker-compose.yaml up -d
     ```
+-   **Start services with the Maui mounts (Maui and "all" editions):**
+    ```bash
+    docker compose -f development_environment/docker-compose.yaml -f development_environment/docker-compose-dev-maui.yaml up -d
+    ```
 -   **Stop services:**
     ```bash
     docker compose -f development_environment/docker-compose.yaml down

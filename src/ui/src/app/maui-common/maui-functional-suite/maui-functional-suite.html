@@ -801,12 +801,97 @@
       </diagnoseme-rework-card-column>
     </diagnoseme-rework-card>
 
-    <!-- Card 9: Log Compilation & Archival -->
+    <!-- Card 9: ADB Data Transfer Reliability -->
+    <diagnoseme-rework-card
+      id="func-card-adb"
+      title="9. ADB Data Transfer Reliability (DUT via H2H)"
+      [progress]="cards.adbTransfer.inProgress"
+      [disabled]="!cards.chargerDisconnect.done">
+      <diagnoseme-rework-card-column column="1">
+        <div class="steps-vertical-container">
+          <div class="instructions-box">
+            <span class="step-num">Step 1</span>
+            <span class="step-text"
+              >Keep the DUT connected and booted with <strong>ADB</strong> enabled.</span
+            >
+          </div>
+          <div class="instructions-box">
+            <span class="step-num">Step 2</span>
+            <span class="step-text"
+              >Click <strong>Run ADB Transfer Test</strong>. Two ~400 MB random files (slightly different
+              sizes) are pushed to the DUT and pulled back and their checksums are compared; the
+              transfer must finish within 60 s.</span
+            >
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="2">
+        <div class="status-panel">
+          @if (cards.adbTransfer.inProgress) {
+            <div class="info-row">
+              <span class="label">Status:</span>
+              <span class="value">Transferring data over ADB...</span>
+            </div>
+          }
+          @if (adbTransferResult; as t) {
+            <div class="info-row">
+              <span class="label">ADB Device:</span>
+              <span class="value code">{{ t.adbSerial || '-' }}</span>
+            </div>
+            <div class="info-row" id="func-adb-push">
+              <span class="label">Push:</span>
+              <span class="value">{{ t.pushMbPerS | number: '1.1-1' }} MB/s ({{ t.pushSeconds | number: '1.1-1' }} s)</span>
+            </div>
+            <div class="info-row" id="func-adb-pull">
+              <span class="label">Pull:</span>
+              <span class="value">{{ t.pullMbPerS | number: '1.1-1' }} MB/s ({{ t.pullSeconds | number: '1.1-1' }} s)</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Checksum:</span>
+              <span class="badge" [class.badge-active]="t.success" [class.badge-fail]="!t.success">{{
+                t.success ? 'SHA-1 Match' : 'FAILED'
+              }}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Result:</span>
+              <span class="value">{{ t.message }}</span>
+            </div>
+          }
+          <div class="actions-wrapper" style="display: flex; gap: 8px;">
+            <button
+              #adbTransferBtn
+              mat-raised-button
+              color="primary"
+              class="action-btn-wide"
+              [disabled]="otherUnitDetected || !cards.chargerDisconnect.done || cards.adbTransfer.inProgress"
+              (click)="runAdbTransfer()">
+              <mat-icon>swap_vert</mat-icon>
+              Run ADB Transfer Test
+            </button>
+            <button
+              mat-stroked-button
+              color="warn"
+              [disabled]="otherUnitDetected || !cards.chargerDisconnect.done || cards.adbTransfer.inProgress"
+              (click)="bypassCard('adbTransfer')">
+              <mat-icon>skip_next</mat-icon>
+              Bypass
+            </button>
+          </div>
+        </div>
+      </diagnoseme-rework-card-column>
+
+      <diagnoseme-rework-card-column column="3">
+        <test-pass-fail-button #adbTransferStatus></test-pass-fail-button>
+      </diagnoseme-rework-card-column>
+    </diagnoseme-rework-card>
+
+    <!-- Card 10: Log Compilation & Archival -->
     <diagnoseme-rework-card
       id="func-card-9"
-      [title]="isFatpMode ? '9. FATP QT0 Summary & Archival' : '9. SMT Log Completion & Archival'"
+      [title]="isFatpMode ? '10. FATP QT0 Summary & Archival' : '10. SMT Log Completion & Archival'"
       [progress]="savingLogs || inspectingLogs"
-      [disabled]="!cards.chargerDisconnect.done">
+      [disabled]="!cards.adbTransfer.done">
       <diagnoseme-rework-card-column column="1">
         <div class="steps-vertical-container">
           <div class="instructions-box">
@@ -826,13 +911,13 @@
 
       <diagnoseme-rework-card-column column="2">
         <div class="status-panel">
-          @if (cards.chargerDisconnect.done && deviceConnected && !logsSaved) {
+          @if (cards.adbTransfer.done && deviceConnected && !logsSaved) {
             <div class="operator-warning-banner">
               <mat-icon>warning</mat-icon>
               <span><strong>Operator Action Required:</strong> Please disconnect the Maui unit from the host USB port to enable log archival and complete testing.</span>
             </div>
           }
-          @if (cards.chargerDisconnect.done && !deviceConnected && !logsSaved) {
+          @if (cards.adbTransfer.done && !deviceConnected && !logsSaved) {
             <div class="operator-ready-banner">
               <mat-icon>check_circle</mat-icon>
               <span><strong>Ready for Archival:</strong> Maui unit disconnected. Click <strong>{{ isFatpMode ? 'Save FATP Logs' : 'Save SMT Logs' }}</strong> to finalize.</span>
@@ -855,7 +940,7 @@
             <span class="label">Physical Connection:</span>
             <span
               class="badge"
-              [class.badge-active]="!deviceConnected && cards.chargerDisconnect.done"
+              [class.badge-active]="!deviceConnected && cards.adbTransfer.done"
               [class.badge-fail]="deviceConnected">
               {{ deviceConnected ? 'Unit Still Connected (Unplug to proceed)' : 'Unit Disconnected (Safe to Save Logs)' }}
             </span>
@@ -871,7 +956,7 @@
             <span
               class="badge"
               [class.badge-active]="logsSaved"
-              [class.badge-fail]="!logsSaved && cards.chargerDisconnect.done">
+              [class.badge-fail]="!logsSaved && cards.adbTransfer.done">
               {{
                 logsSaved
                   ? (isFatpMode ? 'FATP QT0 Report Saved' : 'SMT Report Saved')
@@ -953,7 +1038,7 @@
             <button
               mat-stroked-button
               color="accent"
-              [disabled]="!cards.chargerDisconnect.done || inspectingLogs"
+              [disabled]="!cards.adbTransfer.done || inspectingLogs"
               (click)="inspectLogs()">
               <mat-icon>refresh</mat-icon>
               Refresh Logs Checklist

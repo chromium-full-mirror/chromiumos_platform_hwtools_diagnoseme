@@ -4,8 +4,8 @@
 """gRPC Servicer for Maui functional testing (SMT Step 2 and FATP Step 4).
 
 Covers the Host-only checks (host USB/console, 180° host re-plug, RESET and BSL
-buttons) and the Host+DUT stages (with charger, 180° SBU flip, charger
-disconnected).
+buttons), the Host+DUT stages (with charger, 180° SBU flip, charger
+disconnected) and the ADB data transfer reliability test.
 """
 
 import dataclasses
@@ -23,6 +23,7 @@ from typing import Tuple
 import grpc
 import serial
 
+from server import maui_adb_transfer
 from server import maui_common
 from server.generated import maui_manufacturing_pb2
 from server.generated import maui_manufacturing_pb2_grpc
@@ -180,6 +181,19 @@ def _resolve_serial(serial_no: str) -> str:
     return serial_no
 
 
+def _known_serial(serial_no: str) -> str:
+    """Returns the stripped serial, '' if it is empty or the UNKNOWN placeholder."""
+    serial_no = (serial_no or "").strip()
+    return "" if maui_common.is_unknown_serial(serial_no) else serial_no
+
+
+def _fail_adb_result(res: maui_adb_transfer.AdbTransferResult, message: str) -> None:
+    """Marks the ADB transfer result |res| as failed with |message|."""
+    res.success = False
+    res.message = message
+    res.log.append(f"FAILED: {message}")
+
+
 def _resolve_console_port(requested: str, default: str = DEFAULT_TTY) -> str:
     """Resolves the Maui MCU console: requested port, FTDI sysfs node, then numerically first ttyUSB."""
     if requested and os.path.exists(requested):
@@ -248,6 +262,9 @@ class _HostConsoleChecks:  # pylint: disable=too-many-instance-attributes
     voltage_mismatches: List[str] = dataclasses.field(
         default_factory=lambda: ["Serial port not accessible"]
     )
+    # Revision texts (MauiStation2Servicer hooks).
+    expected_hwrev_text: str = str(EXPECTED_HWREV)
+    gpio_ok_text: str = f"All {len(EXPECTED_HOST_GPIOS)} GPIOs verified"
 
     def adc(self, key: str, default: Any = 0) -> Any:
         """Value of one parsed `adc status` field."""
@@ -269,7 +286,7 @@ class _HostConsoleChecks:  # pylint: disable=too-many-instance-attributes
         """GPIO mismatches, or the verified count."""
         if self.gpio_mismatches:
             return "; ".join(self.gpio_mismatches)
-        return f"All {len(EXPECTED_HOST_GPIOS)} GPIOs verified"
+        return self.gpio_ok_text
 
     @property
     def voltage_details(self) -> str:
@@ -290,7 +307,7 @@ class _HostConsoleChecks:  # pylint: disable=too-many-instance-attributes
     def log_details(self) -> str:
         """Log section shared by the Host-only and Host re-plug logs."""
         return (
-            f"HWRev: {self.detected_hwrev} (Expected: {EXPECTED_HWREV})\n"
+            f"HWRev: {self.detected_hwrev} (Expected: {self.expected_hwrev_text})\n"
             f"Temperature: {self.temp_c:.2f} 'C (Limits: {TEMP_MIN_C:g}-{TEMP_MAX_C:g} 'C)\n"
             f"GPIO Status: {_pass_fail(self.gpios_ok)}\n"
             f"GPIO Details: {self.gpio_details}\n"
@@ -308,14 +325,15 @@ class _HostConsoleChecks:  # pylint: disable=too-many-instance-attributes
         )
 
 
-def _run_host_console_checks(port_node: str, read_charger: bool) -> _HostConsoleChecks:
+def _run_host_console_checks(
+    tester: MauiConsoleTester, read_charger: bool, checks: _HostConsoleChecks
+) -> _HostConsoleChecks:
     """Runs the Host console checks (tests, [charger PDC], ADC, hwrev, temp, GPIOs) in one session."""
-    checks = _HostConsoleChecks()
+    port_node = tester.port_node
     if not os.path.exists(port_node):
         checks.session_error = f"Port {port_node} does not exist"
         return checks
 
-    tester = MauiConsoleTester(port_node=port_node, timeout=CONSOLE_TIMEOUT_SEC)
     try:
         with port_lock(port_node), open_serial_port(
             port_node, tester.baudrate, timeout=tester.timeout
@@ -414,9 +432,47 @@ class MauiStation2Servicer(
 ):
     """Implementation of the Maui functional testing gRPC service (Steps 2 and 4)."""
 
+    # Revision hooks. Maui v1.1 (FTDI console) is the default implementation;
+    # other hardware revisions subclass this servicer and override the hooks.
+    # Label of the MCU console USB endpoint in summaries.
+    CONSOLE_USB_LABEL = "FTDI"
+    # Expected `hwrev` shown in the device logs.
+    EXPECTED_HWREV_TEXT = str(EXPECTED_HWREV)
+    # True when the MCU console is a /dev/ttyUSB* node (used by the CCD fallback).
+    MCU_CONSOLE_IS_TTYUSB = True
+
     def __init__(self):
         super().__init__()
-        logging.info("MauiStation2Servicer initialized.")
+        logging.info("%s initialized.", type(self).__name__)
+
+    def _make_console_tester(self, port_node: str) -> MauiConsoleTester:
+        """Returns the console tester used for the MCU console on `port_node`."""
+        return MauiConsoleTester(port_node=port_node, timeout=CONSOLE_TIMEOUT_SEC)
+
+    def _find_unit_serial(self) -> str:
+        """Returns the unit serial (Maui ADB/H2H iSerial, else MCU console iSerial)."""
+        return _resolve_serial("")
+
+    def _resolve_console_port(self, requested: str, default: str = DEFAULT_TTY) -> str:
+        """Returns the MCU console node (requested port if present, else discovered)."""
+        return _resolve_console_port(requested, default)
+
+    def _gpio_ok_text(self) -> str:
+        """Returns the GPIO details text of a passing GPIO check."""
+        return f"All {len(EXPECTED_HOST_GPIOS)} GPIOs verified"
+
+    def _host_console_checks(
+        self, port_node: str, read_charger: bool
+    ) -> _HostConsoleChecks:
+        """Runs the shared Host console session on `port_node`."""
+        return _run_host_console_checks(
+            self._make_console_tester(port_node),
+            read_charger,
+            _HostConsoleChecks(
+                expected_hwrev_text=self.EXPECTED_HWREV_TEXT,
+                gpio_ok_text=self._gpio_ok_text(),
+            ),
+        )
 
     @staticmethod
     def _check_host_usb_topology() -> Tuple[bool, bool, bool, bool]:
@@ -448,8 +504,8 @@ class MauiStation2Servicer(
         unused_context: grpc.ServicerContext,
     ) -> maui_manufacturing_pb2.MauiHostReplugTestResponse:
         """Verifies that the Maui board re-enumerates and flips CC polarity after a 180° cable flip."""
-        serial_no = _resolve_serial(request.serial_number)
-        dev_port = _resolve_console_port(request.device_port or "")
+        serial_no = request.serial_number or self._find_unit_serial()
+        dev_port = self._resolve_console_port(request.device_port or "")
         logging.info(
             "Running Host Re-plug & 180° Flip Verification for serial: %s (port: %s)",
             serial_no,
@@ -457,7 +513,7 @@ class MauiStation2Servicer(
         )
 
         hub_usb2_ok, hub_usb3_ok, ftdi_ok, h2h_ok = self._check_host_usb_topology()
-        checks = _run_host_console_checks(dev_port, read_charger=False)
+        checks = self._host_console_checks(dev_port, read_charger=False)
         if checks.session_error:
             mcu_version_ok, mcu_msg = False, checks.session_error
         else:
@@ -507,7 +563,7 @@ class MauiStation2Servicer(
 
         status_msg = (
             f"Host 180° Flip: {flip_status_str} | Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, "
-            f"FTDI={ftdi_ok}, H2H={h2h_ok}, Console={mcu_msg}, "
+            f"{self.CONSOLE_USB_LABEL}={ftdi_ok}, H2H={h2h_ok}, Console={mcu_msg}, "
             + checks.summary_fields()
         )
 
@@ -553,7 +609,7 @@ class MauiStation2Servicer(
     ) -> maui_manufacturing_pb2.MauiResetButtonTestResponse:
         """Two-step RESET button verification with tight timeouts."""
         action = request.action or "check_initial_uptime"
-        dev_port = _resolve_console_port(request.device_port or "")
+        dev_port = self._resolve_console_port(request.device_port or "")
 
         if action in RESET_BASELINE_ACTIONS:
             return self._capture_reset_baseline(dev_port)
@@ -566,16 +622,16 @@ class MauiStation2Servicer(
             message=f"Unknown reset action '{action}'",
         )
 
-    @staticmethod
     def _capture_reset_baseline(
+        self,
         dev_port: str,
     ) -> maui_manufacturing_pb2.MauiResetButtonTestResponse:
         """Step A: reads the baseline kernel uptime before the operator presses RESET."""
         logging.info("Step A: Querying baseline kernel uptime on %s...", dev_port)
         try:
             with port_lock(dev_port):
-                uptime_ms, raw_out = MauiConsoleTester(
-                    port_node=dev_port, timeout=CONSOLE_TIMEOUT_SEC
+                uptime_ms, raw_out = self._make_console_tester(
+                    dev_port
                 ).read_kernel_uptime()
         except ConsolePortBusyError as e:
             return maui_manufacturing_pb2.MauiResetButtonTestResponse(
@@ -620,9 +676,8 @@ class MauiStation2Servicer(
             raw_output=raw_out,
         )
 
-    @staticmethod
     def _verify_reset(
-        serial_no: str, dev_port: str, initial_uptime_ms: int
+        self, serial_no: str, dev_port: str, initial_uptime_ms: int
     ) -> maui_manufacturing_pb2.MauiResetButtonTestResponse:
         """Step B: verifies the board rebooted (uptime smaller than the baseline)."""
         logging.info(
@@ -636,12 +691,12 @@ class MauiStation2Servicer(
         busy_error = ""
         for attempt in range(1, RESET_POLL_ATTEMPTS + 1):
             if not os.path.exists(dev_port):
-                dev_port = _resolve_console_port("", default=dev_port)
+                dev_port = self._resolve_console_port("", default=dev_port)
 
             try:
                 with port_lock(dev_port):
-                    read_uptime, raw_out = MauiConsoleTester(
-                        port_node=dev_port, timeout=CONSOLE_TIMEOUT_SEC
+                    read_uptime, raw_out = self._make_console_tester(
+                        dev_port
                     ).read_kernel_uptime()
             except ConsolePortBusyError as e:
                 busy_error = str(e)
@@ -720,8 +775,8 @@ class MauiStation2Servicer(
         unused_context: grpc.ServicerContext,
     ) -> maui_manufacturing_pb2.MauiBslButtonTestResponse:
         """Automated BSL button test sampling ADC status over console (expected BSL >= 2500mV)."""
-        dev_port = _resolve_console_port(request.device_port or "")
-        tester = MauiConsoleTester(port_node=dev_port, timeout=CONSOLE_TIMEOUT_SEC)
+        dev_port = self._resolve_console_port(request.device_port or "")
+        tester = self._make_console_tester(dev_port)
         duration = request.max_sample_duration_sec or BSL_SAMPLE_DURATION_SEC
         threshold = BSL_PRESSED_THRESHOLD_MV
         logging.info(
@@ -775,8 +830,8 @@ class MauiStation2Servicer(
         unused_context: grpc.ServicerContext,
     ) -> maui_manufacturing_pb2.MauiHostOnlyTestResponse:
         """Runs all verification tests requiring ONLY the host connected."""
-        serial_no = _resolve_serial(request.serial_number)
-        dev_port = _resolve_console_port(request.device_port or "")
+        serial_no = request.serial_number or self._find_unit_serial()
+        dev_port = self._resolve_console_port(request.device_port or "")
         logging.info(
             "Running Host-Only Verification for serial %s (port: %s)...",
             serial_no,
@@ -794,7 +849,7 @@ class MauiStation2Servicer(
         )
 
         # 2. Maui Console Tester Commands in a single serial session
-        checks = _run_host_console_checks(dev_port, read_charger=True)
+        checks = self._host_console_checks(dev_port, read_charger=True)
         mcu_version_ok, mcu_version_msg = checks.test_result(
             MauiConsoleTester.MCU_VERSION_TEST
         )
@@ -851,7 +906,8 @@ class MauiStation2Servicer(
             else "FAIL (No Charger)"
         )
         summary = (
-            f"USB: Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, FTDI={ftdi_ok}, H2H={h2h_ok} | "
+            f"USB: Hub2={hub_usb2_ok}, Hub3={hub_usb3_ok}, "
+            f"{self.CONSOLE_USB_LABEL}={ftdi_ok}, H2H={h2h_ok} | "
             f"Console: Version={mcu_version_msg}, PDC={pdc_info_msg}, "
             + checks.summary_fields()
             + f", Host CC={host_orientation}, Charger Port={charger_str}"
@@ -957,9 +1013,8 @@ class MauiStation2Servicer(
         # 3. Fallback: If CCD device is present on USB bus, map remaining non-FTDI ttyUSB ports
         # Standard order: 1st = GSC (Cr50), 2nd = AP (Android shell), 3rd = EC
         if ccd_present and len(ccd_nodes) < 3:
-            if ftdi_port:
-                non_ftdi = [t for t in candidate_ttys if t != ftdi_port]
-            else:
+            non_ftdi = [t for t in candidate_ttys if t != ftdi_port]
+            if not ftdi_port and self.MCU_CONSOLE_IS_TTYUSB:
                 # Default ttyUSB0 is FTDI MCU console
                 non_ftdi = candidate_ttys[1:]
             for console, node in zip(("gsc", "ap", "ec"), non_ftdi):
@@ -1088,8 +1143,8 @@ class MauiStation2Servicer(
                 return dev.serial
         return ""
 
-    @staticmethod
     def _read_dut_console(
+        self,
         dev_port: str,
     ) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
         """Reads PDC DUT/charger status and ADC in one fast MCU console session."""
@@ -1110,7 +1165,7 @@ class MauiStation2Servicer(
             )
             return pdc_dut, pdc_chg, adc_status
 
-        tester = MauiConsoleTester(port_node=dev_port, timeout=CONSOLE_TIMEOUT_SEC)
+        tester = self._make_console_tester(dev_port)
         try:
             with port_lock(dev_port), open_serial_port(
                 dev_port, tester.baudrate, timeout=tester.timeout
@@ -1143,6 +1198,86 @@ class MauiStation2Servicer(
             setattr(readings, f"{console}_uart_ok", ok)
             setattr(readings, f"{console}_version_str", version)
 
+    def run_adb_transfer_test(
+        self,
+        request: maui_manufacturing_pb2.MauiAdbTransferTestRequest,
+        unused_context: grpc.ServicerContext,
+    ) -> maui_manufacturing_pb2.MauiAdbTransferTestResponse:
+        """Pushes/pulls two random files to the DUT over ADB and verifies their SHA-1.
+
+        Only the unit under test is tested: its ADB serial is request.adb_serial,
+        else the unit serial (request.serial_number). Without either, exactly
+        one ADB device must be connected. The result must be for the unit.
+        """
+        unit_serial = _known_serial(request.serial_number)
+        adb_serial = _known_serial(request.adb_serial)
+        size_mib = request.size_mb or maui_adb_transfer.get_size_mib()
+        logging.info(
+            "Running ADB transfer test (%s MiB + 1-16 MiB) for %s...",
+            size_mib,
+            unit_serial or adb_serial or "the only ADB device",
+        )
+        if unit_serial and adb_serial and adb_serial.upper() != unit_serial.upper():
+            res = maui_adb_transfer.AdbTransferResult(adb_serial=adb_serial)
+            _fail_adb_result(
+                res,
+                f"ADB serial {adb_serial} is not the unit serial {unit_serial}.",
+            )
+        else:
+            res = maui_adb_transfer.run_adb_transfer_test(
+                preferred_serial=adb_serial or unit_serial,
+                size_mib=size_mib,
+            )
+        if (
+            res.success
+            and unit_serial
+            and res.adb_serial.upper() != unit_serial.upper()
+        ):
+            _fail_adb_result(
+                res,
+                f"Tested ADB device {res.adb_serial} is not the unit "
+                f"{unit_serial}; result discarded.",
+            )
+        serial_no = unit_serial or res.adb_serial or self._find_unit_serial()
+        logging.info("ADB transfer test: %s (%.1f s)", res.message, res.total_s)
+        log_text = "\n".join(res.log)
+        write_device_log(
+            serial_no,
+            "adb_transfer_test",
+            f"ALL_PASSED={res.success}\n"
+            f"RESULT: {'PASSED' if res.success else 'FAILED'}\n"
+            f"{res.message}\n"
+            f"ADB Serial: {res.adb_serial}\n"
+            f"File Size: {res.file_size_bytes} B\n"
+            f"Push: {res.push_s:.2f} s, {res.push_mb_s:.1f} MB/s\n"
+            f"Pull: {res.pull_s:.2f} s, {res.pull_mb_s:.1f} MB/s\n"
+            f"Host SHA-1: {res.host_sha1}\n"
+            f"DUT SHA-1: {res.dut_sha1}\n"
+            f"Pulled SHA-1: {res.pulled_sha1}\n"
+            f"Transfer: {res.transfer_s:.2f} s (deadline {res.deadline_s:g} s)\n"
+            f"H2H USB link: host {res.host_link_mbps} Mb/s, DUT "
+            f"{res.dut_link_mbps} Mb/s\n"
+            f"Total: {res.total_s:.2f} s\n\n{log_text}",
+            status=_status(res.success),
+        )
+        return maui_manufacturing_pb2.MauiAdbTransferTestResponse(
+            success=res.success,
+            message=res.message,
+            adb_serial=res.adb_serial,
+            file_size_bytes=res.file_size_bytes,
+            push_seconds=res.push_s,
+            pull_seconds=res.pull_s,
+            push_mb_per_s=res.push_mb_s,
+            pull_mb_per_s=res.pull_mb_s,
+            host_sha1=res.host_sha1,
+            dut_sha1=res.dut_sha1,
+            pulled_sha1=res.pulled_sha1,
+            total_seconds=res.total_s,
+            log=log_text,
+            transfer_seconds=res.transfer_s,
+            deadline_seconds=res.deadline_s,
+        )
+
     def run_host_dut_tests(  # pylint: disable=too-many-locals
         self,
         request: maui_manufacturing_pb2.MauiHostDutTestRequest,
@@ -1163,7 +1298,7 @@ class MauiStation2Servicer(
         )
 
         # 1. Open a single fast serial session for MCU console operations
-        dev_port = _resolve_console_port("")
+        dev_port = self._resolve_console_port("")
         pdc_dut, pdc_chg, adc_status = self._read_dut_console(dev_port)
         readings = _HostDutReadings(
             pdc_dut=pdc_dut, pdc_chg=pdc_chg, adc_status=adc_status

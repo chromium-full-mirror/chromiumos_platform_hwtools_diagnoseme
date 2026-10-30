@@ -31,17 +31,15 @@ services:
       - TEST_DUT=brya
       - TEST_MODEL=banshee
       - RESULTS_SERVER=${RESULTS_SERVER:-}
-      - DIAGNOSEME_DEVICE_LOG_DIR=/var/log/diagnoseme/devices
-      - DIAGNOSEME_RESULTS_DIR=/var/log/diagnoseme/maui_v11_results
+      - STATION_ID=${STATION_ID:-}
 
+    # The Maui editions add their mounts and environment with
+    # docker-compose-maui.yaml (config.env COMPOSE_FILE).
     volumes:
       - /var/log/diagnoseme/rpcserver:/var/log/rpcserver
-      - /var/log/diagnoseme/devices:/var/log/diagnoseme/devices
-      - /var/log/diagnoseme/maui_v11_results:/var/log/diagnoseme/maui_v11_results
       - /dev:/dev
       - /sys:/sys
       - /var/run/docker.sock:/var/run/docker.sock
-      - /var/lib/diagnoseme/firmware:/var/lib/diagnoseme/firmware:ro
 
   #############################################################################
   envoy:

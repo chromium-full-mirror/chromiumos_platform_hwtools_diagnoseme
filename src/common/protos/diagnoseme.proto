@@ -9,6 +9,9 @@ package diagnoseme;
 service DiagnoseMeService {
   // Get Logs RPC call
   rpc get_logs(GetLogsRequest) returns (GetLogsResponse) {}
+
+  // Returns the DiagnoseMe edition (product flavor) the server was built for.
+  rpc get_station_config(GetStationConfigRequest) returns (StationConfig) {}
 }
 
 message GetLogsRequest {
@@ -17,4 +20,14 @@ message GetLogsRequest {
 
 message GetLogsResponse {
   string log_content = 1;
+}
+
+message GetStationConfigRequest {}
+
+message StationConfig {
+  string edition = 1;              // e.g. "maui-v1.1"
+  string title = 2;                // e.g. "Maui v1.1"
+  repeated string services = 3;    // Registered gRPC service names
+  string maui_hw_rev = 4;          // e.g. "v1.1"; "" for non-Maui editions
+  string station_id = 5;           // STATION_ID from config.env (optional)
 }

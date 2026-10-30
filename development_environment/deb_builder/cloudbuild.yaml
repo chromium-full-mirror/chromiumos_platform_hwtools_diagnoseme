@@ -3,19 +3,34 @@
 # found in the LICENSE file.
 
 steps:
-  # Fetch Realtek files to satisfy Dockerfile COPY instruction
+  # Fetch the Realtek tools of servo-dolos (editions.json realtek_tools;
+  # fails when they cannot be downloaded) and the deb version
+  # (tools/deb_version.sh, 1.1.<YYYYMMDD>).
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
-        mkdir -p dist/firmware
-        gcloud storage cp "gs://rtk-tools/rtunicpg-2.0.25.3.tar.bz2" "dist/rtunicpg.tar.bz2"
-        gcloud storage cp "gs://rtk-tools/r8152-2.21.4.tar.bz2" "dist/r8152-2.21.4.tar.bz2"
+        set -e
+        mkdir -p dist/firmware dist/maui-utils
+        tools/fetch_rtk_tools.sh servo-dolos
+        tools/deb_version.sh > dist/deb-version
 
-  # Build the DEB package using Docker
+  # Build the DEB package using Docker. This uploads the Servo / Dolos
+  # 'diagnoseme' package (edition servo-dolos), named explicitly: the deb
+  # builder has no default edition. Maui packages come from the edition
+  # release build (dockerfiles/cloudbuild_release.yaml).
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'deb-builder', '-f', 'development_environment/deb_builder/Dockerfile', '.']
+    entrypoint: 'bash'
+    # The deb Dockerfile's optional dist/ COPYs need BuildKit (docker 20.10).
+    env: ['DOCKER_BUILDKIT=1']
+    args:
+      - '-c'
+      - |
+        set -e
+        docker build --build-arg EDITION=servo-dolos \
+          --build-arg DEB_VERSION="$(cat dist/deb-version)" \
+          -t deb-builder-servo-dolos -f development_environment/deb_builder/Dockerfile .
 
   # Extract the DEB file from the image
   - name: 'gcr.io/cloud-builders/docker'
@@ -23,9 +38,15 @@ steps:
     args:
       - '-c'
       - |
-        docker create --name temp-container deb-builder
-        docker cp temp-container:/diagnoseme.deb .
-        docker rm temp-container
+        set -e
+        CONTAINER=$(docker create deb-builder-servo-dolos)
+        docker cp "$${CONTAINER}:/diagnoseme.deb" .
+        docker rm "$${CONTAINER}"
+
+  # Check the package against the servo-dolos edition (editions.json).
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'python3'
+    args: ['tools/check_deb.py', 'diagnoseme.deb', 'servo-dolos']
 
   # Upload the DEB to Artifact Registry
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'

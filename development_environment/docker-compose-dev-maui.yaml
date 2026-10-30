@@ -1,0 +1,33 @@
+# Copyright 2026 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+#
+# Maui override of the development docker-compose.yaml (Maui and "all"
+# editions only), the development counterpart of docker-compose-maui.yaml:
+#   docker compose -f development_environment/docker-compose.yaml \
+#       -f development_environment/docker-compose-dev-maui.yaml up -d
+# Without it the development containers neither mount nor create the Maui
+# directories.
+# Maui v1.2: set DIAGNOSEME_RESULTS_DIR=/var/log/diagnoseme/maui_v12_results.
+
+services:
+  server:
+    environment:
+      - DIAGNOSEME_DEVICE_LOG_DIR=/var/log/diagnoseme/devices
+      - DIAGNOSEME_RESULTS_DIR=${DIAGNOSEME_RESULTS_DIR:-/var/log/diagnoseme/maui_v11_results}
+      # Optional maui-utils image override (default: the server image's
+      # MAUI_UTILS_IMAGE, else the newest local maui-utils image).
+      - MAUI_UTILS_IMAGE
+      # Optional ADB transfer test overrides (passed through when set).
+      - MAUI_ADB_SIZE_MB
+      - MAUI_ADB_DEADLINE_S
+      - MAUI_ADB_MIN_RATE_MB_S
+      - MAUI_ADB_MIN_LINK_MBPS
+    volumes:
+      - /var/log/diagnoseme/devices:/var/log/diagnoseme/devices
+      - ${DIAGNOSEME_RESULTS_DIR:-/var/log/diagnoseme/maui_v11_results}:${DIAGNOSEME_RESULTS_DIR:-/var/log/diagnoseme/maui_v11_results}
+      # Stable Maui firmware with STABLE.json (tools/maui_fw_fetch.py --dest-root
+      # /var/lib/diagnoseme/firmware); the approved MCU builds come from it.
+      - /var/lib/diagnoseme/firmware:/var/lib/diagnoseme/firmware:ro
+      # Firmware staged for the maui-utils container (src/server/maui_utils_runner.py).
+      - /var/lib/diagnoseme/maui-utils/staging:/var/lib/diagnoseme/maui-utils/staging

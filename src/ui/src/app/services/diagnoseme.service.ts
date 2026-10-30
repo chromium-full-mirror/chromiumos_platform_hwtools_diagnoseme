@@ -4,7 +4,12 @@
 
 import {Injectable} from '@angular/core';
 import {DiagnoseMeServiceClient} from '../../proto/diagnoseme.pbsc';
-import {GetLogsRequest, GetLogsResponse} from '../../proto/diagnoseme.pb';
+import {
+  GetLogsRequest,
+  GetLogsResponse,
+  GetStationConfigRequest,
+  StationConfig,
+} from '../../proto/diagnoseme.pb';
 import {Observable} from 'rxjs';
 
 @Injectable({
@@ -17,5 +22,10 @@ export class DiagnoseMeService {
     const request = new GetLogsRequest();
     request.lineCount = lineCount;
     return this.client.getLogs(request);
+  }
+
+  /** Returns the edition and station configuration of the backend. */
+  getStationConfig(): Observable<StationConfig> {
+    return this.client.getStationConfig(new GetStationConfigRequest());
   }
 }

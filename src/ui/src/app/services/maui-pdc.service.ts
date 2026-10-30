@@ -22,6 +22,11 @@ export class MauiPdcService {
     return this.client.discoverConnectedPdcDevices(new Empty());
   }
 
+  /**
+   * Flashes the PDC firmware of one board. The default 'stable' channel lets
+   * the server choose the station's stable PDC image (named by the
+   * firmware's STABLE.json); the UI never names a PDC version.
+   */
   programSinglePdc(
     slotIndex: number,
     serialNumber: string,

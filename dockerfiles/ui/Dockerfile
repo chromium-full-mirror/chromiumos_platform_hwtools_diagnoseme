@@ -23,7 +23,11 @@ RUN npm install --ignore-scripts --legacy-peer-deps
 COPY src/ui/ /app/
 
 WORKDIR /app
-RUN ng build --output-path=dist --output-hashing=all --configuration=production
+# DiagnoseMe edition (see editions.json and angular.json configurations).
+# There is no default: every build names its edition (--build-arg EDITION=...).
+ARG EDITION
+RUN test -n "${EDITION}" || { echo "ERROR: build with --build-arg EDITION=<edition>" >&2; exit 1; }
+RUN ng build --output-path=dist --output-hashing=all --configuration=production,${EDITION}
 # ng build copies symlinked assets (e.g. assets/img/*.jpg -> placeholder.jpg)
 # as absolute symlinks into /app; dereference them and make everything
 # world-readable for nginx, independent of the checkout's umask.

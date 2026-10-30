@@ -5,24 +5,113 @@
 
 set -e
 
-COMPOSE_FILE="/etc/diagnoseme/docker-compose.yaml"
-CONFIG_FILE="/etc/diagnoseme/config.env"
+CONFIG_DIR="${DIAGNOSEME_CONFIG_DIR:-/etc/diagnoseme}"
+DEFAULT_COMPOSE_FILE="${CONFIG_DIR}/docker-compose.yaml"
+CONFIG_FILE="${CONFIG_DIR}/config.env"
+# Station specific settings: never shipped or overwritten by the package and
+# read after config.env, so its values win.
+LOCAL_CONFIG_FILE="${CONFIG_DIR}/config.local.env"
 DEFAULT_UI_URL="http://localhost:8888/"
+FW_ROOT="/var/lib/diagnoseme/firmware"
+MAUI_UTILS_DIR="${DIAGNOSEME_MAUI_UTILS_DIR:-/var/lib/diagnoseme/maui-utils}"
+MAUI_UTILS_TAR="${MAUI_UTILS_DIR}/maui-utils.tar"
+# {version, file, md5, source} of the bundled maui-utils.tar
+# (tools/maui_fw_fetch.py, written when the package was built).
+MAUI_UTILS_MANIFEST="${MAUI_UTILS_DIR}/STABLE.json"
+MAUI_UTILS_STAGING="${MAUI_UTILS_DIR}/staging"
 
-# Load configuration if available. The generic (Servo/Dolos) package ships no
-# config.env, so the defaults below match the original start-diagnoseme:
-# pull the :release images and run with watchtower. Maui station packages
-# ship a config.env selecting offline mode and the :maui images.
-if [ -f "$CONFIG_FILE" ]; then
-    # shellcheck disable=SC1090
-    source "$CONFIG_FILE"
+# Fetches the current Maui firmware of the edition from the public GCS bucket
+# into ${FW_ROOT} (see tools/maui_fw_fetch.py, installed as
+# fetch-maui-firmware). The download is skipped when the local STABLE.json
+# already matches. Non-fatal: failures only print a warning and the firmware
+# already on the station is used.
+sync_maui_firmware() {
+    local fetch_bin
+    if ! fetch_bin="$(command -v fetch-maui-firmware)"; then
+        echo "WARNING: fetch-maui-firmware is missing; skipping the Maui firmware sync."
+        return 0
+    fi
+    local fetch=("$fetch_bin" --device "${MAUI_DEVICE}" --dest-root "${FW_ROOT}" \
+        --timeout 5 --download-timeout 15 --retries 0 --quiet)
+    if [ "$(id -u)" -ne 0 ] && [ ! -w "${FW_ROOT}" ]; then
+        # The firmware directories belong to root (deb / ISO installation).
+        fetch=(sudo -n "${fetch[@]}")
+    fi
+    echo "Checking for updated Maui firmware (${FIRMWARE_COMPONENTS}) from cloud..."
+    # shellcheck disable=SC2086 # one argument per component
+    if ! "${fetch[@]}" ${FIRMWARE_COMPONENTS}; then
+        echo "WARNING: Maui firmware sync failed. Using cached offline firmware."
+    fi
+}
+
+# Prints field $2 of the JSON object in file $1 (empty when missing).
+json_field() {
+    python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))' \
+        "$1" "$2" 2> /dev/null || true
+}
+
+# Checks the bundled maui-utils.tar against the md5 recorded in its
+# STABLE.json before it is loaded (the image runs privileged). Fails closed:
+# a missing or unreadable STABLE.json is an error too.
+verify_maui_utils_tar() {
+    local expected actual
+    if [ ! -r "${MAUI_UTILS_MANIFEST}" ]; then
+        echo "ERROR: ${MAUI_UTILS_MANIFEST} is missing; not loading ${MAUI_UTILS_TAR}."
+        return 1
+    fi
+    expected="$(json_field "${MAUI_UTILS_MANIFEST}" md5)"
+    if [[ ! "${expected}" =~ ^[0-9a-f]{32}$ ]]; then
+        echo "ERROR: ${MAUI_UTILS_MANIFEST} has no valid md5; not loading ${MAUI_UTILS_TAR}."
+        return 1
+    fi
+    echo "Verifying ${MAUI_UTILS_TAR} (md5 ${expected})..."
+    actual="$(md5sum "${MAUI_UTILS_TAR}" | cut -d' ' -f1)"
+    if [ "${actual}" != "${expected}" ]; then
+        echo "ERROR: ${MAUI_UTILS_TAR} is damaged (md5 ${actual}, expected ${expected}); not loading it."
+        return 1
+    fi
+}
+
+# Sources config.env, then config.local.env (station overrides).
+load_station_config() {
+    local file
+    for file in "$CONFIG_FILE" "$LOCAL_CONFIG_FILE"; do
+        if [ -f "$file" ]; then
+            # shellcheck disable=SC1090
+            source "$file"
+        fi
+    done
+}
+
+# Unit tests source this script for its functions only.
+if [ -n "${DIAGNOSEME_LIB_ONLY:-}" ]; then
+    # shellcheck disable=SC2317 # exit only when executed, not sourced
+    return 0 2> /dev/null || exit 0
 fi
+
+# Load configuration if available. Without a config.env (stations installed
+# before the editions) the defaults below match the original
+# start-diagnoseme: pull the :release images and run with watchtower. Every
+# edition package ships a config.env naming its edition and image tag
+# (editions.json); servo-dolos keeps the online defaults, the Maui editions
+# select offline mode, firmware, maui-utils and the Maui compose override.
+load_station_config
 
 MODE="${MODE:-online}"
 AUTO_OPEN_BROWSER="${AUTO_OPEN_BROWSER:-false}"
 UI_URL="${UI_URL:-$DEFAULT_UI_URL}"
 DOCKER_TAG="${DOCKER_TAG:-release}"
 SYNC_MAUI_FIRMWARE="${SYNC_MAUI_FIRMWARE:-false}"
+# Maui firmware components of the edition and the Maui device of their
+# stable markers (editions.json "firmware" / "maui_device", written to the
+# config.env of the Maui editions only). Only Maui stations have a
+# MAUI_DEVICE; they alone create and mount the Maui directories.
+FIRMWARE_COMPONENTS="${FIRMWARE_COMPONENTS:-}"
+MAUI_DEVICE="${MAUI_DEVICE:-}"
+MAUI_STATION=false
+if [ -n "${MAUI_DEVICE}" ]; then
+    MAUI_STATION=true
+fi
 
 # Parse command line options
 while [[ $# -gt 0 ]]; do
@@ -63,10 +152,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [ ! -f "$COMPOSE_FILE" ]; then
-    echo "Error: Docker compose file not found at $COMPOSE_FILE"
-    exit 1
-fi
+# Compose files: COMPOSE_FILE of config.env (the Maui editions add
+# docker-compose-maui.yaml), separated by ':'.
+IFS=':' read -r -a COMPOSE_FILES <<< "${COMPOSE_FILE:-$DEFAULT_COMPOSE_FILE}"
+COMPOSE=(docker compose)
+for F in "${COMPOSE_FILES[@]}"; do
+    if [ ! -f "$F" ]; then
+        echo "Error: Docker compose file not found at $F"
+        exit 1
+    fi
+    COMPOSE+=(-f "$F")
+done
 
 echo "=================================================="
 echo " Starting DiagnoseMe [Mode: ${MODE^^}]"
@@ -74,6 +170,49 @@ echo " Image Tag: ${DOCKER_TAG}"
 echo "=================================================="
 
 export DOCKER_TAG
+export STATION_ID="${STATION_ID:-}"
+export RESULTS_SERVER="${RESULTS_SERVER:-}"
+if [ "$MAUI_STATION" = true ]; then
+    # Maui results directory of the edition (config.env; required by
+    # docker-compose-maui.yaml).
+    export DIAGNOSEME_RESULTS_DIR="${DIAGNOSEME_RESULTS_DIR:-}"
+    # Optional Maui test overrides (config.local.env; docker compose passes
+    # them to the server only when they are exported).
+    for VAR in MAUI_ADB_SIZE_MB MAUI_ADB_DEADLINE_S MAUI_ADB_MIN_RATE_MB_S MAUI_ADB_MIN_LINK_MBPS; do
+        if [ -n "${!VAR:-}" ]; then
+            export "${VAR?}"
+        fi
+    done
+
+    # The Maui flashing tools run in the maui-utils container. Load the
+    # bundled image (md5 checked) if it is not present yet (offline stations).
+    if [ -z "${MAUI_UTILS_IMAGE:-}" ] && [ -r "${MAUI_UTILS_MANIFEST}" ]; then
+        MAUI_UTILS_VERSION="$(json_field "${MAUI_UTILS_MANIFEST}" version)"
+        MAUI_UTILS_IMAGE="${MAUI_UTILS_VERSION:+maui-utils:${MAUI_UTILS_VERSION}}"
+    fi
+    if [ -f "${MAUI_UTILS_TAR}" ] && { [ -z "${MAUI_UTILS_IMAGE:-}" ] || \
+            ! docker image inspect "${MAUI_UTILS_IMAGE}" > /dev/null 2>&1; }; then
+        if verify_maui_utils_tar; then
+            echo "Loading bundled ${MAUI_UTILS_IMAGE:-maui-utils} (this takes a minute)..."
+            LOADED=$(docker load -i "${MAUI_UTILS_TAR}" | sed -n 's/^Loaded image[^:]*: //p' | tail -n 1)
+            if [ -z "${MAUI_UTILS_IMAGE:-}" ]; then
+                MAUI_UTILS_IMAGE="${LOADED}"
+            elif [ -n "${LOADED}" ] && [ "${LOADED}" != "${MAUI_UTILS_IMAGE}" ]; then
+                docker tag "${LOADED}" "${MAUI_UTILS_IMAGE}"
+            fi
+        fi
+        if [ -z "${MAUI_UTILS_IMAGE:-}" ] || ! docker image inspect "${MAUI_UTILS_IMAGE}" > /dev/null 2>&1; then
+            echo "ERROR: ${MAUI_UTILS_IMAGE:-maui-utils} is not available from ${MAUI_UTILS_TAR}."
+            echo "       MCU / PDC flashing will fail. Reinstall the DiagnoseMe package or"
+            echo "       apply an offline update bundle."
+        fi
+    elif [ -n "${MAUI_UTILS_IMAGE:-}" ] && ! docker image inspect "${MAUI_UTILS_IMAGE}" > /dev/null 2>&1; then
+        echo "WARNING: ${MAUI_UTILS_IMAGE} is missing and no bundled image was found."
+    fi
+    if [ -n "${MAUI_UTILS_IMAGE:-}" ]; then
+        export MAUI_UTILS_IMAGE
+    fi
+fi
 
 # Ensure local image aliases exist for Docker Compose
 for IMG in ui server envoy; do
@@ -82,9 +221,20 @@ for IMG in ui server envoy; do
     fi
 done
 
-# Ensure host log and results directories exist. Ownership and permissions
-# are set up once by the deb postinst.
-mkdir -p /var/log/diagnoseme/nginx /var/log/diagnoseme/rpcserver /var/log/diagnoseme/envoy /var/lib/diagnoseme/firmware/mcu /var/lib/diagnoseme/firmware/pdc /var/log/diagnoseme/devices /var/log/diagnoseme/maui_v11_results 2>/dev/null || true
+# Ensure the host log directories (and on Maui stations the firmware,
+# staging, device log and results directories) exist. Ownership and
+# permissions are set up once by the deb postinst.
+HOST_DIRS=(/var/log/diagnoseme/nginx /var/log/diagnoseme/rpcserver /var/log/diagnoseme/envoy)
+if [ "$MAUI_STATION" = true ]; then
+    for COMP in ${FIRMWARE_COMPONENTS}; do
+        HOST_DIRS+=("${FW_ROOT}/${COMP}")
+    done
+    HOST_DIRS+=("${MAUI_UTILS_STAGING}" /var/log/diagnoseme/devices)
+    if [ -n "${DIAGNOSEME_RESULTS_DIR:-}" ]; then
+        HOST_DIRS+=("${DIAGNOSEME_RESULTS_DIR}")
+    fi
+fi
+mkdir -p "${HOST_DIRS[@]}" 2>/dev/null || true
 
 # Services started by 'up'. In offline mode watchtower is left out (Maui
 # factory stations must not update themselves; its image is not in the
@@ -96,30 +246,25 @@ if [ "$MODE" == "online" ]; then
     # from config.env only applies to offline mode.
     export PULL_POLICY="always"
     echo "Pulling updated Docker images (:tag ${DOCKER_TAG})..."
-    docker compose -f "$COMPOSE_FILE" pull || {
+    "${COMPOSE[@]}" pull || {
         echo "WARNING: Online pull failed. Falling back to existing local images."
         export PULL_POLICY="if_not_present"
     }
 
-    # Non-fatal: the cached offline firmware is used if the sync fails. The
-    # download is skipped when the local STABLE.json already matches.
-    if [ "$SYNC_MAUI_FIRMWARE" = "true" ] && command -v fetch-maui-firmware > /dev/null 2>&1; then
-        echo "Checking for updated Maui firmware from cloud..."
-        fetch-maui-firmware --dest /var/lib/diagnoseme/firmware \
-            --timeout 5 --download-timeout 15 --quiet \
-            || echo "WARNING: Maui firmware sync failed. Using cached offline firmware."
+    if [ "$MAUI_STATION" = true ] && [ "$SYNC_MAUI_FIRMWARE" = "true" ] && [ -n "${FIRMWARE_COMPONENTS}" ]; then
+        sync_maui_firmware
     fi
 else
     export PULL_POLICY="${PULL_POLICY:-if_not_present}"
-    mapfile -t UP_SERVICES < <(docker compose -f "$COMPOSE_FILE" config --services | grep -vx watchtower)
+    mapfile -t UP_SERVICES < <("${COMPOSE[@]}" config --services | grep -vx watchtower)
     if [ ${#UP_SERVICES[@]} -eq 0 ]; then
         UP_SERVICES=(ui server envoy)
     fi
 fi
 
 echo "Bringing up DiagnoseMe containers..."
-docker compose -f "$COMPOSE_FILE" down --remove-orphans || true
-docker compose -f "$COMPOSE_FILE" up -d "${UP_SERVICES[@]}"
+"${COMPOSE[@]}" down --remove-orphans || true
+"${COMPOSE[@]}" up -d "${UP_SERVICES[@]}"
 
 # Returns success when the web UI answers. Uses curl if installed, else
 # python3 (the diagnoseme package does not depend on curl).
