@@ -45,6 +45,9 @@ RUN if [ -z "${EDITION}" ]; then \
 ARG MAUI_UTILS_VERSION=
 ENV MAUI_UTILS_IMAGE=${MAUI_UTILS_VERSION:+maui-utils:}${MAUI_UTILS_VERSION}
 
+RUN apt-mark hold fwupd
+RUN apt-get update && apt-get dist-upgrade -y
+
 COPY --from=serverbuild /build/dist/ /install_tmp/
 WORKDIR /install_tmp
 RUN python3 -m pip install *.whl --no-deps --no-index --break-system-packages
