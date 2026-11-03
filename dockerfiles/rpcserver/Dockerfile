@@ -25,6 +25,8 @@ RUN python3 -m build
 #####################################################################
 FROM base
 
+RUN apt-get update && apt-get dist-upgrade -y
+
 COPY --from=serverbuild /build/dist/ /install_tmp/
 WORKDIR /install_tmp
 RUN python3 -m pip install *.whl --no-deps --no-index --break-system-packages

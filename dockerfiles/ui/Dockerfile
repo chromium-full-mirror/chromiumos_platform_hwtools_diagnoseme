@@ -29,6 +29,7 @@ RUN ng build --output-path=dist --output-hashing=all --configuration=production
 
 FROM nginx:alpine
 
+RUN apk update && apk upgrade
 RUN mkdir -p /var/cache/nginx/client_temp
 RUN mkdir -p /var/cache/nginx/proxy_temp
 RUN chmod uog+rw /var/run

@@ -94,7 +94,9 @@ RUN curl -k -sSL https://rtr.ca/ft232r/ft232r_prog-1.25.tar.gz | tar -xz \
 #####################################################################
 FROM python:3-trixie
 
-RUN apt-get update && apt-get install -yq \
+RUN apt-get update \
+    && apt-get dist-upgrade -yq \
+    && apt-get install -yq \
     python3-docker \
     dfu-util \
     dfu-programmer \
